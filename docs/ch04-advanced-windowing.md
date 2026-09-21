@@ -133,6 +133,8 @@ flowchart TD
 
 ## System Design Interview
 
+> **The question:** Design session-window analytics for user activity. Premise: a late event can bridge two already-emitted sessions, so the pipeline must retract the two stale panes and emit the merged session instead of double-counting.
+
 **The pipeline:** event source -> window assigner -> session merger -> keyed session state -> trigger/retraction emitter -> analytics store
 
 ### event source

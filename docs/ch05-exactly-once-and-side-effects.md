@@ -140,6 +140,8 @@ flowchart TD
 
 ## System Design Interview
 
+> **The question:** Design a payment pipeline that charges a card exactly once. Premise: the pipeline can crash and retry after a timeout, so the sink must be idempotent on an idempotency key and the shuffle must dedup, otherwise a retry double-charges order-99.
+
 **The pipeline:** replayable source (offset) -> dedup shuffle -> idempotent sink (idempotency key) -> external system
 
 ### replayable source (offset)

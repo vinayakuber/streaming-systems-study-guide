@@ -132,6 +132,8 @@ flowchart TD
 
 ## System Design Interview
 
+> **The question:** Design a continuous SQL query that keeps a campaign click count current. Premise: the query buckets clicks into a TUMBLE window and updates the result only when the watermark closes the window, so the count stays correct as late clicks arrive.
+
 **The pipeline:** streams (clicks, impressions) -> SQL engine (continuous query) -> watermark + window -> updating result -> sink
 
 ### streams (clicks, impressions)

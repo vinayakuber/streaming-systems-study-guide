@@ -132,6 +132,8 @@ flowchart TD
 
 ## System Design Interview
 
+> **The question:** Design a windowed join between a click stream and an impression stream for ad attribution. Premise: the join must buffer each side until both watermarks pass, and a late row arriving afterward must retract and correct the earlier attribution.
+
 **The pipeline:** click stream + impression stream -> windowed join (buffer + watermark) -> retraction emitter -> attribution store
 
 ### click stream + impression stream

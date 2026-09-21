@@ -96,6 +96,7 @@ registerChapter({
     { scenario: "An analyst asks why the company maintains separate batch and streaming pipelines when the business logic is identical.", q: "Are batch and streaming really the same thing, and how would you unify them?", solution: "Yes — batch is streaming over a bounded input. Use a unified model (Beam) so one pipeline runs both modes, and reprocess via replay when logic changes.", components: ["Unified model — Beam", "Bounded vs unbounded input", "One codebase"], diagram: "flowchart LR\n  P[\"one pipeline\"] --> B[\"bounded input = batch\"]\n  P --> S[\"unbounded input = streaming\"]", code: "// same windowed sum\n//   batch    : read 3 records -> result {12:00: 3}\n//   streaming: read 3 records as they arrive -> {12:00: 3}\n//   -> identical computation, different input", tieback: "This is exactly the batch-as-a-special-case material in this chapter.", refs: ["1. Batch and streaming were separate worlds", "4. Batch is a special case"], problems: ["20-metrics-monitoring"] }
   ],
   systemDesign: {
+    question: 'Design a data-processing system that survives a bug fix. Premise: every input is kept in a replayable log, so the corrected pipeline is deployed once and the whole history is replayed through the same code to replace the wrong result.',
     pipeline: 'log (replayable) -> one streaming pipeline -> speed result; replay path -> same pipeline -> corrected result',
     decomposition: [
       { box: 'log (replayable)', role: 'log — retains input history for replay',

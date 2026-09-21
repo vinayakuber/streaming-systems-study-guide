@@ -96,6 +96,7 @@ registerChapter({
     { scenario: "A click stream needs each click enriched with the user's current subscription tier before aggregation, and the tier changes over time.", q: "How do you join a stream to a slowly-changing table correctly?", solution: "Use a temporal (stream-table) join — probe the table at the join key for the version current at the event's time, rather than a windowed join.", components: ["Temporal join — lookup", "Table — changelog-backed", "Join key — user id"], diagram: "flowchart LR\n  C[\"click stream\"] --> T[\"temporal join\"]\n  U[(user table)] --> T\n  T --> E[\"enriched click\"]", code: "// click {user:42, event_time:12:03}\n//   probe user_table[42] = {tier: gold}\n//   -> click + tier=gold, no window needed", tieback: "This is exactly the temporal-join material in this chapter.", refs: ["3. Temporal joins", "8. Stream-stream vs stream-table confusion"], problems: ["21-ad-click-aggregation"] }
   ],
   systemDesign: {
+    question: 'Design a windowed join between a click stream and an impression stream for ad attribution. Premise: the join must buffer each side until both watermarks pass, and a late row arriving afterward must retract and correct the earlier attribution.',
     pipeline: 'click stream + impression stream -> windowed join (buffer + watermark) -> retraction emitter -> attribution store',
     decomposition: [
       { box: 'click stream + impression stream', role: 'two streams — feed the join with event-time rows',

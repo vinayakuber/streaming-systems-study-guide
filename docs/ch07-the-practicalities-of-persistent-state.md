@@ -132,6 +132,8 @@ flowchart TD
 
 ## System Design Interview
 
+> **The question:** Design checkpointing for a stateful stream processor. Premise: after a crash the processor must resume from the last barrier snapshot (state plus offset) without losing events or double-counting, even though the source replays from the checkpoint.
+
 **The pipeline:** stream -> processor (state store) -> checkpoint (state + offset) -> durable storage -> restart recovery
 
 ### stream

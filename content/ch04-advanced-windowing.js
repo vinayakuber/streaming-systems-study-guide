@@ -95,6 +95,7 @@ registerChapter({
     { scenario: "A dashboard needs both an hourly total and a rolling 10-minute average, but the team used one window type for both and the numbers look wrong.", q: "Which window shapes should each metric use, and why?", solution: "The hourly total is a fixed window (equal, non-overlapping buckets); the rolling average is a sliding window (10-minute window advancing every minute).", components: ["Fixed window — hourly total", "Sliding window — rolling 10-min average", "Window size + slide — defines the overlap"], diagram: "flowchart LR\n  H[\"hourly total\"] --> F[\"fixed [12:00,13:00)\"]\n  R[\"rolling avg\"] --> S[\"sliding 10min / 1min\"]", code: "// fixed   : event @ 12:04 belongs to [12:00,12:05) only\n// sliding : event @ 12:04 belongs to [11:55,12:05), [11:56,12:06), ... [12:04,12:14)\n//   -> count once vs count many", tieback: "This is exactly the fixed vs sliding window material in this chapter.", refs: ["2. Fixed windows", "3. Sliding windows"], problems: ["20-metrics-monitoring"] }
   ],
   systemDesign: {
+    question: 'Design session-window analytics for user activity. Premise: a late event can bridge two already-emitted sessions, so the pipeline must retract the two stale panes and emit the merged session instead of double-counting.',
     pipeline: 'event source -> window assigner -> session merger -> keyed session state -> trigger/retraction emitter -> analytics store',
     decomposition: [
       { box: 'event source', role: 'event source — emits events with event time and a key',

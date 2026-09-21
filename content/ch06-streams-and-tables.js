@@ -96,6 +96,7 @@ registerChapter({
     { scenario: "An ad-click pipeline needs both a per-minute event feed and a per-campaign running total, but the team built two separate systems that disagree.", q: "How do you model the event feed and the running total so they never disagree?", solution: "Keep the event feed as the stream of truth and derive the per-campaign total as a table by aggregating the stream — one system, two views.", components: ["Stream — the event feed", "Table — the per-campaign total", "Aggregation — stream -> table"], diagram: "flowchart LR\n  E[\"click stream\"] --> A[\"aggregate by campaign\"]\n  A --> T[(campaign totals)]", code: "// clicks [ +1, +1, +1 ] campaign C\n//   stream: 3 events, table: total 3\n//   both from the same source -> cannot disagree", tieback: "This is exactly the stream -> table material in this chapter.", refs: ["4. Stream -> table", "7. Materialize vs recompute"], problems: ["21-ad-click-aggregation"] }
   ],
   systemDesign: {
+    question: 'Design one system that keeps a balance table and a balance-change stream as two consistent views. Use case: fraud detection needs the real-time change feed while the database holds current balances. Premise: the table is the materialized fold of the changelog (CDC), so the two views cannot drift.',
     pipeline: 'database (table) -> change capture (CDC) -> changelog stream -> stream processor (fold) -> materialized view (table)',
     decomposition: [
       { box: 'database (table)', role: 'database — holds the source table',

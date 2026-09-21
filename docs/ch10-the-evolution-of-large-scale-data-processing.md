@@ -132,6 +132,8 @@ flowchart TD
 
 ## System Design Interview
 
+> **The question:** Design a data-processing system that survives a bug fix. Premise: every input is kept in a replayable log, so the corrected pipeline is deployed once and the whole history is replayed through the same code to replace the wrong result.
+
 **The pipeline:** log (replayable) -> one streaming pipeline -> speed result; replay path -> same pipeline -> corrected result
 
 ### log (replayable)

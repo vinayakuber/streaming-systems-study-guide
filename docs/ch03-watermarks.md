@@ -138,6 +138,8 @@ flowchart TD
 
 ## System Design Interview
 
+> **The question:** Design the watermark generator for an event-time pipeline. Premise: the watermark advances as max_seen event time minus a skew bound, so windows close on time and a straggler after the watermark is flagged late.
+
 **The pipeline:** sources (events with event time) -> watermark generator (max_seen − skew) -> window assigner -> per-window state -> trigger/emitter -> dashboard
 
 ### sources (events with event time)

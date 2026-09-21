@@ -96,6 +96,7 @@ registerChapter({
     { scenario: "A metrics pipeline has 10 GB of state; snapshotting the whole thing every minute saturates the network, but snapshotting rarely makes crashes expensive.", q: "How do you keep checkpoint cost low while keeping recovery fast?", solution: "Use incremental checkpoints — upload only the keys that changed since the last snapshot — and tune the frequency so the recovery time matches the failure budget.", components: ["Incremental checkpoint — delta only", "State store — disk-backed", "Frequency — tuned to failure budget"], diagram: "flowchart LR\n  S[(10 GB state)] --> D[\"delta = changed keys\"]\n  D -->|upload 12 keys| C[\"checkpoint\"]", code: "// 1000 keys, 12 changed\n//   incremental: upload 12 keys\n//   full:        upload 1000 keys\n//   -> 0.3% of the I/O", tieback: "This is exactly the incremental-checkpoint material in this chapter.", refs: ["4. Incremental checkpoints", "7. Checkpoint frequency"], problems: ["20-metrics-monitoring"] }
   ],
   systemDesign: {
+    question: 'Design checkpointing for a stateful stream processor. Premise: after a crash the processor must resume from the last barrier snapshot (state plus offset) without losing events or double-counting, even though the source replays from the checkpoint.',
     pipeline: 'stream -> processor (state store) -> checkpoint (state + offset) -> durable storage -> restart recovery',
     decomposition: [
       { box: 'stream', role: 'stream — delivers records with a source offset',
