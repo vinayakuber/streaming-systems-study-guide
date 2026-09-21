@@ -12,16 +12,22 @@ _Also known as: SS Ch01 · Event Time · Processing Time · Bounded vs Unbounded
 
 ```mermaid
 flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,stroke-width:1px,rx:6
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
   classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
   classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  s0n0["<b>1. The term #quot;streaming#quot; is overloaded</b><br/>#quot;Streaming#quot; means different things to different teams — real-time,…"]:::start
-  s0n1["<b>2. Two critical dimensions of time</b><br/>Every event carries two timestamps that disagree. Event time is whe…"]:::step
-  s0n2["<b>3. Why the divergence breaks naive systems</b><br/>A system that buckets by processing time groups events by when it h…"]:::step
-  s0n3["<b>4. The rest of the book in one sentence</b><br/>The book is a systematic answer to four questions you can ask of an…"]:::stop
-  s0n0 --> s0n1
-  s0n1 --> s0n2
-  s0n2 --> s0n3
+  n0["<b>1. The term is overloaded</b><br/>real-time, low latency, continuous, event-driven, merely not-batch"]:::start
+  n1["<b>2. The book's precise meaning</b><br/>a data-processing engine designed for infinite datasets"]:::step
+  n2["<b>3. Unbounded data</b><br/>a dataset that arrives gradually and never completes"]:::core
+  n3["<b>4. Two clocks per event</b><br/>event time vs processing time - they disagree"]:::warn
+  n4["<b>5. Four questions</b><br/>what, where, when, how - the rest of the book"]:::step
+  n5["<b>6. Recap</b><br/>streaming = designed for unbounded data, not merely fast"]:::stop
+  n0 -->|"1. narrowed to"| n1
+  n1 -->|"2. built around"| n2
+  n2 -->|"3. every event carries"| n3
+  n3 -->|"4. answered by"| n4
+  n4 -->|"5. the one-sentence summary"| n5
 ```
 
 1. **The term "streaming" is overloaded** — "Streaming" means different things to different teams — real-time, low latency, continuous computation, event-driven, or merely "not batch". The book pins it to one precise meaning: **a data processing engine designed with infinite datasets in mind, and a dataset that is unbounded — one that arrives gradually and never completes.**
@@ -52,14 +58,20 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,stroke-width:1px,rx:6
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
   classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
   classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  s1n0["<b>1. Event time is the meaningful one</b><br/>For almost any question about users or business — clicks per minute…"]:::start
-  s1n1["<b>2. Processing time is the cheap one</b><br/>Processing time needs no special machinery — the system clock is ri…"]:::step
-  s1n2["<b>3. The lag between them is the cost of correctness</b><br/>Event-time correctness requires waiting for stragglers, and waiting…"]:::stop
-  s1n0 --> s1n1
-  s1n1 --> s1n2
+  n0["<b>1. Event time</b><br/>when the event actually happened, stamped by the producer"]:::start
+  n1["<b>2. Processing time</b><br/>when the pipeline observed the event"]:::step
+  n2["<b>3. They diverge</b><br/>network delay, queueing, backpressure, replay"]:::warn
+  n3["<b>4. Correct answers need event time</b><br/>processing-time buckets silently shift under load"]:::core
+  n4["<b>5. The lag is the cost</b><br/>waiting for stragglers buys correctness"]:::stop
+  n0 -->|"1. contrasted with"| n1
+  n1 -->|"2. the gap is"| n2
+  n2 -->|"3. so bucket by"| n3
+  n3 -->|"4. measured as"| n4
 ```
 
 1. **Event time is the meaningful one** — For almost any question about users or business — clicks per minute, latency, correctness — the answer should be keyed to **when things happened**, not when your system happened to look at them.
@@ -74,16 +86,19 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,stroke-width:1px,rx:6
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
   classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
   classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  s2n0["<b>1. Bounded data</b><br/>A finite dataset — one day of logs, a database snapshot. You can pr…"]:::start
-  s2n1["<b>2. Unbounded data, processed as batch</b><br/>Data that never ends, but the pipeline artificially slices it into…"]:::step
-  s2n2["<b>3. Unbounded data, processed as streaming</b><br/>Process every event as it arrives, continuously, with no artificial…"]:::step
-  s2n3["<b>4. Streaming is the generalization</b><br/>Batch is a special case of streaming: a bounded dataset is just an…"]:::stop
-  s2n0 --> s2n1
-  s2n1 --> s2n2
-  s2n2 --> s2n3
+  n0["<b>1. Bounded</b><br/>a finite dataset - the batch world"]:::start
+  n1["<b>2. Unbounded as batch</b><br/>infinite data chopped into finite windows, each run as a batch"]:::step
+  n2["<b>3. Unbounded as streaming</b><br/>infinite data processed continuously as it arrives"]:::core
+  n3["<b>4. The bridge</b><br/>batch is a special case of streaming - a bounded stream"]:::warn
+  n0 -->|"1. grows into"| n1
+  n1 -->|"2. re-framed as"| n2
+  n2 -->|"3. subsumes"| n3
+  n3 -->|"4. loops back to"| n0
 ```
 
 1. **Bounded data** — A finite dataset — one day of logs, a database snapshot. **You can process it to completion; when the job ends you have a final answer.** Classic batch engines (MapReduce) assume this shape.
@@ -312,6 +327,22 @@ flowchart LR
 **Grounding.** The whole book is the answer to what/where/when/how for that one definition.
 
 **In the wild.** A Flink job over a Kafka topic is streaming in this precise sense.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Streaming</b><br/>overloaded: real-time, low latency, continuous, event-driven, not-batch"]):::start
+  A["<b>2. The book's fix</b><br/>one precise meaning - engines designed for infinite datasets"]:::core
+  B["<b>3. Consequence</b><br/>unbounded data, not latency, is the defining trait"]:::step
+  C["<b>4. Result</b><br/>the same engine answers batch and streaming questions"]:::warn
+  S -->|"1. narrowed to"| A
+  A -->|"2. the trait is"| B
+  B -->|"3. so"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Definition: 2. Event time
 
 **Why.** Every business question is about when things happened, so the pipeline must record and reason with that instant rather than the instant it looked.
@@ -321,6 +352,22 @@ flowchart LR
 **Grounding.** It is the correct key for "clicks per minute", "latency", and correctness.
 
 **In the wild.** A device timestamp on a mobile click is event time.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Event time</b><br/>when the event happened"]):::start
+  A["<b>2. Stamped by the producer</b><br/>the user's device, not the pipeline"]:::core
+  B["<b>3. The meaningful clock</b><br/>answers about users must use it"]:::step
+  C["<b>4. Cost</b><br/>requires waiting for late events"]:::warn
+  S -->|"1. defined by"| A
+  A -->|"2. drives"| B
+  B -->|"3. imposes"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Definition: 3. Processing time
 
 **Why.** The system still needs its own clock to answer questions about itself, even though it is the wrong clock for user behavior.
@@ -330,6 +377,22 @@ flowchart LR
 **Grounding.** It is correct only for system questions — queue depth, events processed per second.
 
 **In the wild.** A Flink operator wall-clock timestamp is processing time.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Processing time</b><br/>when the pipeline observed the event"]):::start
+  A["<b>2. Read from the system clock</b><br/>no special machinery needed"]:::core
+  B["<b>3. The cheap clock</b><br/>immediate, no waiting for stragglers"]:::step
+  C["<b>4. The trap</b><br/>answers silently shift under load"]:::warn
+  S -->|"1. sourced from"| A
+  A -->|"2. it is"| B
+  B -->|"3. but"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Distinction: 4. Event vs processing time
 
 **Why.** Bucketing by the wrong clock silently corrupts every aggregate, and the corruption worsens exactly when the system is under load.
@@ -339,6 +402,23 @@ flowchart LR
 **Grounding.** A click at 12:00:59 processed at 12:04:11 lands in different windows under the two clocks.
 
 **In the wild.** Event-time mode in Flink is the production fix for this divergence.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Two clocks per event</b><br/>they disagree by the network delay"]):::start
+  A["<b>2. Event time</b><br/>correct answers, but wait for stragglers"]:::core
+  B["<b>3. Processing time</b><br/>instant answers, but they shift under load"]:::warn
+  C["<b>4. The trade</b><br/>latency vs correctness - the book's central tension"]:::stop
+  S -->|"1. choose"| A
+  S -->|"2. or choose"| B
+  A -->|"3. both frame"| C
+  B -->|"4. both frame"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Shape: 5. Bounded data
 
 **Why.** Finite inputs are the one case where a job can run to completion and hand back a final answer, so they are the natural fit for classic batch.
@@ -348,6 +428,22 @@ flowchart LR
 **Grounding.** MapReduce and friends assume this shape.
 
 **In the wild.** A nightly Hive table scan is bounded data processing.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Bounded data</b><br/>a finite dataset"]):::start
+  A["<b>2. Fully known</b><br/>can be sorted, indexed, completed"]:::core
+  B["<b>3. Batch processing</b><br/>read the whole set, then emit results"]:::step
+  C["<b>4. The classic world</b><br/>MapReduce and SQL over files"]:::warn
+  S -->|"1. it is"| A
+  A -->|"2. handled by"| B
+  B -->|"3. the home of"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Shape: 6. Unbounded as batch
 
 **Why.** Teams slice never-ending data into chunks because batch tooling is familiar, but the chunk boundary becomes the maximum freshness of every answer.
@@ -357,6 +453,22 @@ flowchart LR
 **Grounding.** A daily aggregation reflects a change only at the next midnight.
 
 **In the wild.** Daily ETL over a click stream is unbounded-as-batch.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Unbounded data</b><br/>never completes"]):::start
+  A["<b>2. Chopped into finite windows</b><br/>process each window as a batch"]:::core
+  B["<b>3. Repeated batch runs</b><br/>hourly or daily jobs over the latest chunk"]:::step
+  C["<b>4. The price</b><br/>arbitrary boundaries; latency and correctness suffer"]:::warn
+  S -->|"1. re-framed by"| A
+  A -->|"2. implemented as"| B
+  B -->|"3. pays"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Shape: 7. Unbounded as streaming
 
 **Why.** When a change must be visible in seconds, the only option is to process each event as it arrives and give up the idea of a finished answer.
@@ -366,6 +478,22 @@ flowchart LR
 **Grounding.** The engine is designed for infinite datasets from the start.
 
 **In the wild.** A Kafka-to-Flink pipeline is unbounded streaming.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Unbounded data</b><br/>never completes"]):::start
+  A["<b>2. Processed continuously</b><br/>results emit as events arrive"]:::core
+  B["<b>3. The engine assumes infinity</b><br/>windows, watermarks, triggers handle never-ending input"]:::step
+  C["<b>4. The goal</b><br/>correct event-time answers with low latency"]:::warn
+  S -->|"1. handled by"| A
+  A -->|"2. needs"| B
+  B -->|"3. to reach"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Model: 8. Batch is a special case of streaming
 
 **Why.** If one abstraction covers both finite and infinite inputs, you maintain one pipeline instead of two that must agree.
@@ -375,6 +503,22 @@ flowchart LR
 **Grounding.** The Beam model treats both with one what/where/when/how vocabulary.
 
 **In the wild.** Apache Beam runs the same pipeline on batch and streaming runners.
+
+```mermaid
+flowchart TD
+  S(["<b>1. A batch job</b><br/>reads a finite file"]):::start
+  A["<b>2. Reframe as a stream</b><br/>a bounded stream - a stream that ends"]:::core
+  B["<b>3. One engine, one model</b><br/>same windows, same watermarks, same semantics"]:::step
+  C["<b>4. The payoff</b><br/>batch and streaming logic no longer drift apart"]:::warn
+  S -->|"1. can be"| A
+  A -->|"2. so"| B
+  B -->|"3. delivers"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 
 </details>
 

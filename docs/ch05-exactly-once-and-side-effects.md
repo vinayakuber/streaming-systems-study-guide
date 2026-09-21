@@ -12,16 +12,20 @@ _Also known as: SS Ch05 · Exactly-Once · Idempotency · Deduplication · Side 
 
 ```mermaid
 flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,stroke-width:1px,rx:6
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
   classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
   classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  s0n0["<b>1. Accuracy and completeness</b><br/>A correct pipeline is accurate (each result is right) and complete…"]:::start
-  s0n1["<b>2. Retries are the enemy of once</b><br/>In a distributed system, records are retried after crashes and time…"]:::step
-  s0n2["<b>3. Two sub-problems</b><br/>Exactly-once splits into deduplicating records as they move between…"]:::step
-  s0n3["<b>4. Exactly-once state vs exactly-once effects</b><br/>Making per-key state exactly-once is easy (recompute a deterministi…"]:::stop
-  s0n0 --> s0n1
-  s0n1 --> s0n2
-  s0n2 --> s0n3
+  n0["<b>1. Retries are unavoidable</b><br/>crashes and timeouts force re-processing"]:::start
+  n1["<b>2. At-least-once + dedup</b><br/>re-process freely, then drop duplicates"]:::core
+  n2["<b>3. Exactly-once ≠ one-time</b><br/>a step may run many times; results appear once"]:::warn
+  n3["<b>4. End-to-end</b><br/>the guarantee must span the whole pipeline, not one operator"]:::step
+  n4["<b>5. Replayable sources</b><br/>inputs must be re-readable for recovery"]:::stop
+  n0 -->|"1. made safe by"| n1
+  n1 -->|"2. the key distinction"| n2
+  n2 -->|"3. scoped as"| n3
+  n3 -->|"4. requiring"| n4
 ```
 
 1. **Accuracy and completeness** — A correct pipeline is **accurate** (each result is right) and **complete** (every input contributes). Exactly-once means each record's contribution appears exactly once.
@@ -51,16 +55,18 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,stroke-width:1px,rx:6
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
   classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
   classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  s1n0["<b>1. Idempotent operations</b><br/>An operation is idempotent if performing it many times has the same…"]:::start
-  s1n1["<b>2. Deduplicate at the shuffle</b><br/>When a stage sends records to the next, the receiver can keep a set…"]:::step
-  s1n2["<b>3. Sources need replayable, deduplicable records</b><br/>A source that can be replayed from a checkpoint (a Kafka offset, a…"]:::step
-  s1n3["<b>4. End-to-end exactly-once = source + shuffle + sink</b><br/>End-to-end exactly-once composes: a replayable source, a deduplicat…"]:::stop
-  s1n0 --> s1n1
-  s1n1 --> s1n2
-  s1n2 --> s1n3
+  n0["<b>1. Idempotency</b><br/>the same operation yields the same result however often run"]:::start
+  n1["<b>2. Deduplication</b><br/>recognize a repeated input and skip it"]:::core
+  n2["<b>3. Shuffle dedup</b><br/>a repeated delivery across a shuffle must not double-count"]:::step
+  n3["<b>4. The guard</b><br/>a seen-set or stable key turns a replay into a no-op"]:::warn
+  n0 -->|"1. complementary to"| n1
+  n1 -->|"2. the distributed case"| n2
+  n2 -->|"3. implemented with"| n3
 ```
 
 1. **Idempotent operations** — An operation is **idempotent** if performing it many times has the same effect as once. **Setting a value to 10 is idempotent; incrementing by 10 is not.**
@@ -92,16 +98,18 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,stroke-width:1px,rx:6
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
   classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
   classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  s2n0["<b>1. Why side effects resist exactly-once</b><br/>A side effect touches the outside world, and the outside world cann…"]:::start
-  s2n1["<b>2. Make the effect idempotent</b><br/>If the external system supports idempotency (a unique id, an upsert…"]:::step
-  s2n2["<b>3. Isolate side effects at the boundary</b><br/>Keep the main computation pure and push side effects to the very en…"]:::step
-  s2n3["<b>4. Two-phase is expensive and fragile</b><br/>True end-to-end exactly-once across an external side effect often n…"]:::stop
-  s2n0 --> s2n1
-  s2n1 --> s2n2
-  s2n2 --> s2n3
+  n0["<b>1. Pure transforms are easy</b><br/>recompute and the same output follows"]:::start
+  n1["<b>2. Side effects are not idempotent</b><br/>a credit, an email, an external write does not undo itself"]:::warn
+  n2["<b>3. Isolate side effects</b><br/>keep the heavy compute pure; concentrate effects at the edge"]:::core
+  n3["<b>4. The two tools</b><br/>an idempotency key, or a two-phase commit with the sink"]:::step
+  n0 -->|"1. the hard part is"| n1
+  n1 -->|"2. so"| n2
+  n2 -->|"3. made safe by"| n3
 ```
 
 1. **Why side effects resist exactly-once** — A side effect touches the outside world, and the outside world cannot be "recomputed" the way per-key state can. **Sending an email twice is visible; a database increment applied twice is money.**
@@ -333,6 +341,22 @@ flowchart LR
 **Grounding.** The book defines exactly-once as each record affecting the output exactly once.
 
 **In the wild.** Kafka's exactly-once semantics and Flink's two-phase commit both target this.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Retries are unavoidable</b><br/>crashes and timeouts force re-processing"]):::start
+  A["<b>2. Duplicates follow</b><br/>a retried step may re-emit results"]:::warn
+  B["<b>3. The fix</b><br/>at-least-once delivery plus deduplication"]:::core
+  C["<b>4. The guarantee</b><br/>exactly-once = at-least-once + at-most-once"]:::stop
+  S -->|"1. which produce"| A
+  A -->|"2. so"| B
+  B -->|"3. giving"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Property: 2. Idempotency
 
 **Why.** If an operation can be replayed without changing the result, retries are harmless.
@@ -342,6 +366,22 @@ flowchart LR
 **Grounding.** Idempotency is the property that makes sinks tolerate retries.
 
 **In the wild.** HTTP PUT and upserts are idempotent; a naive POST increment is not.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Idempotency</b><br/>same operation, same result, any number of runs"]):::start
+  A["<b>2. Natural examples</b><br/>set a value, insert with a fixed key"]:::core
+  B["<b>3. Retry-safe</b><br/>a re-run changes nothing"]:::step
+  C["<b>4. The tool</b><br/>an idempotency key makes an arbitrary operation idempotent"]:::warn
+  S -->|"1. e.g."| A
+  A -->|"2. so it is"| B
+  B -->|"3. enforced by"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Mechanism: 3. Shuffle deduplication
 
 **Why.** Records moving between stages can be delivered more than once after a crash.
@@ -351,6 +391,22 @@ flowchart LR
 **Grounding.** Dedup turns two deliveries into one effect.
 
 **In the wild.** Beam's exactly-once shuffle and Flink's checkpoint barrier do this.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Shuffle deduplication</b><br/>a repeated delivery across a shuffle"]):::start
+  A["<b>2. Why it matters</b><br/>a retried shuffle can double-count a key"]:::warn
+  B["<b>3. The guard</b><br/>a seen-set or deterministic key drops repeats"]:::core
+  C["<b>4. The rule</b><br/>dedup at every stage, not just the source"]:::step
+  S -->|"1. the risk"| A
+  A -->|"2. fixed by"| B
+  B -->|"3. so"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Source: 4. Replayable sources
 
 **Why.** A source must be able to recover from a crash without losing or duplicating records.
@@ -360,6 +416,22 @@ flowchart LR
 **Grounding.** Replay + stable ids = the source side of end-to-end exactly-once.
 
 **In the wild.** Kafka consumer offsets and file offsets are the canonical checkpoints.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Replayable sources</b><br/>inputs that can be re-read"]):::start
+  A["<b>2. A durable, ordered log</b><br/>offsets let you re-read from a point"]:::core
+  B["<b>3. Recovery depends on it</b><br/>replay after a checkpoint resumes exactly"]:::step
+  C["<b>4. The requirement</b><br/>end-to-end exactly-once starts here"]:::warn
+  S -->|"1. e.g."| A
+  A -->|"2. so"| B
+  B -->|"3. which is"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Composition: 5. End-to-end exactly-once
 
 **Why.** Each stage has its own failure mode, so a single dedup is not enough.
@@ -369,6 +441,22 @@ flowchart LR
 **Grounding.** Drop any one of the three and the guarantee breaks.
 
 **In the wild.** Kafka -> Flink -> idempotent sink is the reference architecture.
+
+```mermaid
+flowchart TD
+  S(["<b>1. End-to-end exactly-once</b><br/>the whole pipeline, not one operator"]):::start
+  A["<b>2. Replayable source</b><br/>re-read inputs from a checkpoint"]:::core
+  B["<b>3. Deterministic compute + dedup</b><br/>no double results within or across stages"]:::step
+  C["<b>4. Idempotent sink</b><br/>the final write is retry-safe"]:::warn
+  S -->|"1. needs"| A
+  A -->|"2. then"| B
+  B -->|"3. and"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Hard part: 6. Side effects
 
 **Why.** An external effect — an email, a charge, an API call — cannot be undone by recomputing state.
@@ -378,6 +466,22 @@ flowchart LR
 **Grounding.** Sending an email twice is visible; a double increment is money.
 
 **In the wild.** Stripe's Idempotency-Key header is the production form.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Side effects</b><br/>writes to the outside world"]):::start
+  A["<b>2. Not idempotent by nature</b><br/>a credit, an email, a notification"]:::warn
+  B["<b>3. The hard part of exactly-once</b><br/>compute is easy; effects are not"]:::core
+  C["<b>4. Two tools</b><br/>idempotency keys, or a two-phase commit with the sink"]:::step
+  S -->|"1. they are"| A
+  A -->|"2. making them"| B
+  B -->|"3. tamed by"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Pattern: 7. Idempotency key vs two-phase commit
 
 **Why.** Making an external side effect exactly-once has two options, and they differ sharply in cost.
@@ -387,6 +491,22 @@ flowchart LR
 **Grounding.** Prefer idempotent effects over distributed transactions whenever the external system supports them.
 
 **In the wild.** Payment APIs accept idempotency keys; XA two-phase commit is avoided in stream processing.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Idempotency key</b><br/>a stable identifier per logical operation"]):::start
+  A["<b>2. Sink dedups on it</b><br/>repeated writes with the same key are no-ops"]:::core
+  B["<b>3. Two-phase commit</b><br/>coordinate the sink write with the checkpoint"]:::step
+  C["<b>4. The trade</b><br/>keys are simpler; 2PC is stronger but heavier"]:::warn
+  S -->|"1. vs"| A
+  A -->|"2. alternative"| B
+  B -->|"3. choosing"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Boundary: 8. Isolate side effects
 
 **Why.** Retries are most controllable when the effect is one idempotent write at the edge.
@@ -396,6 +516,22 @@ flowchart LR
 **Grounding.** A pure core plus a thin idempotent boundary is the cleanest exactly-once design.
 
 **In the wild.** Enrich -> compute -> idempotent upsert is the standard Dataflow shape.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Isolate side effects</b><br/>concentrate them at the edge"]):::start
+  A["<b>2. Keep compute pure</b><br/>recomputable, no external writes"]:::core
+  B["<b>3. One small effectful stage</b><br/>only it needs idempotency or 2PC"]:::step
+  C["<b>4. The payoff</b><br/>most of the pipeline is trivially exactly-once"]:::warn
+  S -->|"1. by keeping"| A
+  A -->|"2. with"| B
+  B -->|"3. so"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 
 </details>
 

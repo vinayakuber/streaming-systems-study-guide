@@ -12,16 +12,22 @@ _Also known as: SS Ch02 · Beam Model · Transformations · Windowing · Trigger
 
 ```mermaid
 flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,stroke-width:1px,rx:6
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
   classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
   classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  s0n0["<b>1. What: transformations</b><br/>The answer to #quot;what#quot; is a computation over the data — a sum, a filt…"]:::start
-  s0n1["<b>2. Where: windowing</b><br/>The answer to #quot;where#quot; is the slice of event time a value is compute…"]:::step
-  s0n2["<b>3. The two axes are independent</b><br/>Choosing what to compute and choosing where to compute it are separ…"]:::step
-  s0n3["<b>4. Batch already answers what and where</b><br/>A classic MapReduce job also has transformations and (implicitly) w…"]:::stop
-  s0n0 --> s0n1
-  s0n1 --> s0n2
-  s0n2 --> s0n3
+  n0["<b>1. A pipeline is underspecified</b><br/>names alone - sum, join, filter - leave four questions open"]:::start
+  n1["<b>2. What - transformations</b><br/>the functions applied to each element"]:::step
+  n2["<b>3. Where - windowing</b><br/>the event-time slice a transformation runs over"]:::core
+  n3["<b>4. When - triggers</b><br/>when results materialize in processing time"]:::step
+  n4["<b>5. How - accumulation</b><br/>how later results relate to earlier ones"]:::step
+  n5["<b>6. Recap</b><br/>all four together fully specify the pipeline"]:::stop
+  n0 -->|"1. first question"| n1
+  n1 -->|"2. second question"| n2
+  n2 -->|"3. third question"| n3
+  n3 -->|"4. fourth question"| n4
+  n4 -->|"5. together"| n5
 ```
 
 1. **What: transformations** — The answer to "what" is a computation over the data — a sum, a filter, a join, a keyed aggregation. In the Beam model **a pipeline is a directed acyclic graph of transforms, and the transform decides what the output is.**
@@ -50,16 +56,20 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,stroke-width:1px,rx:6
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
   classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
   classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  s1n0["<b>1. Triggers decide when results materialize</b><br/>A trigger is the mechanism that says #quot;emit the current window resul…"]:::start
-  s1n1["<b>2. Watermarks declare event-time completeness</b><br/>A watermark is a signal that #quot;no more events with event time earlie…"]:::step
-  s1n2["<b>3. Early, on-time, and late triggers</b><br/>A pipeline can emit a window's result early (speculative, before th…"]:::step
-  s1n3["<b>4. Allowed lateness bounds the waiting</b><br/>After the watermark passes, a pipeline may keep accepting straggler…"]:::stop
-  s1n0 --> s1n1
-  s1n1 --> s1n2
-  s1n2 --> s1n3
+  n0["<b>1. When = materialization</b><br/>the moment results become visible downstream"]:::start
+  n1["<b>2. Triggers</b><br/>repeated signals - processing time, count, or data driven"]:::step
+  n2["<b>3. Watermarks</b><br/>a monotonic estimate of event-time completeness"]:::core
+  n3["<b>4. Allowed lateness</b><br/>a data-driven trigger for stragglers after the watermark"]:::warn
+  n4["<b>5. Recap</b><br/>triggers decide when; watermarks decide what is late"]:::stop
+  n0 -->|"1. fired by"| n1
+  n1 -->|"2. often gated on"| n2
+  n2 -->|"3. late data handled by"| n3
+  n3 -->|"4. both shape"| n4
 ```
 
 1. **Triggers decide when results materialize** — A trigger is the mechanism that says "emit the current window result now". **Triggers can fire on processing time (every N seconds), on event-time progress (the watermark passes the window end), or on data arrival (count of elements).**
@@ -89,14 +99,20 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,stroke-width:1px,rx:6
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
   classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
   classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  s2n0["<b>1. Accumulation relates panes</b><br/>The answer to #quot;how#quot; is the relationship between a window's successi…"]:::start
-  s2n1["<b>2. Why retractions exist</b><br/>If a downstream system stores the first result, a later refined res…"]:::step
-  s2n2["<b>3. The four questions are a checklist</b><br/>Ask all four — what, where, when, how — of any pipeline and its beh…"]:::stop
-  s2n0 --> s2n1
-  s2n1 --> s2n2
+  n0["<b>1. How = refinement</b><br/>the relationship between a new result and the previous one"]:::start
+  n1["<b>2. Discarding</b><br/>each pane is independent - downstream gets disjoint results"]:::step
+  n2["<b>3. Accumulating</b><br/>each pane folds into a running total - a growing result"]:::core
+  n3["<b>4. Accumulating and retracting</b><br/>the running total plus a retraction of the prior value"]:::warn
+  n4["<b>5. Recap</b><br/>retractions keep a downstream accumulator exact"]:::stop
+  n0 -->|"1. simplest"| n1
+  n0 -->|"2. moving sum"| n2
+  n2 -->|"3. exact version of"| n3
+  n3 -->|"4. the point of"| n4
 ```
 
 1. **Accumulation relates panes** — The answer to "how" is the relationship between a window's successive results. **Accumulating mode adds to the previous pane; discarding mode replaces it; accumulating-and-retracting also emits a retraction so downstream can undo the old value.**
@@ -312,6 +328,22 @@ flowchart LR
 **Grounding.** The four questions are the Beam model's complete description of a pipeline.
 
 **In the wild.** Beam's PTransform (what), Window (where), Trigger (when), and AccumulationMode (how) map one-to-one onto the four questions.
+
+```mermaid
+flowchart TD
+  S(["<b>1. A named pipeline</b><br/>sum, join, filter - but four questions left open"]):::start
+  A["<b>2. What / Where / When / How</b><br/>transform, window, trigger, accumulate"]:::core
+  B["<b>3. Underspecified = surprising</b><br/>two engines give two different answers for the same code"]:::warn
+  C["<b>4. The checklist</b><br/>answer all four and the pipeline is fully specified"]:::stop
+  S -->|"1. must answer"| A
+  A -->|"2. otherwise"| B
+  B -->|"3. fixed by"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Axis: 2. Transformations (what)
 
 **Why.** The output of a pipeline is whatever its transforms compute, so the transform is the first thing a design must pin down.
@@ -321,6 +353,22 @@ flowchart LR
 **Grounding.** A pipeline is a DAG of transforms in the Beam model.
 
 **In the wild.** A Beam ParDo or a Flink map/keyBy/sum is a transform.
+
+```mermaid
+flowchart TD
+  S(["<b>1. What = transformations</b><br/>the per-element computation"]):::start
+  A["<b>2. Element-wise and per-pane</b><br/>map, filter, sum - pure functions over data"]:::core
+  B["<b>3. The first question</b><br/>without it nothing else is defined"]:::step
+  C["<b>4. In Beam</b><br/>ParDo and combiners express it"]:::warn
+  S -->|"1. split into"| A
+  A -->|"2. it is"| B
+  B -->|"3. e.g."| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Axis: 3. Windowing (where)
 
 **Why.** An unbounded stream has no natural boundary, so aggregates need an explicit event-time slice to be well-defined.
@@ -330,6 +378,22 @@ flowchart LR
 **Grounding.** The window is the "where" an aggregate is computed over.
 
 **In the wild.** A 5-minute fixed window in Flink is a windowing choice.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Where = windowing</b><br/>the event-time slice a transform runs over"]):::start
+  A["<b>2. Fixed, sliding, session</b><br/>the three shapes of event-time grouping"]:::core
+  B["<b>3. Event time, not processing time</b><br/>the bucket is when the event happened"]:::step
+  C["<b>4. The second question</b><br/>windows decide what a result means"]:::warn
+  S -->|"1. answered with"| A
+  A -->|"2. always in"| B
+  B -->|"3. because"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Axis: 4. Triggers (when)
 
 **Why.** Without a trigger a window result sits unemitted forever, so the pipeline must name the processing-time conditions that fire output.
@@ -339,6 +403,22 @@ flowchart LR
 **Grounding.** Early, on-time, and late are three trigger points for the same window.
 
 **In the wild.** Flink's trigger API fires on watermark passage by default.
+
+```mermaid
+flowchart TD
+  S(["<b>1. When = triggers</b><br/>when results materialize"]):::start
+  A["<b>2. Repeated, not once</b><br/>a window can emit many times as data arrives"]:::core
+  B["<b>3. Kinds</b><br/>processing-time, count-based, watermark, data-driven"]:::step
+  C["<b>4. The third question</b><br/>triggers decide freshness vs cost"]:::warn
+  S -->|"1. they are"| A
+  A -->|"2. the"| B
+  B -->|"3. answering"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Signal: 5. Watermarks
 
 **Why.** The pipeline needs a signal for how complete event time is before it can safely close a window.
@@ -348,6 +428,22 @@ flowchart LR
 **Grounding.** The watermark passing a window's end is what makes an on-time trigger fire.
 
 **In the wild.** Flink and Dataflow watermarks are the production completeness signal.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Watermark</b><br/>a monotonic estimate of event-time completeness"]):::start
+  A["<b>2. Gates a trigger</b><br/>emit when the watermark passes the window's end"]:::core
+  B["<b>3. Heuristic, not perfect</b><br/>some events will still arrive late"]:::step
+  C["<b>4. Paired with allowed lateness</b><br/>late data gets a data-driven trigger"]:::warn
+  S -->|"1. it"| A
+  A -->|"2. but it is"| B
+  B -->|"3. so"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Bound: 6. Allowed lateness
 
 **Why.** After the watermark passes, late data still exists, and the pipeline must bound how long it keeps window state around for stragglers.
@@ -357,6 +453,22 @@ flowchart LR
 **Grounding.** Beyond it, stragglers are dropped — it is garbage collection for window state.
 
 **In the wild.** Dataflow's allowed-lateness setting is the production form.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Allowed lateness</b><br/>the grace period after the watermark"]):::start
+  A["<b>2. A data-driven trigger</b><br/>any late event re-fires the window"]:::core
+  B["<b>3. Trade-off</b><br/>longer grace = more correct, more state, more late updates"]:::warn
+  C["<b>4. After it lapses</b><br/>later data is dropped or parked"]:::step
+  S -->|"1. enables"| A
+  A -->|"2. the"| B
+  B -->|"3. once"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Mode: 7. Accumulation (how)
 
 **Why.** A window that emits early and on-time produces multiple panes, and downstream must know if each pane adds to or replaces the last.
@@ -366,6 +478,22 @@ flowchart LR
 **Grounding.** Retracting mode undoes the previous pane so sinks do not double-count.
 
 **In the wild.** Beam's accumulation modes are the production expression of "how".
+
+```mermaid
+flowchart TD
+  S(["<b>1. How = accumulation</b><br/>how a new pane relates to the prior one"]):::start
+  A["<b>2. Discarding</b><br/>each pane independent"]:::core
+  B["<b>3. Accumulating</b><br/>running total grows"]:::step
+  C["<b>4. Accumulating + retracting</b><br/>running total plus a retraction of the old value"]:::warn
+  S -->|"1. mode"| A
+  A -->|"2. next mode"| B
+  B -->|"3. exact mode"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Checklist: 8. The four-question checklist
 
 **Why.** A design review that omits one axis ships a pipeline whose latency or correctness is an accident rather than a decision.
@@ -375,6 +503,22 @@ flowchart LR
 **Grounding.** Omit "when" and latency is unspecified; omit "how" and refinement correctness is unspecified.
 
 **In the wild.** The book's recurring worked example (team score over sessions) is defined by exactly these four answers.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Four questions</b><br/>what, where, when, how"]):::start
+  A["<b>2. Each has a default</b><br/>but the defaults are engine-specific"]:::core
+  B["<b>3. The checklist</b><br/>state all four before you trust a result"]:::step
+  C["<b>4. The payoff</b><br/>a pipeline you can reason about and port"]:::warn
+  S -->|"1. they form"| A
+  A -->|"2. so use"| B
+  B -->|"3. giving"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 
 </details>
 

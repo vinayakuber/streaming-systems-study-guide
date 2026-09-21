@@ -12,16 +12,20 @@ _Also known as: SS Ch03 · Watermark · Event-time Progress · Heuristic Waterma
 
 ```mermaid
 flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,stroke-width:1px,rx:6
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
   classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
   classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  s0n0["<b>1. A timestamp that moves forward</b><br/>A watermark is a monotonically increasing event-time value: once it…"]:::start
-  s0n1["<b>2. It is a statement about completeness</b><br/>The watermark is the pipeline's best estimate of event-time complet…"]:::step
-  s0n2["<b>3. Two kinds of watermarks</b><br/>A perfect watermark is possible when you know inputs are in order (…"]:::step
-  s0n3["<b>4. Watermarks drive on-time triggers</b><br/>The on-time trigger for a window fires when the watermark passes th…"]:::stop
-  s0n0 --> s0n1
-  s0n1 --> s0n2
-  s0n2 --> s0n3
+  n0["<b>1. Unbounded data has no end</b><br/>so a window can never know it is complete"]:::start
+  n1["<b>2. Watermark = completeness estimate</b><br/>a statement of how complete event time is right now"]:::core
+  n2["<b>3. Monotonic</b><br/>the estimate only moves forward, never backward"]:::step
+  n3["<b>4. Perfect vs heuristic</b><br/>exact lag is unknowable in practice - heuristics approximate it"]:::warn
+  n4["<b>5. After the watermark</b><br/>events with older event times are late"]:::stop
+  n0 -->|"1. answered by"| n1
+  n1 -->|"2. it is"| n2
+  n2 -->|"3. two kinds"| n3
+  n3 -->|"4. anything older is"| n4
 ```
 
 1. **A timestamp that moves forward** — A watermark is a **monotonically increasing** event-time value: once it advances past a point, the pipeline declares it will not see event time earlier than that point again.
@@ -50,16 +54,20 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,stroke-width:1px,rx:6
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
   classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
   classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  s1n0["<b>1. Estimate from observed event time minus lag</b><br/>A common heuristic: track the maximum event time seen so far and su…"]:::start
-  s1n1["<b>2. Too fast = late data looks late</b><br/>If the heuristic advances faster than the true arrival pattern, eve…"]:::step
-  s1n2["<b>3. Too slow = correct but high latency</b><br/>If the skew is too conservative, the watermark lags and windows sta…"]:::step
-  s1n3["<b>4. Per-source tracking is more accurate</b><br/>When each source has its own idleness pattern, tracking a watermark…"]:::stop
-  s1n0 --> s1n1
-  s1n1 --> s1n2
-  s1n2 --> s1n3
+  n0["<b>1. Perfect watermarks are impossible</b><br/>you cannot know the true lag of every event"]:::start
+  n1["<b>2. Heuristic watermark</b><br/>estimate lag from what is observed - arrival minus event time"]:::core
+  n2["<b>3. Skew</b><br/>the out-of-orderness bound, often a percentile of observed lag"]:::step
+  n3["<b>4. Too short vs too long</b><br/>too short - more late data; too long - higher latency"]:::warn
+  n4["<b>5. Recap</b><br/>the skew parameter trades correctness against latency"]:::stop
+  n0 -->|"1. so use a"| n1
+  n1 -->|"2. parameterized by"| n2
+  n2 -->|"3. the tuning tension"| n3
+  n3 -->|"4. summarized as"| n4
 ```
 
 1. **Estimate from observed event time minus lag** — A common heuristic: track the **maximum event time seen so far** and subtract a fixed skew (a bound on out-of-orderness). **watermark = max_seen_event_time - skew.**
@@ -89,16 +97,18 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,stroke-width:1px,rx:6
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
   classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
   classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  s2n0["<b>1. The watermark is the minimum across inputs</b><br/>When a stage has multiple upstream sources, its watermark is the mi…"]:::start
-  s2n1["<b>2. A watermark is an estimate, not a guarantee</b><br/>Because heuristics can be wrong, a watermark that passed does not m…"]:::step
-  s2n2["<b>3. Allowed lateness is the safety net</b><br/>When the heuristic is wrong and data arrives after the watermark, a…"]:::step
-  s2n3["<b>4. Watermarks are what make event-time pipelines tractable</b><br/>Without watermarks, a pipeline can never emit a result that a user…"]:::stop
-  s2n0 --> s2n1
-  s2n1 --> s2n2
-  s2n2 --> s2n3
+  n0["<b>1. One watermark per source</b><br/>each input has its own estimate of completeness"]:::start
+  n1["<b>2. Propagated through stages</b><br/>a stage's output watermark is the min of its inputs"]:::core
+  n2["<b>3. Upstream changes flow down</b><br/>a source updating its watermark advances downstream estimates"]:::step
+  n3["<b>4. Correctness depends on it</b><br/>a wrong watermark emits results too early or too late"]:::warn
+  n0 -->|"1. combined by"| n1
+  n1 -->|"2. as"| n2
+  n2 -->|"3. because"| n3
 ```
 
 1. **The watermark is the minimum across inputs** — When a stage has multiple upstream sources, **its watermark is the minimum of its inputs' watermarks** — a stage cannot claim more completeness than its least-complete input.
@@ -336,6 +346,22 @@ flowchart LR
 **Grounding.** The watermark is the book's central mechanism for event-time progress.
 
 **In the wild.** Dataflow, Flink, and Beam all expose watermarks as first-class concepts.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Unbounded data</b><br/>never ends, so no natural done"]):::start
+  A["<b>2. A window needs completion</b><br/>to emit a final result"]:::core
+  B["<b>3. The answer</b><br/>a watermark - an estimate of completeness"]:::step
+  C["<b>4. The tension</b><br/>earlier emission vs more late data"]:::warn
+  S -->|"1. yet"| A
+  A -->|"2. provided by"| B
+  B -->|"3. tuned by"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Perfect: 2. Perfect watermarks
 
 **Why.** If a source is provably ordered, the pipeline can know completeness exactly rather than estimating it.
@@ -345,6 +371,22 @@ flowchart LR
 **Grounding.** For an ordered log, every record is at or ahead of the watermark, so the watermark can advance to each record's timestamp.
 
 **In the wild.** Ingestion-time pipelines over a single Kafka partition are the classic perfect-watermark case.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Perfect watermark</b><br/>exactly knows the lag of every event"]):::start
+  A["<b>2. Complete knowledge</b><br/>no event will ever arrive late"]:::core
+  B["<b>3. Unattainable in practice</b><br/>real sources have unbounded, unknowable delay"]:::warn
+  C["<b>4. The ideal</b><br/>a correctness baseline, not a deployment target"]:::step
+  S -->|"1. requires"| A
+  A -->|"2. but"| B
+  B -->|"3. so it is"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Heuristic: 3. Heuristic watermarks
 
 **Why.** Out-of-order sources (mobile devices, retries, multi-region collectors) make a perfect watermark impossible.
@@ -354,6 +396,22 @@ flowchart LR
 **Grounding.** watermark = max_seen_event_time − skew is the book's canonical heuristic.
 
 **In the wild.** Flink's BoundedOutOfOrdernessWatermarkGenerator implements exactly this.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Heuristic watermark</b><br/>estimates lag from observed events"]):::start
+  A["<b>2. Arrival minus event time</b><br/>the observed delay becomes the estimate"]:::core
+  B["<b>3. Skew parameter</b><br/>a percentile bound on out-of-orderness"]:::step
+  C["<b>4. The trade</b><br/>tighter skew = lower latency, more late data"]:::warn
+  S -->|"1. computed as"| A
+  A -->|"2. tuned by"| B
+  B -->|"3. giving"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Parameter: 4. Skew (out-of-orderness bound)
 
 **Why.** A heuristic needs a knob that says how out-of-order the source can be, to trade latency against correctness.
@@ -363,6 +421,22 @@ flowchart LR
 **Grounding.** Too small a skew mislabels delayed data as late; too large a skew delays on-time output.
 
 **In the wild.** The skew parameter in a Dataflow pipeline is the production form.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Skew</b><br/>the bound on out-of-orderness"]):::start
+  A["<b>2. A percentile</b><br/>e.g. P99 of observed lag"]:::core
+  B["<b>3. Too small</b><br/>many events arrive late"]:::warn
+  C["<b>4. Too large</b><br/>results wait too long"]:::warn
+  S -->|"1. chosen as"| A
+  A -->|"2. set too small"| B
+  A -->|"3. set too large"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Bound: 5. Per-source watermarks
 
 **Why.** One global watermark is dragged down by the slowest source — a single idle device stalls completeness for everything.
@@ -372,6 +446,22 @@ flowchart LR
 **Grounding.** The minimum across per-source watermarks is the stage's watermark.
 
 **In the wild.** Per-partition watermarks in Flink are the production form.
+
+```mermaid
+flowchart TD
+  S(["<b>1. One watermark per source</b><br/>each input has its own lag"]):::start
+  A["<b>2. Independent estimates</b><br/>a slow source does not delay a fast one"]:::core
+  B["<b>3. Combined downstream</b><br/>a stage's watermark is the min of its inputs"]:::step
+  C["<b>4. The rule</b><br/>the pipeline is as complete as its slowest source"]:::warn
+  S -->|"1. with"| A
+  A -->|"2. then"| B
+  B -->|"3. so"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Propagation: 6. Watermark propagation
 
 **Why.** A stage with multiple inputs cannot claim more completeness than its least-complete input.
@@ -381,6 +471,22 @@ flowchart LR
 **Grounding.** The join stage in the book waits on the slower input before emitting a keyed result.
 
 **In the wild.** Flink's watermark alignment (min across inputs) is the production form.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Watermark propagation</b><br/>estimates flow through the graph"]):::start
+  A["<b>2. Downstream = min of upstream</b><br/>a stage cannot be more complete than its inputs"]:::core
+  B["<b>3. Updates cascade</b><br/>a source advancing advances its dependents"]:::step
+  C["<b>4. Correctness</b><br/>a wrong propagated watermark mis-times every downstream emission"]:::warn
+  S -->|"1. the rule"| A
+  A -->|"2. so"| B
+  B -->|"3. and"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Tradeoff: 7. Latency vs correctness
 
 **Why.** The watermark's aggressiveness is the single knob that trades result latency against late-data correctness.
@@ -390,6 +496,23 @@ flowchart LR
 **Grounding.** Skew is the parameter that moves the pipeline along this tradeoff.
 
 **In the wild.** Tuning the out-of-orderness bound is a routine production decision.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Latency vs correctness</b><br/>the watermark's central trade"]):::start
+  A["<b>2. Early emission</b><br/>low latency, but late data missed"]:::core
+  B["<b>3. Late emission</b><br/>more complete, but results are stale"]:::warn
+  C["<b>4. No free lunch</b><br/>pick a skew; the trade is structural"]:::stop
+  S -->|"1. choose"| A
+  S -->|"2. or choose"| B
+  A -->|"3. either way"| C
+  B -->|"4. either way"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Safety net: 8. Watermarks + allowed lateness
 
 **Why.** A heuristic watermark can be wrong, so a pipeline needs a bounded way to accept data that arrives after the watermark.
@@ -399,6 +522,22 @@ flowchart LR
 **Grounding.** It is the garbage collector for window state that outlives the watermark.
 
 **In the wild.** Dataflow's allowed-lateness setting is the production form.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Watermark passed</b><br/>the window is declared complete"]):::start
+  A["<b>2. Allowed lateness</b><br/>a grace period for stragglers"]:::core
+  B["<b>3. Late data re-fires</b><br/>each straggler triggers an update or retraction"]:::step
+  C["<b>4. The combination</b><br/>watermark = when to close; allowed lateness = how long to forgive"]:::warn
+  S -->|"1. then"| A
+  A -->|"2. during which"| B
+  B -->|"3. together"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 
 </details>
 

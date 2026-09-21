@@ -12,16 +12,18 @@ _Also known as: SS Ch08 · Streaming SQL · Continuous Query · TUMBLE · HOP ·
 
 ```mermaid
 flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,stroke-width:1px,rx:6
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
   classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
   classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  s0n0["<b>1. A query over a stream is continuous</b><br/>A streaming SQL query is a continuous query — it runs forever and e…"]:::start
-  s0n1["<b>2. Relational operations map onto streams</b><br/>SELECT is a transform, WHERE is a filter, GROUP BY is a keyed aggre…"]:::step
-  s0n2["<b>3. Time becomes a first-class column</b><br/>A stream table has a time attribute (event time or processing time)…"]:::step
-  s0n3["<b>4. Append-only vs updating streams</b><br/>Some query results are append-only (each row is a new fact); others…"]:::stop
-  s0n0 --> s0n1
-  s0n1 --> s0n2
-  s0n2 --> s0n3
+  n0["<b>1. SQL is declarative</b><br/>say what you want, not how to compute it"]:::start
+  n1["<b>2. Continuous queries</b><br/>the same query runs forever over a stream, emitting as data arrives"]:::core
+  n2["<b>3. Tables append or update</b><br/>an INSERT-only stream, or an upserting stream with retractions"]:::step
+  n3["<b>4. Time attributes</b><br/>each row carries event time; the watermark drives emission"]:::warn
+  n0 -->|"1. turns into"| n1
+  n1 -->|"2. over"| n2
+  n2 -->|"3. governed by"| n3
 ```
 
 1. **A query over a stream is continuous** — A streaming SQL query is a **continuous query** — it runs forever and emits updated results as data arrives, rather than reading a finite table once.
@@ -51,16 +53,18 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,stroke-width:1px,rx:6
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
   classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
   classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  s1n0["<b>1. TUMBLE — fixed windows</b><br/>TUMBLE(size) is a fixed (tumbling) window: equal, non-overlapping s…"]:::start
-  s1n1["<b>2. HOP — sliding windows</b><br/>HOP(size, slide) is a sliding window: fixed length, advancing by sl…"]:::step
-  s1n2["<b>3. SESSION — session windows</b><br/>SESSION(gap) is a session window: a burst of activity closed by a g…"]:::step
-  s1n3["<b>4. The watermark drives emission</b><br/>A windowed aggregate emits when the watermark passes the window end…"]:::stop
-  s1n0 --> s1n1
-  s1n1 --> s1n2
-  s1n2 --> s1n3
+  n0["<b>1. TUMBLE</b><br/>fixed, non-overlapping windows - GROUP BY TUMBLE(5 MINUTES)"]:::start
+  n1["<b>2. HOP</b><br/>sliding windows - fixed size, fixed period"]:::step
+  n2["<b>3. SESSION</b><br/>activity-bounded windows that merge across gaps"]:::core
+  n3["<b>4. Watermark-driven emission</b><br/>a window's result emits when the watermark passes its end"]:::warn
+  n0 -->|"1. then"| n1
+  n1 -->|"2. then"| n2
+  n2 -->|"3. all emit when"| n3
 ```
 
 1. **TUMBLE — fixed windows** — **TUMBLE(size)** is a fixed (tumbling) window: equal, non-overlapping spans. It is the SQL spelling of the fixed window from the Beam model.
@@ -90,16 +94,18 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,stroke-width:1px,rx:6
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
   classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
   classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  s2n0["<b>1. Stream-stream joins need windows</b><br/>Joining two unbounded streams requires a windowed join — match rows…"]:::start
-  s2n1["<b>2. The watermark bounds the join</b><br/>A windowed join emits when both sides' watermarks pass the join win…"]:::step
-  s2n2["<b>3. Time attributes pick event or processing time</b><br/>Queries declare whether windows use event time (correct, can be lat…"]:::step
-  s2n3["<b>4. SQL hides the mechanics, not the semantics</b><br/>Streaming SQL still obeys the Beam model underneath — the watermark…"]:::stop
-  s2n0 --> s2n1
-  s2n1 --> s2n2
-  s2n2 --> s2n3
+  n0["<b>1. Windowed joins</b><br/>join two streams only within a shared time window"]:::start
+  n1["<b>2. Temporal joins</b><br/>join a stream against a table's version as of event time"]:::core
+  n2["<b>3. Time attributes are required</b><br/>every joined input must declare its event-time column"]:::step
+  n3["<b>4. Retractions</b><br/>late data corrects an earlier join result"]:::warn
+  n0 -->|"1. vs"| n1
+  n1 -->|"2. both need"| n2
+  n2 -->|"3. corrected by"| n3
 ```
 
 1. **Stream-stream joins need windows** — Joining two unbounded streams requires a **windowed join** — match rows whose time attributes are within a window of each other — otherwise the join has no boundary.
@@ -327,6 +333,22 @@ flowchart LR
 **Grounding.** The book presents SQL as a first-class stream-processing surface.
 
 **In the wild.** Flink SQL, Beam SQL, and ksqlDB are production streaming-SQL engines.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Streaming is too low-level</b><br/>hand-rolled operators are verbose"]):::start
+  A["<b>2. SQL is declarative</b><br/>say what, not how"]:::core
+  B["<b>3. Streaming SQL</b><br/>continuous queries over streams"]:::step
+  C["<b>4. The payoff</b><br/>familiar syntax, engine-optimized execution"]:::warn
+  S -->|"1. the fix"| A
+  A -->|"2. applied as"| B
+  B -->|"3. giving"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Query: 2. Continuous queries
 
 **Why.** A stream never ends, so a query over it must run forever, not once.
@@ -336,6 +358,22 @@ flowchart LR
 **Grounding.** This is what distinguishes streaming SQL from batch SQL.
 
 **In the wild.** A materialized view over a Kafka topic is a continuous query.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Continuous query</b><br/>runs forever"]):::start
+  A["<b>2. Emits as data arrives</b><br/>not once at the end"]:::core
+  B["<b>3. Table semantics</b><br/>append-only or updating results"]:::step
+  C["<b>4. In practice</b><br/>Flink SQL, Beam SQL, ksqlDB"]:::warn
+  S -->|"1. it"| A
+  A -->|"2. with"| B
+  B -->|"3. e.g."| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Time: 3. Time attributes
 
 **Why.** Windows and joins need to know which time to use — when the event happened or when it was processed.
@@ -345,6 +383,22 @@ flowchart LR
 **Grounding.** Batch SQL has no event time; streaming SQL does.
 
 **In the wild.** Flink SQL's event-time attribute drives watermark-based windows.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Time attributes</b><br/>event-time or processing-time columns"]):::start
+  A["<b>2. Declared per table</b><br/>the engine must know the clock"]:::core
+  B["<b>3. Event time needs a watermark</b><br/>else the engine cannot close windows"]:::step
+  C["<b>4. The rule</b><br/>every windowed query names its time attribute"]:::warn
+  S -->|"1. they are"| A
+  A -->|"2. and"| B
+  B -->|"3. so"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Window: 4. TUMBLE, HOP, SESSION
 
 **Why.** Aggregates over a stream need an explicit time slice, spelled out in SQL.
@@ -354,6 +408,22 @@ flowchart LR
 **Grounding.** They are the SQL spellings of the Beam window shapes.
 
 **In the wild.** Flink SQL and Beam SQL both support these.
+
+```mermaid
+flowchart TD
+  S(["<b>1. TUMBLE</b><br/>fixed, non-overlapping windows"]):::start
+  A["<b>2. HOP</b><br/>sliding - fixed size, fixed period"]:::core
+  B["<b>3. SESSION</b><br/>activity-bounded, merging"]:::step
+  C["<b>4. All emit on the watermark</b><br/>when the window's end passes"]:::warn
+  S -->|"1. then"| A
+  A -->|"2. then"| B
+  B -->|"3. each"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Mode: 5. Append-only vs updating results
 
 **Why.** Some results only add rows; others change existing rows, which sinks must handle differently.
@@ -363,6 +433,22 @@ flowchart LR
 **Grounding.** A COUNT GROUP BY is updating — the old count row must be retracted.
 
 **In the wild.** Flink SQL emits retract streams for updating queries.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Append-only results</b><br/>each row is a new fact"]):::start
+  A["<b>2. Updating results</b><br/>a key's value changes over time"]:::core
+  B["<b>3. Retractions</b><br/>updates ship the old value as a withdrawal"]:::step
+  C["<b>4. The difference</b><br/>whether downstream sees history or current state"]:::warn
+  S -->|"1. vs"| A
+  A -->|"2. needing"| B
+  B -->|"3. which is"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Join: 6. Windowed joins
 
 **Why.** Two unbounded streams have no natural join boundary, so time must supply one.
@@ -372,6 +458,22 @@ flowchart LR
 **Grounding.** The window is what bounds an otherwise infinite join.
 
 **In the wild.** Flink SQL interval joins are the production form.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Windowed joins</b><br/>two streams in a shared window"]):::start
+  A["<b>2. Bounded by the window</b><br/>matches only within the time slice"]:::core
+  B["<b>3. Emit on watermark</b><br/>plus late updates"]:::step
+  C["<b>4. In SQL</b><br/>JOIN ... WITHIN or a window clause"]:::warn
+  S -->|"1. they are"| A
+  A -->|"2. and"| B
+  B -->|"3. e.g."| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Watermark: 7. The watermark drives SQL emission
 
 **Why.** A windowed result must wait until the engine believes the window is complete.
@@ -381,6 +483,22 @@ flowchart LR
 **Grounding.** SQL hides the watermark mechanics but not its semantics.
 
 **In the wild.** Flink SQL uses the watermark to fire windows.
+
+```mermaid
+flowchart TD
+  S(["<b>1. The watermark drives SQL emission</b><br/>windows close when it passes"]):::start
+  A["<b>2. No watermark</b><br/>no final result"]:::warn
+  B["<b>3. Late data</b><br/>updates or retractions after emission"]:::core
+  C["<b>4. The takeaway</b><br/>SQL correctness rides on the watermark"]:::step
+  S -->|"1. so"| A
+  A -->|"2. while"| B
+  B -->|"3. hence"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Choice: 8. Event time vs processing time
 
 **Why.** The time attribute is a correctness decision, not a syntax detail.
@@ -390,6 +508,23 @@ flowchart LR
 **Grounding.** Event time is the right default for correctness.
 
 **In the wild.** Production SQL pipelines default to event time.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Event time vs processing time</b><br/>in SQL, the same choice"]):::start
+  A["<b>2. Event time</b><br/>correct, but waits on the watermark"]:::core
+  B["<b>3. Processing time</b><br/>instant, but shifts under load"]:::warn
+  C["<b>4. Declare it</b><br/>the time attribute picks the clock"]:::step
+  S -->|"1. choose"| A
+  S -->|"2. or"| B
+  A -->|"3. via"| C
+  B -->|"4. via"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 
 </details>
 

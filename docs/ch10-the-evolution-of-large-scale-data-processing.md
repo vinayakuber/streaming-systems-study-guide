@@ -12,16 +12,18 @@ _Also known as: SS Ch10 · Lambda Architecture · Kappa Architecture · Batch-St
 
 ```mermaid
 flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,stroke-width:1px,rx:6
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
   classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
   classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  s0n0["<b>1. MapReduce made batch tractable</b><br/>MapReduce (and Hadoop) made large batch jobs scalable and fault-tol…"]:::start
-  s0n1["<b>2. Streaming emerged for low latency</b><br/>Systems like MillWheel and Storm processed events as they arrived f…"]:::step
-  s0n2["<b>3. The Beam model unified the two</b><br/>The what/where/when/how model showed batch and streaming are the sa…"]:::step
-  s0n3["<b>4. The consequence: one pipeline, both modes</b><br/>Because the model is unified, the same pipeline code can run in bat…"]:::stop
-  s0n0 --> s0n1
-  s0n1 --> s0n2
-  s0n2 --> s0n3
+  n0["<b>1. MapReduce = batch</b><br/>finite inputs, full pass, then results"]:::start
+  n1["<b>2. Streaming engines arrived</b><br/>Flink, Beam, MillWheel - continuous, event-time aware"]:::step
+  n2["<b>3. Batch as a special case</b><br/>a bounded stream is just a stream that ends"]:::core
+  n3["<b>4. One model</b><br/>the same semantics run over both bounded and unbounded data"]:::stop
+  n0 -->|"1. superseded by"| n1
+  n1 -->|"2. by treating"| n2
+  n2 -->|"3. giving"| n3
 ```
 
 1. **MapReduce made batch tractable** — MapReduce (and Hadoop) made large batch jobs **scalable and fault-tolerant**, but it was built for finite datasets and had high latency.
@@ -51,16 +53,18 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,stroke-width:1px,rx:6
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
   classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
   classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  s1n0["<b>1. Lambda: batch + speed layers</b><br/>The Lambda architecture runs two systems: a batch layer for correct…"]:::start
-  s1n1["<b>2. Lambda's flaw: two codebases</b><br/>The batch and speed layers must be kept in sync by hand — the same…"]:::step
-  s1n2["<b>3. Kappa: one streaming pipeline with replay</b><br/>The Kappa architecture runs one streaming pipeline; reprocessing is…"]:::step
-  s1n3["<b>4. Kappa needs replayable, persistent logs</b><br/>Kappa assumes the input is a replayable log (Kafka) that retains hi…"]:::stop
-  s1n0 --> s1n1
-  s1n1 --> s1n2
-  s1n2 --> s1n3
+  n0["<b>1. Lambda architecture</b><br/>a batch layer + a speed layer, merged at query time"]:::start
+  n1["<b>2. Two codebases drift</b><br/>the same logic written twice inevitably disagrees"]:::warn
+  n2["<b>3. Kappa architecture</b><br/>a single streaming pipeline; batch is replay over a log"]:::core
+  n3["<b>4. The trade</b><br/>Kappa removes drift but requires replayable sources and streaming maturity"]:::step
+  n0 -->|"1. its weakness"| n1
+  n1 -->|"2. answered by"| n2
+  n2 -->|"3. the catch"| n3
 ```
 
 1. **Lambda: batch + speed layers** — The Lambda architecture runs **two systems**: a batch layer for correct results and a speed layer for low-latency approximations. Both compute the same logic.
@@ -90,16 +94,18 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,stroke-width:1px,rx:6
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
   classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
   classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  s2n0["<b>1. Batch is streaming over a bounded input</b><br/>A batch job is a streaming pipeline whose input ends. All the strea…"]:::start
-  s2n1["<b>2. One model, one codebase</b><br/>With the Beam model, the same pipeline serves both modes, so the La…"]:::step
-  s2n2["<b>3. Reprocessing is a first-class operation</b><br/>Changing business logic means replaying history through the new pip…"]:::step
-  s2n3["<b>4. What remains distinct</b><br/>Bounded vs unbounded still changes when results are final (a batch…"]:::stop
-  s2n0 --> s2n1
-  s2n1 --> s2n2
-  s2n2 --> s2n3
+  n0["<b>1. Same engine</b><br/>one runner executes batch and streaming jobs"]:::start
+  n1["<b>2. Replay = reprocessing</b><br/>re-run a job by replaying the log from an offset"]:::core
+  n2["<b>3. Batch = bounded stream</b><br/>batch is streaming over a finite input"]:::step
+  n3["<b>4. What stays distinct</b><br/>batch is cheaper and simpler; streaming trades cost for latency"]:::warn
+  n0 -->|"1. enables"| n1
+  n1 -->|"2. formalizes"| n2
+  n2 -->|"3. yet"| n3
 ```
 
 1. **Batch is streaming over a bounded input** — A batch job is a streaming pipeline whose input **ends**. **All the streaming machinery — windows, watermarks, triggers — still applies**, just with a finite input.
@@ -325,6 +331,22 @@ flowchart LR
 **Grounding.** The book's thesis is that the two converge.
 
 **In the wild.** Beam, Flink, and Dataflow all run the same pipeline in both modes.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Batch and streaming were separate</b><br/>different engines, different code"]):::start
+  A["<b>2. Same logic, twice</b><br/>a batch job and a streaming job"]:::warn
+  B["<b>3. They drift</b><br/>two implementations, two answers"]:::core
+  C["<b>4. The motivation</b><br/>unify them"]:::step
+  S -->|"1. so"| A
+  A -->|"2. and"| B
+  B -->|"3. hence"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Architecture: 2. Lambda architecture
 
 **Why.** To get both correct and low-latency results, run two layers.
@@ -334,6 +356,22 @@ flowchart LR
 **Grounding.** The duplication is the core cost — the layers drift.
 
 **In the wild.** Nathan Marz's Lambda architecture from the Hadoop era.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Lambda architecture</b><br/>batch layer + speed layer"]):::start
+  A["<b>2. Batch = accurate</b><br/>full recompute, eventually"]:::core
+  B["<b>3. Speed = fast</b><br/>approximate, then corrected"]:::step
+  C["<b>4. The flaw</b><br/>two codebases to keep in sync"]:::warn
+  S -->|"1. the"| A
+  A -->|"2. the"| B
+  B -->|"3. but"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Architecture: 3. Kappa architecture
 
 **Why.** Eliminating the second codebase removes the drift.
@@ -343,6 +381,22 @@ flowchart LR
 **Grounding.** One codebase, no synchronization.
 
 **In the wild.** Jay Kreps' Kappa architecture on top of Kafka.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Kappa architecture</b><br/>streaming only"]):::start
+  A["<b>2. Batch is replay</b><br/>re-run the stream over the log"]:::core
+  B["<b>3. One codebase</b><br/>one pipeline, no drift"]:::step
+  C["<b>4. The requirement</b><br/>replayable sources and streaming maturity"]:::warn
+  S -->|"1. where"| A
+  A -->|"2. giving"| B
+  B -->|"3. needing"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Insight: 4. Batch is a special case
 
 **Why.** If the model is unified, batch needs no separate machinery.
@@ -352,6 +406,22 @@ flowchart LR
 **Grounding.** This is the consequence of the Beam model.
 
 **In the wild.** Beam runs batch pipelines with the same windowing as streaming.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Batch is a special case</b><br/>of streaming"]):::start
+  A["<b>2. A bounded stream</b><br/>a stream that ends"]:::core
+  B["<b>3. One engine runs both</b><br/>same windows, watermarks, semantics"]:::step
+  C["<b>4. The unification</b><br/>batch and streaming logic match"]:::warn
+  S -->|"1. i.e."| A
+  A -->|"2. so"| B
+  B -->|"3. delivering"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Operation: 5. Reprocessing via replay
 
 **Why.** Business logic changes, so history must be recomputed under the new logic.
@@ -361,6 +431,22 @@ flowchart LR
 **Grounding.** The log is the source of truth; the pipeline is disposable.
 
 **In the wild.** Kafka retention + replay is the production form.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Reprocessing via replay</b><br/>re-run the past"]):::start
+  A["<b>2. Replay the log</b><br/>from an earlier offset"]:::core
+  B["<b>3. Fix bugs, backfill views</b><br/>rebuild results with new logic"]:::step
+  C["<b>4. The payoff</b><br/>the past is never lost"]:::warn
+  S -->|"1. by"| A
+  A -->|"2. to"| B
+  B -->|"3. so"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Requirement: 6. Replayable logs
 
 **Why.** Replay-based reprocessing requires the input history to be retained and re-readable.
@@ -370,6 +456,22 @@ flowchart LR
 **Grounding.** Without retention, history cannot be replayed.
 
 **In the wild.** Kafka topic retention is the Kappa prerequisite.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Replayable logs</b><br/>durable, ordered, re-readable"]):::start
+  A["<b>2. Kafka, Kinesis, bookkeeper</b><br/>offset-based reads"]:::core
+  B["<b>3. The foundation</b><br/>of reprocessing and recovery"]:::step
+  C["<b>4. The prerequisite</b><br/>Kappa cannot exist without them"]:::warn
+  S -->|"1. e.g."| A
+  A -->|"2. they are"| B
+  B -->|"3. hence"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Cost: 7. Lambda vs Kappa
 
 **Why.** The architectures differ in what they pay for correctness and latency.
@@ -379,6 +481,23 @@ flowchart LR
 **Grounding.** Kappa's cost is storage and recompute, not coordination.
 
 **In the wild.** Most modern systems choose Kappa-style, given a replayable log.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Lambda vs Kappa</b><br/>the architecture choice"]):::start
+  A["<b>2. Lambda</b><br/>proven, but two codebases"]:::core
+  B["<b>3. Kappa</b><br/>one codebase, but needs replay + streaming maturity"]:::warn
+  C["<b>4. The trend</b><br/>toward Kappa as streaming engines matured"]:::step
+  S -->|"1. choose"| A
+  S -->|"2. or"| B
+  A -->|"3. the drift"| C
+  B -->|"4. the drift"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Remaining: 8. What stays distinct
 
 **Why.** Unification does not make streams finite.
@@ -388,6 +507,22 @@ flowchart LR
 **Grounding.** The model unifies the how, not the fact that streams never end.
 
 **In the wild.** Streaming jobs run until stopped; batch jobs terminate.
+
+```mermaid
+flowchart TD
+  S(["<b>1. What stays distinct</b><br/>even when unified"]):::start
+  A["<b>2. Batch is cheaper</b><br/>simpler, no watermarks, no live state"]:::core
+  B["<b>3. Streaming trades cost for latency</b><br/>continuous, low-latency results"]:::step
+  C["<b>4. The rule</b><br/>use batch unless latency pays for itself"]:::warn
+  S -->|"1. first"| A
+  A -->|"2. while"| B
+  B -->|"3. so"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 
 </details>
 

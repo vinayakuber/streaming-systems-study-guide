@@ -12,16 +12,18 @@ _Also known as: SS Ch07 · Persistent State · Checkpoint · State Store · Rock
 
 ```mermaid
 flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,stroke-width:1px,rx:6
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
   classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
   classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  s0n0["<b>1. State is the aggregation in progress</b><br/>A keyed count, a session, a running sum — state is everything the p…"]:::start
-  s0n1["<b>2. Restarts must not lose state</b><br/>Machines crash and jobs redeploy. Persistent state means the aggreg…"]:::step
-  s0n2["<b>3. Recovery is about correctness and cost</b><br/>Losing state forces a full reprocessing of the stream — correct but…"]:::step
-  s0n3["<b>4. The stream is the truth, state is a cache of it</b><br/>Persistent state is a materialized fold of the stream. You can alwa…"]:::stop
-  s0n0 --> s0n1
-  s0n1 --> s0n2
-  s0n2 --> s0n3
+  n0["<b>1. In-memory state dies</b><br/>a crash loses every running window and join"]:::start
+  n1["<b>2. Long-lived queries need state</b><br/>windows, joins, and aggregations accumulate over time"]:::step
+  n2["<b>3. Persist it</b><br/>write state to disk so a restart can resume, not restart"]:::core
+  n3["<b>4. Consistency across replicas</b><br/>state must survive single-node and whole-pipeline failure"]:::warn
+  n0 -->|"1. motivates"| n1
+  n1 -->|"2. so"| n2
+  n2 -->|"3. with"| n3
 ```
 
 1. **State is the aggregation in progress** — A keyed count, a session, a running sum — **state is everything the pipeline remembers between events**. Without it, each event would start from scratch.
@@ -51,16 +53,18 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,stroke-width:1px,rx:6
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
   classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
   classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  s1n0["<b>1. A checkpoint is a consistent snapshot</b><br/>A checkpoint captures the state of every stage at a consistent poin…"]:::start
-  s1n1["<b>2. State stores hold the bytes</b><br/>Large state does not fit in memory, so processors spill to an embed…"]:::step
-  s1n2["<b>3. Incremental checkpoints keep cost down</b><br/>Rather than snapshotting all state every time, incremental checkpoi…"]:::step
-  s1n3["<b>4. Checkpoint frequency trades cost vs recovery</b><br/>Frequent checkpoints mean short recovery but high I/O; infrequent o…"]:::stop
-  s1n0 --> s1n1
-  s1n1 --> s1n2
-  s1n2 --> s1n3
+  n0["<b>1. State store</b><br/>local, keyed, queryable state per operator"]:::start
+  n1["<b>2. Checkpoint</b><br/>a durable snapshot of all operator state"]:::core
+  n2["<b>3. Incremental checkpoints</b><br/>copy only what changed since the last snapshot"]:::step
+  n3["<b>4. Barriers align the snapshot</b><br/>a marker flows the graph so all operators checkpoint a consistent point"]:::warn
+  n0 -->|"1. snapshotted by"| n1
+  n1 -->|"2. made cheap by"| n2
+  n2 -->|"3. aligned via"| n3
 ```
 
 1. **A checkpoint is a consistent snapshot** — A checkpoint captures the **state of every stage at a consistent point in the stream** (aligned by a barrier), so restart resumes from a coherent position.
@@ -90,16 +94,18 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,stroke-width:1px,rx:6
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
   classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
   classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  s2n0["<b>1. Barriers align the snapshot</b><br/>A checkpoint barrier flows through the stream; each stage snapshots…"]:::start
-  s2n1["<b>2. The snapshot is tied to a stream position</b><br/>A checkpoint records both the state and the source offset at the ba…"]:::step
-  s2n2["<b>3. At-least-once vs exactly-once recovery</b><br/>With at-least-once checkpointing, some records after the last check…"]:::step
-  s2n3["<b>4. State grows, so bound it</b><br/>Windows that never close and keys that never expire grow state fore…"]:::stop
-  s2n0 --> s2n1
-  s2n1 --> s2n2
-  s2n2 --> s2n3
+  n0["<b>1. Failure strikes</b><br/>a worker dies mid-window"]:::start
+  n1["<b>2. Restore the checkpoint</b><br/>reload state from the last durable snapshot"]:::core
+  n2["<b>3. Replay the source</b><br/>re-read inputs from the checkpointed position"]:::step
+  n3["<b>4. Exactly-once recovery</b><br/>barrier alignment + replay + dedup = no lost or double results"]:::stop
+  n0 -->|"1. handled by"| n1
+  n1 -->|"2. then"| n2
+  n2 -->|"3. together give"| n3
 ```
 
 1. **Barriers align the snapshot** — A checkpoint barrier flows through the stream; each stage snapshots its state when it sees the barrier. **The result is a snapshot of all stages at the same logical point** (Chandy-Lamport).
@@ -323,6 +329,22 @@ flowchart LR
 **Grounding.** State is the materialized fold of the stream, and persisting it avoids the rebuild.
 
 **In the wild.** Flink and Dataflow persist state to survive restarts.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Memory state dies</b><br/>a crash loses windows and joins"]):::start
+  A["<b>2. Long-lived queries</b><br/>accumulate state for hours or forever"]:::core
+  B["<b>3. The fix</b><br/>persist state to disk"]:::step
+  C["<b>4. The goal</b><br/>resume, not restart"]:::warn
+  S -->|"1. yet"| A
+  A -->|"2. so"| B
+  B -->|"3. to"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Snapshot: 2. Checkpoints
 
 **Why.** A consistent point-in-time snapshot is what a restart resumes from.
@@ -332,6 +354,22 @@ flowchart LR
 **Grounding.** It pairs state with the source offset so resume is coherent.
 
 **In the wild.** Flink's aligned checkpoints implement this.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Checkpoint</b><br/>a durable snapshot of all state"]):::start
+  A["<b>2. Written periodically</b><br/>to durable, replicated storage"]:::core
+  B["<b>3. Recovery point</b><br/>restart reloads from here"]:::step
+  C["<b>4. The trade</b><br/>more frequent = less replay, more write cost"]:::warn
+  S -->|"1. it is"| A
+  A -->|"2. the"| B
+  B -->|"3. tuning"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Store: 3. State stores
 
 **Why.** State can exceed memory, so bytes need a home with hot data in memory and the rest on disk.
@@ -341,6 +379,22 @@ flowchart LR
 **Grounding.** It is the difference between fitting 10 GB of state in memory or on a disk-backed store.
 
 **In the wild.** Flink's RocksDB state backend is the production form.
+
+```mermaid
+flowchart TD
+  S(["<b>1. State store</b><br/>local, keyed, queryable state"]):::start
+  A["<b>2. Per operator</b><br/>each operator holds its own"]:::core
+  B["<b>3. RocksDB-style</b><br/>an embedded, disk-backed key-value store"]:::step
+  C["<b>4. Checkpointed</b><br/>its contents feed the snapshot"]:::warn
+  S -->|"1. it is"| A
+  A -->|"2. often"| B
+  B -->|"3. and"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Cost: 4. Incremental checkpoints
 
 **Why.** Snapshotting all state every time is I/O-expensive when state is large.
@@ -350,6 +404,22 @@ flowchart LR
 **Grounding.** Uploading a delta of 12 keys vs a full 1000 is the practical win.
 
 **In the wild.** Flink's incremental checkpointing for RocksDB.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Incremental checkpoints</b><br/>copy only what changed"]):::start
+  A["<b>2. Delta since last snapshot</b><br/>not a full copy every time"]:::core
+  B["<b>3. Much cheaper</b><br/>frequent checkpoints become affordable"]:::step
+  C["<b>4. The win</b><br/>less replay without the write storm"]:::warn
+  S -->|"1. i.e."| A
+  A -->|"2. so"| B
+  B -->|"3. hence"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Alignment: 5. Checkpoint barriers
 
 **Why.** A snapshot must be consistent across stages, or a resume can mix old and new state.
@@ -359,6 +429,22 @@ flowchart LR
 **Grounding.** The barrier is what makes the snapshot a single logical point.
 
 **In the wild.** Flink checkpoint barriers are the production form.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Checkpoint barriers</b><br/>markers that flow the graph"]):::start
+  A["<b>2. Injected at the sources</b><br/>one barrier between logical chunks"]:::core
+  B["<b>3. Operators snapshot on the barrier</b><br/>all align at a consistent point"]:::step
+  C["<b>4. Chandy-Lamport idea</b><br/>a consistent global snapshot of a running graph"]:::warn
+  S -->|"1. they are"| A
+  A -->|"2. and"| B
+  B -->|"3. the"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Guarantee: 6. Exactly-once recovery
 
 **Why.** At-least-once recovery can replay some records, double-counting at sinks.
@@ -368,6 +454,22 @@ flowchart LR
 **Grounding.** Resume at offset 501 after offset 500 was folded = no double-count.
 
 **In the wild.** Flink's exactly-once checkpoint mode.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Exactly-once recovery</b><br/>no lost, no double results"]):::start
+  A["<b>2. Restore checkpoint</b><br/>reload state"]:::core
+  B["<b>3. Replay source from offset</b><br/>re-read inputs"]:::step
+  C["<b>4. Barrier + dedup</b><br/>alignment plus dedup closes the loop"]:::warn
+  S -->|"1. step"| A
+  A -->|"2. then"| B
+  B -->|"3. with"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Frequency: 7. Checkpoint frequency
 
 **Why.** The snapshot interval is the knob between steady-state cost and recovery time.
@@ -377,6 +479,22 @@ flowchart LR
 **Grounding.** Pick the frequency for the failure budget and state size.
 
 **In the wild.** A 1-minute interval is a common starting point.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Checkpoint frequency</b><br/>how often to snapshot"]):::start
+  A["<b>2. Frequent</b><br/>little replay, but heavy writes"]:::core
+  B["<b>3. Infrequent</b><br/>cheap writes, but long replay"]:::warn
+  C["<b>4. Incremental helps</b><br/>cheapens the frequent side"]:::step
+  S -->|"1. option"| A
+  A -->|"2. option"| B
+  B -->|"3. the middle"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Growth: 8. Bound state growth
 
 **Why.** Windows that never close and keys that never expire grow state without limit.
@@ -386,6 +504,22 @@ flowchart LR
 **Grounding.** Unbounded state eventually exhausts the state store.
 
 **In the wild.** Dataflow's allowed-lateness is the garbage-collection horizon.
+
+```mermaid
+flowchart TD
+  S(["<b>1. State grows unbounded</b><br/>windows and joins keep accumulating"]):::start
+  A["<b>2. Bound it</b><br/>cap state per key, window, or time"]:::core
+  B["<b>3. Garbage collection</b><br/>drop state whose window is closed"]:::step
+  C["<b>4. The discipline</b><br/>no bound means the store fills"]:::warn
+  S -->|"1. so"| A
+  A -->|"2. via"| B
+  B -->|"3. because"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 
 </details>
 

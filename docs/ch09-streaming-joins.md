@@ -12,16 +12,18 @@ _Also known as: SS Ch09 · Streaming Join · Windowed Join · Temporal Join · S
 
 ```mermaid
 flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,stroke-width:1px,rx:6
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
   classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
   classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  s0n0["<b>1. Two unbounded inputs have no join boundary</b><br/>A batch join completes when both tables are read. A stream-stream j…"]:::start
-  s0n1["<b>2. The join must buffer</b><br/>Rows from one side must wait for their counterpart on the other sid…"]:::step
-  s0n2["<b>3. Watermarks bound the wait</b><br/>The watermark tells each side when no more rows for a time range wi…"]:::step
-  s0n3["<b>4. Different joins for different inputs</b><br/>Windowed joins match two streams in a time window; temporal joins e…"]:::stop
-  s0n0 --> s0n1
-  s0n1 --> s0n2
-  s0n2 --> s0n3
+  n0["<b>1. Unbounded inputs never finish</b><br/>a plain join waits forever for a matching key"]:::start
+  n1["<b>2. Matching keys arrive far apart</b><br/>the two sides of a join disagree on arrival order"]:::warn
+  n2["<b>3. Bound the wait with a window</b><br/>only join events that fall in the same time slice"]:::core
+  n3["<b>4. Hold state per key</b><br/>keep each side's events until the window closes"]:::step
+  n0 -->|"1. because"| n1
+  n1 -->|"2. so"| n2
+  n2 -->|"3. which needs"| n3
 ```
 
 1. **Two unbounded inputs have no join boundary** — A batch join completes when both tables are read. **A stream-stream join never completes on its own** — it needs a time bound to say when a match is done.
@@ -51,16 +53,18 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,stroke-width:1px,rx:6
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
   classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
   classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  s1n0["<b>1. Windowed (interval) join</b><br/>A windowed join matches rows from two streams whose time attributes…"]:::start
-  s1n1["<b>2. Temporal join (stream-table)</b><br/>A temporal join enriches a stream with the version of a table that…"]:::step
-  s1n2["<b>3. Stream-table join is a lookup</b><br/>Joining a stream against a table is a keyed lookup — the stream row…"]:::step
-  s1n3["<b>4. The choice is about what is joined</b><br/>Join two streams -&gt; window; join a stream to a table -&gt; temporal lo…"]:::stop
-  s1n0 --> s1n1
-  s1n1 --> s1n2
-  s1n2 --> s1n3
+  n0["<b>1. Windowed join</b><br/>stream-to-stream, bounded by a shared window"]:::start
+  n1["<b>2. Temporal join</b><br/>stream-to-table, joining against the table snapshot at event time"]:::core
+  n2["<b>3. Which when</b><br/>windowed for two live streams; temporal for enrichment against a table"]:::step
+  n3["<b>4. The common thread</b><br/>both need a time bound and keyed state"]:::warn
+  n0 -->|"1. vs"| n1
+  n1 -->|"2. choose by"| n2
+  n2 -->|"3. shared requirement"| n3
 ```
 
 1. **Windowed (interval) join** — A windowed join matches rows from two streams whose time attributes are **within a window of each other**. The window bounds the buffer and the watermark bounds the wait.
@@ -90,16 +94,18 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,stroke-width:1px,rx:6
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
   classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
   classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  s2n0["<b>1. Join state is bounded by the window</b><br/>The buffer for a windowed join only needs to hold rows within the j…"]:::start
-  s2n1["<b>2. Late data complicates the join</b><br/>A late row can arrive after the join already emitted. Allowed laten…"]:::step
-  s2n2["<b>3. Retractions correct emitted joins</b><br/>If a late row changes a join result already emitted, the pipeline m…"]:::step
-  s2n3["<b>4. Garbage-collect the join state</b><br/>Join state must be garbage-collected when the watermark passes the…"]:::stop
-  s2n0 --> s2n1
-  s2n1 --> s2n2
-  s2n2 --> s2n3
+  n0["<b>1. The watermark bounds the wait</b><br/>a window is joinable until its watermark passes"]:::start
+  n1["<b>2. Late data needs retractions</b><br/>a late event invalidates an emitted join result"]:::warn
+  n2["<b>3. Garbage-collect join state</b><br/>drop a key's state once its window can no longer match"]:::core
+  n3["<b>4. Keyed state</b><br/>join state is per key, so it scales by partitioning"]:::stop
+  n0 -->|"1. after which"| n1
+  n1 -->|"2. so"| n2
+  n2 -->|"3. and it is"| n3
 ```
 
 1. **Join state is bounded by the window** — The buffer for a windowed join only needs to hold rows **within the join window** — rows older than the window can be dropped once both watermarks pass.
@@ -329,6 +335,22 @@ flowchart LR
 **Grounding.** The book's central streaming-join point is bounding the unbounded.
 
 **In the wild.** Flink SQL requires an interval for stream-stream joins.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Unbounded joins never finish</b><br/>a matching key may arrive any time"]):::start
+  A["<b>2. So a plain join waits forever</b><br/>and holds state without bound"]:::warn
+  B["<b>3. The fix</b><br/>bound the wait with a window"]:::core
+  C["<b>4. The cost</b><br/>state per key until the window closes"]:::step
+  S -->|"1. which means"| A
+  A -->|"2. hence"| B
+  B -->|"3. paid as"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Stream-stream: 2. Windowed joins
 
 **Why.** Two streams need a time window to bound which rows can match.
@@ -338,6 +360,22 @@ flowchart LR
 **Grounding.** The window bounds the buffer and the watermark bounds the wait.
 
 **In the wild.** Flink SQL interval joins are the production form.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Windowed join</b><br/>stream-to-stream"]):::start
+  A["<b>2. Shared time window</b><br/>both sides bounded by the same slice"]:::core
+  B["<b>3. Emit at watermark</b><br/>with late updates after"]:::step
+  C["<b>4. Use when</b><br/>two live streams must match in time"]:::warn
+  S -->|"1. joins within a"| A
+  A -->|"2. and"| B
+  B -->|"3. i.e."| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Stream-table: 3. Temporal joins
 
 **Why.** Enriching a stream against a slowly-changing table is a lookup, not a windowed match.
@@ -347,6 +385,22 @@ flowchart LR
 **Grounding.** The table is finite per key, so no window is needed.
 
 **In the wild.** Flink SQL temporal joins against a changelog table.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Temporal join</b><br/>stream-to-table"]):::start
+  A["<b>2. Join against a version</b><br/>the table snapshot as of event time"]:::core
+  B["<b>3. Enrichment pattern</b><br/>look up a user, product, or currency"]:::step
+  C["<b>4. No window needed</b><br/>the table side is already state"]:::warn
+  S -->|"1. it joins"| A
+  A -->|"2. the classic"| B
+  B -->|"3. so"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Buffer: 4. Join state
 
 **Why.** Rows from one side must wait for their counterpart on the other side.
@@ -356,6 +410,22 @@ flowchart LR
 **Grounding.** The buffer is what makes a streaming join possible.
 
 **In the wild.** Flink holds the buffered side in managed state.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Join state</b><br/>both sides held per key"]):::start
+  A["<b>2. Until the window closes</b><br/>or the match is complete"]:::core
+  B["<b>3. Keyed and partitioned</b><br/>state scales by key"]:::step
+  C["<b>4. The risk</b><br/>unbounded state if never released"]:::warn
+  S -->|"1. held"| A
+  A -->|"2. it is"| B
+  B -->|"3. with"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Signal: 5. Watermarks bound the wait
 
 **Why.** The pipeline needs to know when no more matching rows will arrive for a time range.
@@ -365,6 +435,22 @@ flowchart LR
 **Grounding.** Completeness is bounded by the slower stream.
 
 **In the wild.** Flink SQL fires interval joins on the watermark.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Watermarks bound the wait</b><br/>a window is matchable until it passes"]):::start
+  A["<b>2. Then emit</b><br/>the join result for that slice"]:::core
+  B["<b>3. Then release state</b><br/>the key's events can be dropped"]:::step
+  C["<b>4. The dependency</b><br/>join correctness rides on the watermark"]:::warn
+  S -->|"1. after which"| A
+  A -->|"2. and"| B
+  B -->|"3. so"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Correctness: 6. Late data and retractions
 
 **Why.** A late row can arrive after a match was emitted and change it.
@@ -374,6 +460,22 @@ flowchart LR
 **Grounding.** The same accumulation discipline as windows applies to joins.
 
 **In the wild.** Retract streams in Flink SQL correct emitted joins.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Late data</b><br/>arrives after the watermark"]):::start
+  A["<b>2. May change a join result</b><br/>a missed match, or a wrong one"]:::warn
+  B["<b>3. Retractions</b><br/>withdraw the stale result, emit the corrected"]:::core
+  C["<b>4. The cost</b><br/>downstream must handle withdrawals"]:::step
+  S -->|"1. which"| A
+  A -->|"2. handled by"| B
+  B -->|"3. meaning"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Growth: 7. Garbage-collect join state
 
 **Why.** A join buffer that never shrinks exhausts memory.
@@ -383,6 +485,22 @@ flowchart LR
 **Grounding.** The window and allowed lateness together bound the state.
 
 **In the wild.** Flink cleans up interval-join state past the window + lateness.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Garbage-collect join state</b><br/>drop it when it can no longer match"]):::start
+  A["<b>2. After the watermark</b><br/>the window is closed"]:::core
+  B["<b>3. Per-key cleanup</b><br/>release each key's buffered events"]:::step
+  C["<b>4. The discipline</b><br/>no GC means unbounded memory"]:::warn
+  S -->|"1. i.e."| A
+  A -->|"2. done as"| B
+  B -->|"3. because"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Mistake: 8. Stream-stream vs stream-table confusion
 
 **Why.** Applying the wrong join type produces unbounded buffers or wrong matches.
@@ -392,6 +510,22 @@ flowchart LR
 **Grounding.** The input type — unbounded vs finite-per-key — picks the join type.
 
 **In the wild.** A common bug is a windowed join where a temporal lookup was intended.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Stream-stream</b><br/>two moving inputs"]):::start
+  A["<b>2. Stream-table</b><br/>one moving, one at rest"]:::core
+  B["<b>3. The confusion</b><br/>using a windowed join where a temporal join fits"]:::warn
+  C["<b>4. The rule</b><br/>two streams - window; a table side - temporal"]:::step
+  S -->|"1. vs"| A
+  A -->|"2. avoid"| B
+  B -->|"3. so"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 
 </details>
 

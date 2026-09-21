@@ -12,16 +12,18 @@ _Also known as: SS Ch04 · Session Windows · Fixed Window · Sliding Window · 
 
 ```mermaid
 flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,stroke-width:1px,rx:6
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
   classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
   classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  s0n0["<b>1. Fixed (tumbling) windows</b><br/>Fixed windows partition time into equal, non-overlapping, contiguou…"]:::start
-  s0n1["<b>2. Sliding (hopping) windows</b><br/>Sliding windows are fixed-length, overlapping spans defined by a wi…"]:::step
-  s0n2["<b>3. Session windows</b><br/>Session windows are dynamic and data-driven: a session is a burst o…"]:::step
-  s0n3["<b>4. Sessions capture behavior, not just counting</b><br/>Because session boundaries follow the data, they model real user jo…"]:::stop
-  s0n0 --> s0n1
-  s0n1 --> s0n2
-  s0n2 --> s0n3
+  n0["<b>1. Fixed windows</b><br/>equal, non-overlapping event-time slices"]:::start
+  n1["<b>2. Sliding windows</b><br/>fixed length with a period - overlapping or with gaps"]:::step
+  n2["<b>3. Session windows</b><br/>activity-bounded - a gap of inactivity closes the window"]:::core
+  n3["<b>4. Which when</b><br/>fixed for uniform accounting, sliding for moving views, session for bursts"]:::warn
+  n0 -->|"1. vs"| n1
+  n1 -->|"2. vs"| n2
+  n2 -->|"3. choose by"| n3
 ```
 
 1. **Fixed (tumbling) windows** — Fixed windows partition time into **equal, non-overlapping, contiguous** spans — every event belongs to exactly one window. They answer "how many per hour".
@@ -51,16 +53,20 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,stroke-width:1px,rx:6
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
   classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
   classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  s1n0["<b>1. Assign</b><br/>Each element is assigned to a set of windows by its event time and…"]:::start
-  s1n1["<b>2. Merge</b><br/>Session windows merge: when a new event lands inside the gap of two…"]:::step
-  s1n2["<b>3. Group and trigger</b><br/>Elements are grouped by (key, window) into the state that will be a…"]:::step
-  s1n3["<b>4. Accumulate and garbage-collect</b><br/>Each emitted pane is accumulated per the accumulation mode, and the…"]:::stop
-  s1n0 --> s1n1
-  s1n1 --> s1n2
-  s1n2 --> s1n3
+  n0["<b>1. Assign</b><br/>each event is placed into one or more windows"]:::start
+  n1["<b>2. Merge</b><br/>session windows merge when an event bridges a gap"]:::step
+  n2["<b>3. Group and trigger</b><br/>events grouped by key; triggers decide when to emit"]:::core
+  n3["<b>4. Accumulate</b><br/>pane results fold together per the accumulation mode"]:::step
+  n4["<b>5. Garbage collect</b><br/>state for a closed window is dropped once it can never change"]:::stop
+  n0 -->|"1. then"| n1
+  n1 -->|"2. then"| n2
+  n2 -->|"3. then"| n3
+  n3 -->|"4. finally"| n4
 ```
 
 1. **Assign** — Each element is assigned to a set of windows by its event time and the windowing function. **A sliding window assigns one event to several windows at once.**
@@ -90,16 +96,18 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,stroke-width:1px,rx:6
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
   classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
   classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  s2n0["<b>1. A session can merge late</b><br/>A late event can bridge two sessions that were already emitted sepa…"]:::start
-  s2n1["<b>2. Sessions are garbage-collected by watermark</b><br/>A session is not done when it looks idle; it is done when the water…"]:::step
-  s2n2["<b>3. Session windows are keyed</b><br/>Sessions are per key — user A's session and user B's session never…"]:::step
-  s2n3["<b>4. Choose the window to match the question</b><br/>Fixed windows for periodic aggregates, sliding windows for moving a…"]:::stop
-  s2n0 --> s2n1
-  s2n1 --> s2n2
-  s2n2 --> s2n3
+  n0["<b>1. Sessions are keyed</b><br/>a session is per user or per key, never global"]:::start
+  n1["<b>2. Merging after emission</b><br/>a late event can bridge two already-emitted sessions"]:::warn
+  n2["<b>3. Retractions</b><br/>the pipeline must cancel the earlier panes and emit the merged one"]:::core
+  n3["<b>4. Gap threshold tuning</b><br/>too small - one session splits; too large - distinct sessions merge"]:::step
+  n0 -->|"1. the trap is"| n1
+  n1 -->|"2. handled by"| n2
+  n2 -->|"3. the knob is"| n3
 ```
 
 1. **A session can merge late** — A late event can bridge two sessions that were already emitted separately. **The pipeline must retract the two earlier panes and emit the merged one** — this is why accumulation mode matters.
@@ -323,6 +331,22 @@ flowchart LR
 **Grounding.** The book builds the whole windowing model on these three shapes.
 
 **In the wild.** Beam, Flink, and Dataflow all expose these three window types.
+
+```mermaid
+flowchart TD
+  S(["<b>1. One shape does not fit all</b><br/>different questions need different windows"]):::start
+  A["<b>2. Fixed</b><br/>uniform, non-overlapping accounting"]:::core
+  B["<b>3. Sliding</b><br/>moving views with a period"]:::step
+  C["<b>4. Session</b><br/>bursts bounded by inactivity"]:::warn
+  S -->|"1. the choices"| A
+  A -->|"2. and"| B
+  B -->|"3. and"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Shape: 2. Fixed windows
 
 **Why.** Periodic, comparable aggregates need equal, non-overlapping time buckets.
@@ -332,6 +356,22 @@ flowchart LR
 **Grounding.** They answer "how many per hour".
 
 **In the wild.** A 5-minute tumbling window in Flink is a fixed window.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Fixed windows</b><br/>equal, non-overlapping slices"]):::start
+  A["<b>2. Aligned to the clock</b><br/>e.g. every hour, on the hour"]:::core
+  B["<b>3. One window each</b><br/>an event lands in exactly one"]:::step
+  C["<b>4. Best for</b><br/>uniform, per-period accounting"]:::warn
+  S -->|"1. they are"| A
+  A -->|"2. so"| B
+  B -->|"3. ideal"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Shape: 3. Sliding windows
 
 **Why.** Moving averages need overlapping spans so a point in time contributes to several recent windows.
@@ -341,6 +381,22 @@ flowchart LR
 **Grounding.** One event can belong to several sliding windows at once.
 
 **In the wild.** A 10-minute window sliding every 2 minutes is the canonical rolling average.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Sliding windows</b><br/>fixed length with a fixed period"]):::start
+  A["<b>2. Overlap or gaps</b><br/>period smaller or larger than length"]:::core
+  B["<b>3. One event, many windows</b><br/>an event may land in several"]:::step
+  C["<b>4. Best for</b><br/>moving averages and recent-window views"]:::warn
+  S -->|"1. defined by"| A
+  A -->|"2. so"| B
+  B -->|"3. ideal"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Shape: 4. Session windows
 
 **Why.** User behavior is bursty and its boundaries follow the data, not the clock.
@@ -350,6 +406,22 @@ flowchart LR
 **Grounding.** A 30-minute gap splits one visit into two sessions.
 
 **In the wild.** Web-analytics sessionization is the canonical session-window use case.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Session windows</b><br/>bounded by a gap of inactivity"]):::start
+  A["<b>2. Data-defined</b><br/>the events decide the boundaries"]:::core
+  B["<b>3. Merge across the gap</b><br/>a bridging event joins two sessions"]:::step
+  C["<b>4. Best for</b><br/>user sessions, bursts, clickstreams"]:::warn
+  S -->|"1. they are"| A
+  A -->|"2. and"| B
+  B -->|"3. ideal"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Lifecycle: 5. The window lifecycle
 
 **Why.** Windowing is a pipeline of steps — assign, merge, group, trigger, accumulate, garbage-collect — not a single bucket lookup.
@@ -359,6 +431,22 @@ flowchart LR
 **Grounding.** The lifecycle is the book's complete description of windowing.
 
 **In the wild.** Beam's WindowFn, trigger, and accumulation mode map onto these stages.
+
+```mermaid
+flowchart TD
+  S(["<b>1. The window lifecycle</b><br/>five stages"]):::start
+  A["<b>2. Assign, merge</b><br/>place events, join sessions"]:::core
+  B["<b>3. Group, trigger, accumulate</b><br/>key events, emit, fold panes"]:::step
+  C["<b>4. Garbage collect</b><br/>drop state that can never change"]:::warn
+  S -->|"1. first"| A
+  A -->|"2. then"| B
+  B -->|"3. finally"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Merge: 6. Session merging
 
 **Why.** Sessions that were separate can turn out to be one session when a bridging event arrives.
@@ -368,6 +456,22 @@ flowchart LR
 **Grounding.** The merge changes the window set, not just a count.
 
 **In the wild.** Beam's mergeWindows is the production form.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Session merging</b><br/>a late event bridges a gap"]):::start
+  A["<b>2. Two sessions become one</b><br/>their events and state merge"]:::core
+  B["<b>3. After emission</b><br/>already-emitted panes must be corrected"]:::warn
+  C["<b>4. Via retraction</b><br/>cancel the old, emit the merged"]:::step
+  S -->|"1. so"| A
+  A -->|"2. even"| B
+  B -->|"3. handled"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Pitfall: 7. Late merges need retractions
 
 **Why.** A late event can bridge two sessions already emitted separately, so the earlier panes are now wrong.
@@ -377,6 +481,22 @@ flowchart LR
 **Grounding.** Retraction is the only way to correct an already-emitted result.
 
 **In the wild.** Accumulating-and-retracting mode in Beam handles this.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Late merges</b><br/>a session changes after it emitted"]):::start
+  A["<b>2. The downstream saw stale panes</b><br/>two separate session results"]:::warn
+  B["<b>3. Retraction needed</b><br/>downstream must undo the stale result"]:::core
+  C["<b>4. The cost</b><br/>retractions complicate every downstream consumer"]:::step
+  S -->|"1. means"| A
+  A -->|"2. so"| B
+  B -->|"3. and"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 ### Scope: 8. Sessions are keyed
 
 **Why.** A gap must be measured within one entity, not across unrelated entities.
@@ -386,6 +506,22 @@ flowchart LR
 **Grounding.** Keying is what makes session windows per-user rather than global.
 
 **In the wild.** Grouping by user id before sessionizing is the production pattern.
+
+```mermaid
+flowchart TD
+  S(["<b>1. Sessions are keyed</b><br/>a session belongs to a key"]):::start
+  A["<b>2. Per-user sessions</b><br/>merging happens within a key, never across"]:::core
+  B["<b>3. Keyed state</b><br/>session state is per key, so it partitions"]:::step
+  C["<b>4. The trap</b><br/>forgetting the key merges unrelated activity"]:::warn
+  S -->|"1. e.g."| A
+  A -->|"2. held in"| B
+  B -->|"3. avoid"| C
+  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
+  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
+  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
+  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
+  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
+```
 
 </details>
 
