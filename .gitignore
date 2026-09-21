@@ -1,0 +1,18 @@
+# Source PDFs / raw extracts (huge, copyrighted)
+raw/
+*.pdf
+
+# Node
+node_modules/
+package-lock.json
+
+# IDE / OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Local secrets
+.env
+.env.local
