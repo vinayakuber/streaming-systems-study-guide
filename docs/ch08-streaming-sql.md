@@ -10,22 +10,6 @@ _Also known as: SS Ch08 · Streaming SQL · Continuous Query · TUMBLE · HOP ·
 
 > **Why this matters:** Declarative SQL lowers the barrier to stream processing, but the relational model must be adapted to time, so this section shows how familiar SQL maps onto a stream.
 
-```mermaid
-flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  n0["<b>1. SQL is declarative</b><br/>say what you want, not how to compute it"]:::start
-  n1["<b>2. Continuous queries</b><br/>the same query runs forever over a stream, emitting as data arrives"]:::core
-  n2["<b>3. Tables append or update</b><br/>an INSERT-only stream, or an upserting stream with retractions"]:::step
-  n3["<b>4. Time attributes</b><br/>each row carries event time; the watermark drives emission"]:::warn
-  n0 -->|"1. turns into"| n1
-  n1 -->|"2. over"| n2
-  n2 -->|"3. governed by"| n3
-```
-
 1. **A query over a stream is continuous** — A streaming SQL query is a **continuous query** — it runs forever and emits updated results as data arrives, rather than reading a finite table once.
 
 2. **Relational operations map onto streams** — **SELECT is a transform, WHERE is a filter, GROUP BY is a keyed aggregation** — the relational algebra of batch SQL maps onto the streaming transforms of the Beam model.
@@ -51,22 +35,6 @@ flowchart TD
 
 > **Why this matters:** The key adaptation of SQL to streams is explicit windowing — batch SQL groups whole tables, while streaming SQL must say over which time slice each aggregate is computed, so this section covers the window constructs.
 
-```mermaid
-flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  n0["<b>1. TUMBLE</b><br/>fixed, non-overlapping windows - GROUP BY TUMBLE(5 MINUTES)"]:::start
-  n1["<b>2. HOP</b><br/>sliding windows - fixed size, fixed period"]:::step
-  n2["<b>3. SESSION</b><br/>activity-bounded windows that merge across gaps"]:::core
-  n3["<b>4. Watermark-driven emission</b><br/>a window's result emits when the watermark passes its end"]:::warn
-  n0 -->|"1. then"| n1
-  n1 -->|"2. then"| n2
-  n2 -->|"3. all emit when"| n3
-```
-
 1. **TUMBLE — fixed windows** — **TUMBLE(size)** is a fixed (tumbling) window: equal, non-overlapping spans. It is the SQL spelling of the fixed window from the Beam model.
 
 2. **HOP — sliding windows** — **HOP(size, slide)** is a sliding window: fixed length, advancing by slide. It is the SQL spelling of the sliding window.
@@ -91,22 +59,6 @@ flowchart TD
 ### Joins and time in SQL
 
 > **Why this matters:** Joins are where streaming SQL gets subtle — two streams never align in time the way two batch tables do — so this section covers windowed joins and the time semantics that make them correct.
-
-```mermaid
-flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  n0["<b>1. Windowed joins</b><br/>join two streams only within a shared time window"]:::start
-  n1["<b>2. Temporal joins</b><br/>join a stream against a table's version as of event time"]:::core
-  n2["<b>3. Time attributes are required</b><br/>every joined input must declare its event-time column"]:::step
-  n3["<b>4. Retractions</b><br/>late data corrects an earlier join result"]:::warn
-  n0 -->|"1. vs"| n1
-  n1 -->|"2. both need"| n2
-  n2 -->|"3. corrected by"| n3
-```
 
 1. **Stream-stream joins need windows** — Joining two unbounded streams requires a **windowed join** — match rows whose time attributes are within a window of each other — otherwise the join has no boundary.
 
@@ -184,13 +136,6 @@ flowchart TD
   R -->|"comprises"| P2["an upsert sink applies retractions correctly"]
 ```
 
-```mermaid
-flowchart LR
-  S["streams"] -->|"feed"| Q["SQL engine"]
-  Q -->|"groups by tumble"| W["watermark + window"]
-  W -->|"closes windows"| K["sink (upsert)"]
-```
-
 ```java
 // SYSTEM DESIGN — a continuous SQL query updates a campaign count as the watermark closes a TUMBLE window
 // DEF: continuous query — "SELECT campaign, COUNT(*) FROM clicks GROUP BY TUMBLE(event_time, 5 min), campaign"
@@ -222,14 +167,6 @@ A team wants analysts to write ad-click aggregations in SQL over a live stream, 
 - Window — TUMBLE/HOP/SESSION
 - Watermark — drives emission
 
-```mermaid
-flowchart LR
-  C["clicks stream"] -->|"queries"| Q["SELECT ... GROUP BY TUMBLE(event_time, 5 min)"]
-  Q -->|"checks"| W{watermark >= window end?}
-  W -->|yes| E[emit result]
-  W -->|no| H[hold]
-```
-
 ```java
 SELECT window_start, campaign, COUNT(*)
 FROM clicks
@@ -255,13 +192,6 @@ A SQL query joins clicks with impressions, but it emits matches before a late im
 - Windowed join — interval bound
 - Watermark — both sides pass
 - Hold — buffer until complete
-
-```mermaid
-flowchart LR
-  C["clicks wm=12:06"] -->|"joins"| J{join window}
-  I["impressions wm=12:04"] -->|"joins"| J
-  J -->|"waits for min wm"| W["emit when both wm pass 12:05"]
-```
 
 ```java
 SELECT ...
@@ -289,12 +219,11 @@ _From the 28 problems:_ 21-ad-click-aggregation
 
 A continuous query emits updated results as data arrives, rather than reading a finite table once.
 
-```mermaid
-flowchart LR
-  C["clicks stream"] -->|"queries"| Q["SELECT ... GROUP BY TUMBLE(event_time, 5 min)"]
-  Q -->|"checks"| W{watermark >= window end?}
-  W -->|yes| E[emit result]
-  W -->|no| H[hold]
+```java
+SELECT window_start, campaign, COUNT(*)
+FROM clicks
+GROUP BY TUMBLE(event_time, INTERVAL '5' MINUTE), campaign
+-- emits when the watermark passes each 5-min window end
 ```
 
 

@@ -10,22 +10,6 @@ _Also known as: SS Ch10 · Lambda Architecture · Kappa Architecture · Batch-St
 
 > **Why this matters:** The evolution of data processing explains why streaming systems look the way they do, so this section traces the arc from batch to the Beam model.
 
-```mermaid
-flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  n0["<b>1. MapReduce = batch</b><br/>finite inputs, full pass, then results"]:::start
-  n1["<b>2. Streaming engines arrived</b><br/>Flink, Beam, MillWheel - continuous, event-time aware"]:::step
-  n2["<b>3. Batch as a special case</b><br/>a bounded stream is just a stream that ends"]:::core
-  n3["<b>4. One model</b><br/>the same semantics run over both bounded and unbounded data"]:::stop
-  n0 -->|"1. superseded by"| n1
-  n1 -->|"2. by treating"| n2
-  n2 -->|"3. giving"| n3
-```
-
 1. **MapReduce made batch tractable** — MapReduce (and Hadoop) made large batch jobs **scalable and fault-tolerant**, but it was built for finite datasets and had high latency.
 
 2. **Streaming emerged for low latency** — Systems like MillWheel and Storm processed events as they arrived for **low-latency** results, but early versions lacked the correctness of batch (no event time, no watermarks).
@@ -51,22 +35,6 @@ flowchart TD
 
 > **Why this matters:** Two architectures tried to reconcile batch correctness with streaming latency, and the difference between them is the difference between dual codebases and one pipeline, so this section contrasts them.
 
-```mermaid
-flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  n0["<b>1. Lambda architecture</b><br/>a batch layer + a speed layer, merged at query time"]:::start
-  n1["<b>2. Two codebases drift</b><br/>the same logic written twice inevitably disagrees"]:::warn
-  n2["<b>3. Kappa architecture</b><br/>a single streaming pipeline; batch is replay over a log"]:::core
-  n3["<b>4. The trade</b><br/>Kappa removes drift but requires replayable sources and streaming maturity"]:::step
-  n0 -->|"1. its weakness"| n1
-  n1 -->|"2. answered by"| n2
-  n2 -->|"3. the catch"| n3
-```
-
 1. **Lambda: batch + speed layers** — The Lambda architecture runs **two systems**: a batch layer for correct results and a speed layer for low-latency approximations. Both compute the same logic.
 
 2. **Lambda's flaw: two codebases** — The batch and speed layers must be kept **in sync by hand** — the same aggregation written twice, in two systems, which drift apart. **That duplication is Lambda's core cost.**
@@ -91,22 +59,6 @@ flowchart TD
 ### Batch and streaming converge
 
 > **Why this matters:** The end of the arc is convergence — batch as a special case of streaming — and this section draws the practical consequences for how systems are built today.
-
-```mermaid
-flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  n0["<b>1. Same engine</b><br/>one runner executes batch and streaming jobs"]:::start
-  n1["<b>2. Replay = reprocessing</b><br/>re-run a job by replaying the log from an offset"]:::core
-  n2["<b>3. Batch = bounded stream</b><br/>batch is streaming over a finite input"]:::step
-  n3["<b>4. What stays distinct</b><br/>batch is cheaper and simpler; streaming trades cost for latency"]:::warn
-  n0 -->|"1. enables"| n1
-  n1 -->|"2. formalizes"| n2
-  n2 -->|"3. yet"| n3
-```
 
 1. **Batch is streaming over a bounded input** — A batch job is a streaming pipeline whose input **ends**. **All the streaming machinery — windows, watermarks, triggers — still applies**, just with a finite input.
 
@@ -184,14 +136,6 @@ flowchart TD
   R -->|"comprises"| P2["the corrected result replaces the buggy one"]
 ```
 
-```mermaid
-flowchart LR
-  L[(log)] -->|"feeds"| P["one pipeline"]
-  P -->|"writes"| S[(speed result)]
-  L -->|replay v2| P2["same pipeline"]
-  P2 -->|"rewrites"| C[(corrected result)]
-```
-
 ```java
 // SYSTEM DESIGN — a bug fix is deployed once and history is replayed through the same pipeline
 // DEF: log — the retained input history = 3 records [ r1, r2, r3 ]
@@ -224,14 +168,6 @@ A team runs a batch job and a streaming job that compute the same metric, and th
 - Reprocessing — replay history
 - Unified model — batch = bounded streaming
 
-```mermaid
-flowchart LR
-  L[(log)] -->|"feeds"| P["one pipeline"]
-  P -->|"writes"| S[(speed result)]
-  L -->|replay| P2["same pipeline (reprocess)"]
-  P2 -->|"rewrites"| B[(corrected result)]
-```
-
 ```java
 // lambda: batch code + speed code -> drift
 // kappa : one code, replay log -> no drift
@@ -257,12 +193,6 @@ An analyst asks why the company maintains separate batch and streaming pipelines
 - Bounded vs unbounded input
 - One codebase
 
-```mermaid
-flowchart LR
-  P["one pipeline"] -->|"reads"| B["bounded input = batch"]
-  P -->|"reads"| S["unbounded input = streaming"]
-```
-
 ```java
 // same windowed sum
 //   batch    : read 3 records -> result {12:00: 3}
@@ -287,12 +217,10 @@ _From the 28 problems:_ 20-metrics-monitoring
 
 Lambda runs a batch layer (correct) and a speed layer (low-latency) computing the same logic in two codebases.
 
-```mermaid
-flowchart LR
-  L[(log)] -->|"feeds"| P["one pipeline"]
-  P -->|"writes"| S[(speed result)]
-  L -->|replay| P2["same pipeline (reprocess)"]
-  P2 -->|"rewrites"| B[(corrected result)]
+```java
+// lambda: batch code + speed code -> drift
+// kappa : one code, replay log -> no drift
+//   bug fix -> edit once -> replay history -> swap result
 ```
 
 

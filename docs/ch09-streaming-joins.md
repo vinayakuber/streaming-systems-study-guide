@@ -10,22 +10,6 @@ _Also known as: SS Ch09 · Streaming Join · Windowed Join · Temporal Join · S
 
 > **Why this matters:** A join over two finite tables is a set intersection; a join over two unbounded streams has no boundary, so this section establishes what makes streaming joins different.
 
-```mermaid
-flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  n0["<b>1. Unbounded inputs never finish</b><br/>a plain join waits forever for a matching key"]:::start
-  n1["<b>2. Matching keys arrive far apart</b><br/>the two sides of a join disagree on arrival order"]:::warn
-  n2["<b>3. Bound the wait with a window</b><br/>only join events that fall in the same time slice"]:::core
-  n3["<b>4. Hold state per key</b><br/>keep each side's events until the window closes"]:::step
-  n0 -->|"1. because"| n1
-  n1 -->|"2. so"| n2
-  n2 -->|"3. which needs"| n3
-```
-
 1. **Two unbounded inputs have no join boundary** — A batch join completes when both tables are read. **A stream-stream join never completes on its own** — it needs a time bound to say when a match is done.
 
 2. **The join must buffer** — Rows from one side must wait for their counterpart on the other side. **Join state holds one side until the other catches up**, bounded by the join window.
@@ -51,22 +35,6 @@ flowchart TD
 
 > **Why this matters:** The two practical join forms — matching two streams in a window, and enriching a stream against a table — have different correctness rules, so this section contrasts them.
 
-```mermaid
-flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  n0["<b>1. Windowed join</b><br/>stream-to-stream, bounded by a shared window"]:::start
-  n1["<b>2. Temporal join</b><br/>stream-to-table, joining against the table snapshot at event time"]:::core
-  n2["<b>3. Which when</b><br/>windowed for two live streams; temporal for enrichment against a table"]:::step
-  n3["<b>4. The common thread</b><br/>both need a time bound and keyed state"]:::warn
-  n0 -->|"1. vs"| n1
-  n1 -->|"2. choose by"| n2
-  n2 -->|"3. shared requirement"| n3
-```
-
 1. **Windowed (interval) join** — A windowed join matches rows from two streams whose time attributes are **within a window of each other**. The window bounds the buffer and the watermark bounds the wait.
 
 2. **Temporal join (stream-table)** — A temporal join enriches a stream with the **version of a table that was current at the event's time**. It looks up state, not a moving window.
@@ -91,22 +59,6 @@ flowchart TD
 ### Correctness and state
 
 > **Why this matters:** A join is only correct if it holds the right state for the right amount of time and cleans it up, so this section covers the state and watermark discipline behind joins.
-
-```mermaid
-flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  n0["<b>1. The watermark bounds the wait</b><br/>a window is joinable until its watermark passes"]:::start
-  n1["<b>2. Late data needs retractions</b><br/>a late event invalidates an emitted join result"]:::warn
-  n2["<b>3. Garbage-collect join state</b><br/>drop a key's state once its window can no longer match"]:::core
-  n3["<b>4. Keyed state</b><br/>join state is per key, so it scales by partitioning"]:::stop
-  n0 -->|"1. after which"| n1
-  n1 -->|"2. so"| n2
-  n2 -->|"3. and it is"| n3
-```
 
 1. **Join state is bounded by the window** — The buffer for a windowed join only needs to hold rows **within the join window** — rows older than the window can be dropped once both watermarks pass.
 
@@ -184,14 +136,6 @@ flowchart TD
   R -->|"comprises"| P2["join state is garbage-collected past the window + lateness"]
 ```
 
-```mermaid
-flowchart LR
-  C["click stream"] -->|"joins"| J["windowed join"]
-  I["impression stream"] -->|"joins"| J
-  J -->|"emits matches"| R["retraction emitter"]
-  R -->|"updates"| S[(attribution store)]
-```
-
 ```java
 // SYSTEM DESIGN — a windowed join holds a match until both watermarks pass, then a late row corrects it
 // DEF: join window — the time bound for a match = 5 min
@@ -223,16 +167,6 @@ An attribution pipeline joins ad impressions with clicks to attribute conversion
 - Allowed lateness — late corrections
 - Retraction — correct emitted matches
 
-```mermaid
-flowchart LR
-  C["clicks"] -->|"joins"| J{join window}
-  I["impressions"] -->|"joins"| J
-  J -->|"checks"| W{both watermarks pass?}
-  W -->|yes| E[emit match]
-  W -->|no| H[hold]
-  L["late row"] -->|"triggers"| R[retract + re-emit]
-```
-
 ```java
 // click 12:03, impression 12:02, window 5 min
 //   impressions wm 12:04:30 < 12:05 -> hold
@@ -259,13 +193,6 @@ A click stream needs each click enriched with the user's current subscription ti
 - Table — changelog-backed
 - Join key — user id
 
-```mermaid
-flowchart LR
-  C["click stream"] -->|"joins"| T["temporal join"]
-  U[(user table)] -->|"joins"| T
-  T -->|"enriches"| E["enriched click"]
-```
-
 ```java
 // click {user:42, event_time:12:03}
 //   probe user_table[42] = {tier: gold}
@@ -289,14 +216,11 @@ _From the 28 problems:_ 21-ad-click-aggregation
 
 A windowed join matches rows whose time attributes are within a window of each other.
 
-```mermaid
-flowchart LR
-  C["clicks"] -->|"joins"| J{join window}
-  I["impressions"] -->|"joins"| J
-  J -->|"checks"| W{both watermarks pass?}
-  W -->|yes| E[emit match]
-  W -->|no| H[hold]
-  L["late row"] -->|"triggers"| R[retract + re-emit]
+```java
+// click 12:03, impression 12:02, window 5 min
+//   impressions wm 12:04:30 < 12:05 -> hold
+//   impressions wm -> 12:06 -> both pass -> emit
+//   late impression 12:01 -> retract old, emit corrected
 ```
 
 

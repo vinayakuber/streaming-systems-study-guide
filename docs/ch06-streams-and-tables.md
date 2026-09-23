@@ -10,22 +10,6 @@ _Also known as: SS Ch06 · Stream-Table Duality · Change Log · Materialized Vi
 
 > **Why this matters:** Every dataset has a moving form and a still form, and much confusion in data systems comes from not naming which one is being discussed, so this section fixes the two terms.
 
-```mermaid
-flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  n0["<b>1. A stream</b><br/>motion - events over time, the change log"]:::start
-  n1["<b>2. A table</b><br/>state - the current value per key"]:::step
-  n2["<b>3. Same data, two views</b><br/>a table is a stream's materialized view; a stream is a table's log"]:::core
-  n3["<b>4. Databases vs logs</b><br/>a database is a table; its replication stream is the log"]:::warn
-  n0 -->|"1. dual of"| n1
-  n1 -->|"2. the insight"| n2
-  n2 -->|"3. in practice"| n3
-```
-
 1. **A stream is motion** — A stream is a **sequence of events over time** — a change log, an event feed, an append-only sequence. It answers "what happened".
 
 2. **A table is state** — A table is a **snapshot of state at a point in time** — a materialized view, a map, a balance. It answers "what is true now".
@@ -49,22 +33,6 @@ flowchart TD
 ### The duality
 
 > **Why this matters:** The real power is the ability to move between the two views — aggregate a stream into a table, or capture a table's changes back into a stream — so this section covers both directions.
-
-```mermaid
-flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  n0["<b>1. Stream to table</b><br/>aggregate the events into current state"]:::start
-  n1["<b>2. Table to stream</b><br/>watch changes - the change log is the stream"]:::step
-  n2["<b>3. The round-trip</b><br/>table of a stream, stream of a table - two directions of one idea"]:::core
-  n3["<b>4. Why it holds</b><br/>both are the same data, one at rest and one in motion"]:::warn
-  n0 -->|"1. inverse"| n1
-  n1 -->|"2. composed"| n2
-  n2 -->|"3. because"| n3
-```
 
 1. **Stream -> table by aggregation** — Aggregating a stream (sum, count, group-by) produces a table. **The table is the materialized view of the stream** — recompute it from the stream and you get the same state.
 
@@ -90,22 +58,6 @@ flowchart TD
 ### Why the duality matters in practice
 
 > **Why this matters:** The duality is not philosophy — it decides how systems store, replay, and rebuild state, so this section connects it to the concrete choices a streaming architecture makes.
-
-```mermaid
-flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  n0["<b>1. Feeds are views</b><br/>a user feed is a table built from a stream of posts"]:::start
-  n1["<b>2. Unread is a table</b><br/>inbox state derived from a message stream"]:::step
-  n2["<b>3. Reprocessing is replay</b><br/>rebuild a view by replaying the source stream"]:::core
-  n3["<b>4. One mental model</b><br/>streams and tables unify batch, streaming, and databases"]:::stop
-  n0 -->|"1. likewise"| n1
-  n1 -->|"2. and"| n2
-  n2 -->|"3. delivering"| n3
-```
 
 1. **Materialization is a design choice** — You can materialize a table eagerly (store it) or **recompute it from the stream on demand**. Eager costs storage; lazy costs recompute time.
 
@@ -184,14 +136,6 @@ flowchart TD
   R -->|"comprises"| P2["the derived table matches the source database"]
 ```
 
-```mermaid
-flowchart LR
-  D[(database table)] -->|CDC| C["changelog stream"]
-  C -->|fold| P["stream processor"]
-  P -->|"updates"| V[(materialized view)]
-  V -.matches.-> D
-```
-
 ```java
 // SYSTEM DESIGN — a balance update flows from table to changelog and back to a matching table
 // DEF: changelog — the stream of (old, new) pairs = [ (0,10), (10,7) ]
@@ -224,13 +168,6 @@ A service stores account balances in a database but also needs a real-time feed 
 - Fold — rebuilds the table from the stream
 - Retraction — (old, new) pairs
 
-```mermaid
-flowchart LR
-  T[(table)] -->|CDC| C["changelog stream"]
-  C -->|fold| V[(materialized view)]
-  V -->|matches| T
-```
-
 ```java
 // table balance 7 -> 12
 //   CDC emits (7,12) to the changelog
@@ -257,12 +194,6 @@ An ad-click pipeline needs both a per-minute event feed and a per-campaign runni
 - Table — the per-campaign total
 - Aggregation — stream -> table
 
-```mermaid
-flowchart LR
-  E["click stream"] -->|"folds"| A["aggregate by campaign"]
-  A -->|"updates"| T[(campaign totals)]
-```
-
 ```java
 // clicks [ +1, +1, +1 ] campaign C
 //   stream: 3 events, table: total 3
@@ -286,11 +217,11 @@ _From the 28 problems:_ 21-ad-click-aggregation
 
 A stream is a sequence of events over time — an append-only change log.
 
-```mermaid
-flowchart LR
-  T[(table)] -->|CDC| C["changelog stream"]
-  C -->|fold| V[(materialized view)]
-  V -->|matches| T
+```java
+// table balance 7 -> 12
+//   CDC emits (7,12) to the changelog
+//   consumer folds -> table 12 (matches source)
+//   stream = source of truth, table = derived view
 ```
 
 

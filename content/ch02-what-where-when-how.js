@@ -56,7 +56,19 @@ registerChapter({
         { num: 1, title: 'Accumulation relates panes', detail: 'The answer to "how" is the relationship between a window\'s successive results. <strong>Accumulating mode adds to the previous pane; discarding mode replaces it; accumulating-and-retracting also emits a retraction so downstream can undo the old value.</strong>' },
         { num: 2, title: 'Why retractions exist', detail: 'If a downstream system stores the first result, a later refined result would double-count unless the old value is retracted. <strong>Accumulating-and-retracting emits the delta and a retraction of the previous pane, so a sink can stay correct.</strong>' },
         { num: 3, title: 'The four questions are a checklist', detail: 'Ask all four — what, where, when, how — of any pipeline and its behavior is fully specified. <strong>Omit "when" and you cannot reason about latency; omit "how" and you cannot reason about correctness under refinement.</strong>' }
-      ]
+      ],
+      program: `// DATA SERVER SIDE — one window emits twice; the accumulation mode decides whether the sink's total is 3, 4, or 7
+// DEF: pane — one emitted result for the window; pane1 = {sum: 3}, pane2 = {sum: 4}
+// DEF: sink — the downstream store that persists the window result; here keyed by window id "12:00-12:05"
+// DEF: retraction — a signal that undoes pane1 so a sink can subtract it
+// STATE (before):
+//    sink_total : { "12:00-12:05": 0 }
+// -> input : window [12:00, 12:05) emits pane1 {sum: 3}, then a late event raises it to pane2 {sum: 4}
+//    step 1 · accumulating mode -> sink_total["12:00-12:05"] : 0 -> 3, then 3 -> 7   BECAUSE each pane adds to the previous
+//    step 2 · discarding mode -> sink_total["12:00-12:05"] : 0 -> 3, then 3 -> 4   BECAUSE pane2 replaces pane1
+//    step 3 · accumulating-and-retracting mode -> sink_total["12:00-12:05"] : 0 -> 3, then 3 -> 4 via -3 +4   BECAUSE the retraction undoes pane1 before pane2 lands
+// <- correct total : 4 in discarding and retracting modes, 7 in accumulating   BECAUSE 7 double-counts the same window's two panes
+//    derivation : retracting total = 3 - 3 + 4 = 4   BECAUSE the retraction subtracts the old pane exactly once`,
     }
   ],
 
@@ -80,8 +92,8 @@ registerChapter({
   },
 
   interview: [
-    { scenario: "A real-time dashboard sums purchases per 5-minute window, but it can't say whether a number is final — an event that happened at 12:04 can still arrive after the window was shown.", q: "How do you decide when a window's result is ready to emit, and what do you do about events that arrive later?", solution: "Use a watermark to declare event-time completeness; emit on-time when the watermark passes the window end, and keep the window alive for an allowed-lateness horizon so late events can update the result.", components: ["Fixed window — the event-time slice", "Watermark — completeness signal", "On-time trigger — fires at the watermark", "Allowed lateness — bounds late updates"], diagram: "flowchart LR\n  W[\"window 12:00-12:05\"] -->|\"closes when\"| WM{watermark >= 12:05?}\n  WM -->|no| E[early / wait]\n  WM -->|yes| O[emit on-time]\n  S[\"late event @ 12:04:59\"] -->|\"arrives late\"| L{within allowed lateness?}\n  L -->|yes| U[update + re-emit]\n  L -->|no| D[drop]", code: "// window [12:00,12:05), sum = 3\n//   watermark 12:05:00 -> on-time trigger -> emit {sum:3}\n//   straggler event_time 12:04:59 at 12:06 -> allowed lateness 1 min\n//     -> update sum 3->4, emit late pane {sum:4}\n//   beyond allowed lateness -> drop the straggler", tieback: "This is exactly the When (triggers + watermarks) and How (accumulation) material in this chapter.", refs: ["4. Triggers (when)", "5. Watermarks", "6. Allowed lateness", "7. Accumulation (how)"], problems: ["21-ad-click-aggregation", "20-metrics-monitoring"] },
-    { scenario: "Two teams build 'the same' streaming aggregation, but one emits a running total and the other replaces each number — downstream sums them and double-counts.", q: "What axis did the teams fail to specify, and how do you fix the double-count?", solution: "They failed to specify the accumulation mode (how). Use accumulating-and-retracting so each refined pane retracts the previous value before adding the new one.", components: ["Accumulation mode — how panes relate", "Retraction — undo the previous pane", "Sink — applies retractions correctly"], diagram: "flowchart LR\n  P1[\"pane 1: sum=3\"] -->|\"writes\"| S[(sink=3)]\n  P2[\"pane 2: sum=4\"] -->|\"retracts\"| R[\"retract pane 1\"]\n  R -->|\"replaces\"| S\n  P2 -->|\"writes\"| S2[(sink=4)]", code: "// accumulating : sink = 3 then 3+4 = 7 -> double counts\n// retracting  : pane1 {sum:3} -> retract -> pane2 {sum:4}\n//   sink sees 3, then -3 +4 = 4 -> correct", tieback: "This is exactly the How (accumulation) axis in this chapter.", refs: ["7. Accumulation (how)", "8. The four-question checklist"], problems: ["21-ad-click-aggregation"] }
+    { scenario: "A real-time dashboard sums purchases per 5-minute window, but it can't say whether a number is final — an event that happened at 12:04 can still arrive after the window was shown.", q: "How do you decide when a window's result is ready to emit, and what do you do about events that arrive later?", solution: "Use a watermark to declare event-time completeness; emit on-time when the watermark passes the window end, and keep the window alive for an allowed-lateness horizon so late events can update the result.", components: ["Fixed window — the event-time slice", "Watermark — completeness signal", "On-time trigger — fires at the watermark", "Allowed lateness — bounds late updates"],  code: "// window [12:00,12:05), sum = 3\n//   watermark 12:05:00 -> on-time trigger -> emit {sum:3}\n//   straggler event_time 12:04:59 at 12:06 -> allowed lateness 1 min\n//     -> update sum 3->4, emit late pane {sum:4}\n//   beyond allowed lateness -> drop the straggler", tieback: "This is exactly the When (triggers + watermarks) and How (accumulation) material in this chapter.", refs: ["4. Triggers (when)", "5. Watermarks", "6. Allowed lateness", "7. Accumulation (how)"], problems: ["21-ad-click-aggregation", "20-metrics-monitoring"] },
+    { scenario: "Two teams build 'the same' streaming aggregation, but one emits a running total and the other replaces each number — downstream sums them and double-counts.", q: "What axis did the teams fail to specify, and how do you fix the double-count?", solution: "They failed to specify the accumulation mode (how). Use accumulating-and-retracting so each refined pane retracts the previous value before adding the new one.", components: ["Accumulation mode — how panes relate", "Retraction — undo the previous pane", "Sink — applies retractions correctly"],  code: "// accumulating : sink = 3 then 3+4 = 7 -> double counts\n// retracting  : pane1 {sum:3} -> retract -> pane2 {sum:4}\n//   sink sees 3, then -3 +4 = 4 -> correct", tieback: "This is exactly the How (accumulation) axis in this chapter.", refs: ["7. Accumulation (how)", "8. The four-question checklist"], problems: ["21-ad-click-aggregation"] }
   ],
   systemDesign: {
     question: 'Design a purchase-counting pipeline that answers what, where, when, and how for one result. Premise: a purchase arrives late, so the pipeline must close the window on the watermark and let allowed lateness correct the already-emitted count.',
@@ -112,7 +124,7 @@ registerChapter({
           'a late straggler updates sum : 10 -> 20 if inside allowed lateness'
         ] }
     ],
-    wiring: "flowchart LR\n  W[\"event source\"] -->|\"emits purchase\"| T[\"stream + watermark\"]\n  T -->|\"assigns window\"| C[\"window assigner\"]\n  C -->|\"accumulates\"| A[\"per-window state\"]\n  A -->|\"reads count\"| R[\"dashboard\"]",
+    
     program: `// SYSTEM DESIGN — a purchase flows through a fixed window; the watermark closes it on time, allowed lateness catches a straggler
 // DEF: purchase — the event {user: 42, amount: 10, event_time: "12:04:00"}
 // DEF: window — the fixed event-time slice [12:00, 12:05)

@@ -10,22 +10,6 @@ _Also known as: SS Ch07 · Persistent State · Checkpoint · State Store · Rock
 
 > **Why this matters:** A pipeline that keeps a running count in memory loses it on restart, so this section establishes why durable state is a requirement, not an optimization.
 
-```mermaid
-flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  n0["<b>1. In-memory state dies</b><br/>a crash loses every running window and join"]:::start
-  n1["<b>2. Long-lived queries need state</b><br/>windows, joins, and aggregations accumulate over time"]:::step
-  n2["<b>3. Persist it</b><br/>write state to disk so a restart can resume, not restart"]:::core
-  n3["<b>4. Consistency across replicas</b><br/>state must survive single-node and whole-pipeline failure"]:::warn
-  n0 -->|"1. motivates"| n1
-  n1 -->|"2. so"| n2
-  n2 -->|"3. with"| n3
-```
-
 1. **State is the aggregation in progress** — A keyed count, a session, a running sum — **state is everything the pipeline remembers between events**. Without it, each event would start from scratch.
 
 2. **Restarts must not lose state** — Machines crash and jobs redeploy. **Persistent state means the aggregation survives a restart** and continues where it left off, rather than re-reading the whole stream.
@@ -51,22 +35,6 @@ flowchart TD
 
 > **Why this matters:** Persisting state has real machinery — how often to snapshot, where to put the bytes, and how to keep snapshots small — so this section covers the practical knobs.
 
-```mermaid
-flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  n0["<b>1. State store</b><br/>local, keyed, queryable state per operator"]:::start
-  n1["<b>2. Checkpoint</b><br/>a durable snapshot of all operator state"]:::core
-  n2["<b>3. Incremental checkpoints</b><br/>copy only what changed since the last snapshot"]:::step
-  n3["<b>4. Barriers align the snapshot</b><br/>a marker flows the graph so all operators checkpoint a consistent point"]:::warn
-  n0 -->|"1. snapshotted by"| n1
-  n1 -->|"2. made cheap by"| n2
-  n2 -->|"3. aligned via"| n3
-```
-
 1. **A checkpoint is a consistent snapshot** — A checkpoint captures the **state of every stage at a consistent point in the stream** (aligned by a barrier), so restart resumes from a coherent position.
 
 2. **State stores hold the bytes** — Large state does not fit in memory, so processors spill to an embedded **state store** (e.g. RocksDB) that keeps hot data in memory and the rest on disk.
@@ -91,22 +59,6 @@ flowchart TD
 ### Consistency and recovery
 
 > **Why this matters:** A snapshot is only useful if it is consistent — taken at one logical point in the stream — and recovery is only safe if the pipeline knows exactly where that point was, so this section covers the correctness side.
-
-```mermaid
-flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  n0["<b>1. Failure strikes</b><br/>a worker dies mid-window"]:::start
-  n1["<b>2. Restore the checkpoint</b><br/>reload state from the last durable snapshot"]:::core
-  n2["<b>3. Replay the source</b><br/>re-read inputs from the checkpointed position"]:::step
-  n3["<b>4. Exactly-once recovery</b><br/>barrier alignment + replay + dedup = no lost or double results"]:::stop
-  n0 -->|"1. handled by"| n1
-  n1 -->|"2. then"| n2
-  n2 -->|"3. together give"| n3
-```
 
 1. **Barriers align the snapshot** — A checkpoint barrier flows through the stream; each stage snapshots its state when it sees the barrier. **The result is a snapshot of all stages at the same logical point** (Chandy-Lamport).
 
@@ -184,14 +136,6 @@ flowchart TD
   R -->|"comprises"| P2["restart reads it back to resume"]
 ```
 
-```mermaid
-flowchart LR
-  S["stream"] -->|"feeds"| P["processor + state store"]
-  P -->|"checkpoints"| C["checkpoint"]
-  C -->|"persists"| D[(durable storage)]
-  D -->|restore| P
-```
-
 ```java
 // SYSTEM DESIGN — a barrier snapshots state and offset so a restart resumes without loss or double-count
 // DEF: barrier — the marker that triggers a snapshot = at offset 500
@@ -223,13 +167,6 @@ A streaming aggregation keeps a running count per user in memory; when the job r
 - Barrier — aligns the snapshot
 - Incremental snapshot — only the delta
 
-```mermaid
-flowchart LR
-  S["stream"] -->|"feeds"| P["processor + state store"]
-  P -->|"checkpoints"| C["checkpoint (state + offset)"]
-  C -->|"resumes"| R["restart resumes from offset"]
-```
-
 ```java
 // count {42:13} at offset 500
 //   checkpoint saves {count:{42:13}, offset:500}
@@ -256,12 +193,6 @@ A metrics pipeline has 10 GB of state; snapshotting the whole thing every minute
 - State store — disk-backed
 - Frequency — tuned to failure budget
 
-```mermaid
-flowchart LR
-  S[(10 GB state)] -->|"diffs"| D["delta = changed keys"]
-  D -->|upload 12 keys| C["checkpoint"]
-```
-
 ```java
 // 1000 keys, 12 changed
 //   incremental: upload 12 keys
@@ -286,11 +217,11 @@ _From the 28 problems:_ 20-metrics-monitoring
 
 A checkpoint captures every stage's state at one logical point in the stream, aligned by a barrier.
 
-```mermaid
-flowchart LR
-  S["stream"] -->|"feeds"| P["processor + state store"]
-  P -->|"checkpoints"| C["checkpoint (state + offset)"]
-  C -->|"resumes"| R["restart resumes from offset"]
+```java
+// count {42:13} at offset 500
+//   checkpoint saves {count:{42:13}, offset:500}
+//   restart restores count 13, resumes at 501
+//   -> no reset, no full replay
 ```
 
 

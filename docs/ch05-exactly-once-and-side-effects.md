@@ -10,24 +10,6 @@ _Also known as: SS Ch05 · Exactly-Once · Idempotency · Deduplication · Side 
 
 > **Why this matters:** "Exactly-once" is used loosely, so this section fixes the definition — it is about each record affecting the output exactly once, not about a magic guarantee that nothing is ever retried.
 
-```mermaid
-flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  n0["<b>1. Retries are unavoidable</b><br/>crashes and timeouts force re-processing"]:::start
-  n1["<b>2. At-least-once + dedup</b><br/>re-process freely, then drop duplicates"]:::core
-  n2["<b>3. Exactly-once ≠ one-time</b><br/>a step may run many times; results appear once"]:::warn
-  n3["<b>4. End-to-end</b><br/>the guarantee must span the whole pipeline, not one operator"]:::step
-  n4["<b>5. Replayable sources</b><br/>inputs must be re-readable for recovery"]:::stop
-  n0 -->|"1. made safe by"| n1
-  n1 -->|"2. the key distinction"| n2
-  n2 -->|"3. scoped as"| n3
-  n3 -->|"4. requiring"| n4
-```
-
 1. **Accuracy and completeness** — A correct pipeline is **accurate** (each result is right) and **complete** (every input contributes). Exactly-once means each record's contribution appears exactly once.
 
 2. **Retries are the enemy of once** — In a distributed system, records are retried after crashes and timeouts. **Exactly-once is the property that a retried record does not count twice.**
@@ -52,22 +34,6 @@ flowchart TD
 ### Idempotency and deduplication
 
 > **Why this matters:** Exactly-once is not a single mechanism — it is deduplication at the boundaries plus idempotency at the effects, so this section separates the two and shows where each applies.
-
-```mermaid
-flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  n0["<b>1. Idempotency</b><br/>the same operation yields the same result however often run"]:::start
-  n1["<b>2. Deduplication</b><br/>recognize a repeated input and skip it"]:::core
-  n2["<b>3. Shuffle dedup</b><br/>a repeated delivery across a shuffle must not double-count"]:::step
-  n3["<b>4. The guard</b><br/>a seen-set or stable key turns a replay into a no-op"]:::warn
-  n0 -->|"1. complementary to"| n1
-  n1 -->|"2. the distributed case"| n2
-  n2 -->|"3. implemented with"| n3
-```
 
 1. **Idempotent operations** — An operation is **idempotent** if performing it many times has the same effect as once. **Setting a value to 10 is idempotent; incrementing by 10 is not.**
 
@@ -95,22 +61,6 @@ flowchart TD
 ### Side effects — the hard part
 
 > **Why this matters:** The truly hard case is when the pipeline must do something in the outside world — send an email, call a payment API — because that effect cannot be undone by recomputation, so this section covers the patterns that make side effects tractable.
-
-```mermaid
-flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  n0["<b>1. Pure transforms are easy</b><br/>recompute and the same output follows"]:::start
-  n1["<b>2. Side effects are not idempotent</b><br/>a credit, an email, an external write does not undo itself"]:::warn
-  n2["<b>3. Isolate side effects</b><br/>keep the heavy compute pure; concentrate effects at the edge"]:::core
-  n3["<b>4. The two tools</b><br/>an idempotency key, or a two-phase commit with the sink"]:::step
-  n0 -->|"1. the hard part is"| n1
-  n1 -->|"2. so"| n2
-  n2 -->|"3. made safe by"| n3
-```
 
 1. **Why side effects resist exactly-once** — A side effect touches the outside world, and the outside world cannot be "recomputed" the way per-key state can. **Sending an email twice is visible; a database increment applied twice is money.**
 
@@ -192,13 +142,6 @@ flowchart TD
   R -->|"comprises"| P2["without the key, two attempts would double-bill"]
 ```
 
-```mermaid
-flowchart LR
-  S["replayable source"] -->|"replays events"| D["dedup shuffle"]
-  D -->|"drops duplicates"| K["idempotent sink"]
-  K -->|"charges once"| X["external system"]
-```
-
 ```java
 // SYSTEM DESIGN — a crash and retry still charge the card exactly once via the idempotency key
 // DEF: idempotency key — a unique id the external system deduplicates on = "order-99"
@@ -230,15 +173,6 @@ A payment pipeline charges cards from a stream; after a crash, some charges were
 - Replayable source — Kafka offset
 - Dedup — drop duplicate deliveries
 
-```mermaid
-flowchart LR
-  S["source (replayable)"] -->|"replays"| D["dedup shuffle"]
-  D -->|"drops duplicates"| K["sink with idempotency key"]
-  K -->|"calls"| P["payment API"]
-  P -->|key seen| N["no-op"]
-  P -->|key new| C["charge once"]
-```
-
 ```java
 // order-99 charge $10
 //   attempt 1 -> API sees key new -> charge, ledger 0->10
@@ -265,13 +199,6 @@ A metrics pipeline recomputes per-key counts from a replayable source after a cr
 - Dedup — record ids
 - Idempotent sink — upsert count
 
-```mermaid
-flowchart LR
-  R["replay from offset"] -->|"replays"| D["dedup"]
-  D -->|"upserts"| U["upsert count"]
-  U -->|"writes"| S[(count = 10)]
-```
-
 ```java
 // count before crash = 10
 //   replay delivers same records -> dedup drops duplicates
@@ -296,13 +223,11 @@ _From the 28 problems:_ 20-metrics-monitoring · 21-ad-click-aggregation
 
 An idempotent operation has the same effect whether run once or many times — SET 42 -> 10 is idempotent, ADD 10 is not.
 
-```mermaid
-flowchart LR
-  S["source (replayable)"] -->|"replays"| D["dedup shuffle"]
-  D -->|"drops duplicates"| K["sink with idempotency key"]
-  K -->|"calls"| P["payment API"]
-  P -->|key seen| N["no-op"]
-  P -->|key new| C["charge once"]
+```java
+// order-99 charge $10
+//   attempt 1 -> API sees key new -> charge, ledger 0->10
+//   retry      -> API sees key seen -> no-op, ledger stays 10
+//   without key: 2 attempts -> ledger 0->10->20 (double bill)
 ```
 
 

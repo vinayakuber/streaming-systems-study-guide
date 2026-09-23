@@ -10,22 +10,6 @@ _Also known as: SS Ch04 · Session Windows · Fixed Window · Sliding Window · 
 
 > **Why this matters:** Different questions need different event-time boundaries, so this section distinguishes the three canonical window shapes and when each is the right tool.
 
-```mermaid
-flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  n0["<b>1. Fixed windows</b><br/>equal, non-overlapping event-time slices"]:::start
-  n1["<b>2. Sliding windows</b><br/>fixed length with a period - overlapping or with gaps"]:::step
-  n2["<b>3. Session windows</b><br/>activity-bounded - a gap of inactivity closes the window"]:::core
-  n3["<b>4. Which when</b><br/>fixed for uniform accounting, sliding for moving views, session for bursts"]:::warn
-  n0 -->|"1. vs"| n1
-  n1 -->|"2. vs"| n2
-  n2 -->|"3. choose by"| n3
-```
-
 1. **Fixed (tumbling) windows** — Fixed windows partition time into **equal, non-overlapping, contiguous** spans — every event belongs to exactly one window. They answer "how many per hour".
 
 2. **Sliding (hopping) windows** — Sliding windows are **fixed-length, overlapping** spans defined by a window size and a slide. They answer "what is the rolling 5-minute average, updated every minute".
@@ -51,24 +35,6 @@ flowchart TD
 
 > **Why this matters:** Windowing is more than "which bucket" — a window is assigned, merged, grouped, triggered, accumulated, and finally garbage-collected, so this section walks the full lifecycle in order.
 
-```mermaid
-flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  n0["<b>1. Assign</b><br/>each event is placed into one or more windows"]:::start
-  n1["<b>2. Merge</b><br/>session windows merge when an event bridges a gap"]:::step
-  n2["<b>3. Group and trigger</b><br/>events grouped by key; triggers decide when to emit"]:::core
-  n3["<b>4. Accumulate</b><br/>pane results fold together per the accumulation mode"]:::step
-  n4["<b>5. Garbage collect</b><br/>state for a closed window is dropped once it can never change"]:::stop
-  n0 -->|"1. then"| n1
-  n1 -->|"2. then"| n2
-  n2 -->|"3. then"| n3
-  n3 -->|"4. finally"| n4
-```
-
 1. **Assign** — Each element is assigned to a set of windows by its event time and the windowing function. **A sliding window assigns one event to several windows at once.**
 
 2. **Merge** — Session windows **merge**: when a new event lands inside the gap of two existing sessions, the two sessions and the event collapse into one window. Merging is what makes sessions dynamic.
@@ -93,22 +59,6 @@ flowchart TD
 ### Session semantics and pitfalls
 
 > **Why this matters:** Sessions are powerful but subtle — their boundaries change as data arrives, so this section covers what the lifecycle implies and where implementations get it wrong.
-
-```mermaid
-flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  n0["<b>1. Sessions are keyed</b><br/>a session is per user or per key, never global"]:::start
-  n1["<b>2. Merging after emission</b><br/>a late event can bridge two already-emitted sessions"]:::warn
-  n2["<b>3. Retractions</b><br/>the pipeline must cancel the earlier panes and emit the merged one"]:::core
-  n3["<b>4. Gap threshold tuning</b><br/>too small - one session splits; too large - distinct sessions merge"]:::step
-  n0 -->|"1. the trap is"| n1
-  n1 -->|"2. handled by"| n2
-  n2 -->|"3. the knob is"| n3
-```
 
 1. **A session can merge late** — A late event can bridge two sessions that were already emitted separately. **The pipeline must retract the two earlier panes and emit the merged one** — this is why accumulation mode matters.
 
@@ -185,14 +135,6 @@ flowchart TD
   R -->|"comprises"| P2["the merged pane is emitted so the store shows one session, not three"]
 ```
 
-```mermaid
-flowchart LR
-  E["event source"] -->|"emits sessions"| A["window assigner"]
-  A -->|"keys by session"| M["session merger"]
-  M -->|"retracts stale panes"| T["trigger / retraction emitter"]
-  T -->|"updates result"| S["analytics store"]
-```
-
 ```java
 // SYSTEM DESIGN — a late event merges two sessions and the pipeline retracts the stale panes
 // DEF: session gap — the inactivity threshold = 30 min
@@ -224,14 +166,6 @@ An analytics pipeline reports 'sessions per user', but a user who pauses for 20 
 - Merge — collapse two sessions + the bridging event
 - Retraction — cancel the earlier panes
 
-```mermaid
-flowchart LR
-  E["event @ 12:20"] -->|"checks gap"| G{gap <= 30min?}
-  G -->|yes to both| M["merge s1 + s2 + event"]
-  M -->|"retracts"| R["retract s1, s2"]
-  R -->|"emits"| O["emit merged session"]
-```
-
 ```java
 // s1 [12:00,12:10), s2 [12:40,12:50)
 //   late event @ 12:20 -> bridges gap -> merge
@@ -258,12 +192,6 @@ A dashboard needs both an hourly total and a rolling 10-minute average, but the 
 - Sliding window — rolling 10-min average
 - Window size + slide — defines the overlap
 
-```mermaid
-flowchart LR
-  H["hourly total"] -->|"uses"| F["fixed [12:00,13:00)"]
-  R["rolling avg"] -->|"uses"| S["sliding 10min / 1min"]
-```
-
 ```java
 // fixed   : event @ 12:04 belongs to [12:00,12:05) only
 // sliding : event @ 12:04 belongs to [11:55,12:05), [11:56,12:06), ... [12:04,12:14)
@@ -287,12 +215,11 @@ _From the 28 problems:_ 20-metrics-monitoring
 
 Fixed windows partition time into equal, non-overlapping, contiguous spans; each event belongs to exactly one window.
 
-```mermaid
-flowchart LR
-  E["event @ 12:20"] -->|"checks gap"| G{gap <= 30min?}
-  G -->|yes to both| M["merge s1 + s2 + event"]
-  M -->|"retracts"| R["retract s1, s2"]
-  R -->|"emits"| O["emit merged session"]
+```java
+// s1 [12:00,12:10), s2 [12:40,12:50)
+//   late event @ 12:20 -> bridges gap -> merge
+//   retract s1 (3), retract s2 (2)
+//   emit sMerged [12:00,12:50) count = 3+2+1 = 6
 ```
 
 

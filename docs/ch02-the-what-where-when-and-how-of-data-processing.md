@@ -10,26 +10,6 @@ _Also known as: SS Ch02 · Beam Model · Transformations · Windowing · Trigger
 
 > **Why this matters:** Before anything can be said about correctness or latency, a pipeline must say what it computes and over which slice of event time, so this section fixes those two axes first.
 
-```mermaid
-flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  n0["<b>1. A pipeline is underspecified</b><br/>names alone - sum, join, filter - leave four questions open"]:::start
-  n1["<b>2. What - transformations</b><br/>the functions applied to each element"]:::step
-  n2["<b>3. Where - windowing</b><br/>the event-time slice a transformation runs over"]:::core
-  n3["<b>4. When - triggers</b><br/>when results materialize in processing time"]:::step
-  n4["<b>5. How - accumulation</b><br/>how later results relate to earlier ones"]:::step
-  n5["<b>6. Recap</b><br/>all four together fully specify the pipeline"]:::stop
-  n0 -->|"1. first question"| n1
-  n1 -->|"2. second question"| n2
-  n2 -->|"3. third question"| n3
-  n3 -->|"4. fourth question"| n4
-  n4 -->|"5. together"| n5
-```
-
 1. **What: transformations** — The answer to "what" is a computation over the data — a sum, a filter, a join, a keyed aggregation. In the Beam model **a pipeline is a directed acyclic graph of transforms, and the transform decides what the output is.**
 
 2. **Where: windowing** — The answer to "where" is the slice of event time a value is computed over. **Windowing cuts an unbounded stream into finite, event-time-aligned pieces** — fixed windows, sliding windows, session windows — so an aggregate has a well-defined boundary.
@@ -53,24 +33,6 @@ flowchart TD
 ### When — triggers and watermarks
 
 > **Why this matters:** A window is useless until the pipeline decides when to emit its result, and that "when" is a processing-time decision driven by triggers and watermarks, so this section covers the timing machinery that the rest of the book leans on.
-
-```mermaid
-flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  n0["<b>1. When = materialization</b><br/>the moment results become visible downstream"]:::start
-  n1["<b>2. Triggers</b><br/>repeated signals - processing time, count, or data driven"]:::step
-  n2["<b>3. Watermarks</b><br/>a monotonic estimate of event-time completeness"]:::core
-  n3["<b>4. Allowed lateness</b><br/>a data-driven trigger for stragglers after the watermark"]:::warn
-  n4["<b>5. Recap</b><br/>triggers decide when; watermarks decide what is late"]:::stop
-  n0 -->|"1. fired by"| n1
-  n1 -->|"2. often gated on"| n2
-  n2 -->|"3. late data handled by"| n3
-  n3 -->|"4. both shape"| n4
-```
 
 1. **Triggers decide when results materialize** — A trigger is the mechanism that says "emit the current window result now". **Triggers can fire on processing time (every N seconds), on event-time progress (the watermark passes the window end), or on data arrival (count of elements).**
 
@@ -97,29 +59,26 @@ flowchart TD
 
 > **Why this matters:** When a window emits more than once, the consumer must know whether each result replaces or refines the previous one, so this section covers the four accumulation modes that relate later panes to earlier ones.
 
-```mermaid
-flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  n0["<b>1. How = refinement</b><br/>the relationship between a new result and the previous one"]:::start
-  n1["<b>2. Discarding</b><br/>each pane is independent - downstream gets disjoint results"]:::step
-  n2["<b>3. Accumulating</b><br/>each pane folds into a running total - a growing result"]:::core
-  n3["<b>4. Accumulating and retracting</b><br/>the running total plus a retraction of the prior value"]:::warn
-  n4["<b>5. Recap</b><br/>retractions keep a downstream accumulator exact"]:::stop
-  n0 -->|"1. simplest"| n1
-  n0 -->|"2. moving sum"| n2
-  n2 -->|"3. exact version of"| n3
-  n3 -->|"4. the point of"| n4
-```
-
 1. **Accumulation relates panes** — The answer to "how" is the relationship between a window's successive results. **Accumulating mode adds to the previous pane; discarding mode replaces it; accumulating-and-retracting also emits a retraction so downstream can undo the old value.**
 
 2. **Why retractions exist** — If a downstream system stores the first result, a later refined result would double-count unless the old value is retracted. **Accumulating-and-retracting emits the delta and a retraction of the previous pane, so a sink can stay correct.**
 
 3. **The four questions are a checklist** — Ask all four — what, where, when, how — of any pipeline and its behavior is fully specified. **Omit "when" and you cannot reason about latency; omit "how" and you cannot reason about correctness under refinement.**
+
+```java
+// DATA SERVER SIDE — one window emits twice; the accumulation mode decides whether the sink's total is 3, 4, or 7
+// DEF: pane — one emitted result for the window; pane1 = {sum: 3}, pane2 = {sum: 4}
+// DEF: sink — the downstream store that persists the window result; here keyed by window id "12:00-12:05"
+// DEF: retraction — a signal that undoes pane1 so a sink can subtract it
+// STATE (before):
+//    sink_total : { "12:00-12:05": 0 }
+// -> input : window [12:00, 12:05) emits pane1 {sum: 3}, then a late event raises it to pane2 {sum: 4}
+//    step 1 · accumulating mode -> sink_total["12:00-12:05"] : 0 -> 3, then 3 -> 7   BECAUSE each pane adds to the previous
+//    step 2 · discarding mode -> sink_total["12:00-12:05"] : 0 -> 3, then 3 -> 4   BECAUSE pane2 replaces pane1
+//    step 3 · accumulating-and-retracting mode -> sink_total["12:00-12:05"] : 0 -> 3, then 3 -> 4 via -3 +4   BECAUSE the retraction undoes pane1 before pane2 lands
+// <- correct total : 4 in discarding and retracting modes, 7 in accumulating   BECAUSE 7 double-counts the same window's two panes
+//    derivation : retracting total = 3 - 3 + 4 = 4   BECAUSE the retraction subtracts the old pane exactly once
+```
 
 
 ## System Design Interview
@@ -176,14 +135,6 @@ flowchart TD
   R -->|"comprises"| P2["a late straggler updates sum : 10 -&gt; 20 if inside allowed lateness"]
 ```
 
-```mermaid
-flowchart LR
-  W["event source"] -->|"emits purchase"| T["stream + watermark"]
-  T -->|"assigns window"| C["window assigner"]
-  C -->|"accumulates"| A["per-window state"]
-  A -->|"reads count"| R["dashboard"]
-```
-
 ```java
 // SYSTEM DESIGN — a purchase flows through a fixed window; the watermark closes it on time, allowed lateness catches a straggler
 // DEF: purchase — the event {user: 42, amount: 10, event_time: "12:04:00"}
@@ -215,16 +166,6 @@ A real-time dashboard sums purchases per 5-minute window, but it can't say wheth
 - On-time trigger — fires at the watermark
 - Allowed lateness — bounds late updates
 
-```mermaid
-flowchart LR
-  W["window 12:00-12:05"] -->|"closes when"| WM{watermark >= 12:05?}
-  WM -->|no| E[early / wait]
-  WM -->|yes| O[emit on-time]
-  S["late event @ 12:04:59"] -->|"arrives late"| L{within allowed lateness?}
-  L -->|yes| U[update + re-emit]
-  L -->|no| D[drop]
-```
-
 ```java
 // window [12:00,12:05), sum = 3
 //   watermark 12:05:00 -> on-time trigger -> emit {sum:3}
@@ -252,14 +193,6 @@ Two teams build 'the same' streaming aggregation, but one emits a running total 
 - Retraction — undo the previous pane
 - Sink — applies retractions correctly
 
-```mermaid
-flowchart LR
-  P1["pane 1: sum=3"] -->|"writes"| S[(sink=3)]
-  P2["pane 2: sum=4"] -->|"retracts"| R["retract pane 1"]
-  R -->|"replaces"| S
-  P2 -->|"writes"| S2[(sink=4)]
-```
-
 ```java
 // accumulating : sink = 3 then 3+4 = 7 -> double counts
 // retracting  : pane1 {sum:3} -> retract -> pane2 {sum:4}
@@ -283,14 +216,12 @@ _From the 28 problems:_ 21-ad-click-aggregation
 
 Transformations are the computations — sum, filter, join, keyed aggregation — applied to the data.
 
-```mermaid
-flowchart LR
-  W["window 12:00-12:05"] -->|"closes when"| WM{watermark >= 12:05?}
-  WM -->|no| E[early / wait]
-  WM -->|yes| O[emit on-time]
-  S["late event @ 12:04:59"] -->|"arrives late"| L{within allowed lateness?}
-  L -->|yes| U[update + re-emit]
-  L -->|no| D[drop]
+```java
+// window [12:00,12:05), sum = 3
+//   watermark 12:05:00 -> on-time trigger -> emit {sum:3}
+//   straggler event_time 12:04:59 at 12:06 -> allowed lateness 1 min
+//     -> update sum 3->4, emit late pane {sum:4}
+//   beyond allowed lateness -> drop the straggler
 ```
 
 

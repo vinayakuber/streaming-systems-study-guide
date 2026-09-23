@@ -10,26 +10,6 @@ _Also known as: SS Ch01 · Event Time · Processing Time · Bounded vs Unbounded
 
 > **Why this matters:** Every later chapter assumes you can tell a bounded dataset from an unbounded one and an event-time answer from a processing-time answer, so this section pins the vocabulary down before any of the mechanics.
 
-```mermaid
-flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  n0["<b>1. The term is overloaded</b><br/>real-time, low latency, continuous, event-driven, merely not-batch"]:::start
-  n1["<b>2. The book's precise meaning</b><br/>a data-processing engine designed for infinite datasets"]:::step
-  n2["<b>3. Unbounded data</b><br/>a dataset that arrives gradually and never completes"]:::core
-  n3["<b>4. Two clocks per event</b><br/>event time vs processing time - they disagree"]:::warn
-  n4["<b>5. Four questions</b><br/>what, where, when, how - the rest of the book"]:::step
-  n5["<b>6. Recap</b><br/>streaming = designed for unbounded data, not merely fast"]:::stop
-  n0 -->|"1. narrowed to"| n1
-  n1 -->|"2. built around"| n2
-  n2 -->|"3. every event carries"| n3
-  n3 -->|"4. answered by"| n4
-  n4 -->|"5. the one-sentence summary"| n5
-```
-
 1. **The term "streaming" is overloaded** — "Streaming" means different things to different teams — real-time, low latency, continuous computation, event-driven, or merely "not batch". The book pins it to one precise meaning: **a data processing engine designed with infinite datasets in mind, and a dataset that is unbounded — one that arrives gradually and never completes.**
 
 2. **Two critical dimensions of time** — Every event carries two timestamps that disagree. **Event time** is when the event actually happened (recorded by the producer). **Processing time** is when the processing system observed it. They diverge because of network delay, queueing, backpressure, and replays.
@@ -56,50 +36,30 @@ flowchart TD
 
 > **Why this matters:** Because the two clocks disagree, a pipeline must decide which one its answers are about, so this section makes the distinction concrete with a metric that changes meaning when the clock is wrong.
 
-```mermaid
-flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  n0["<b>1. Event time</b><br/>when the event actually happened, stamped by the producer"]:::start
-  n1["<b>2. Processing time</b><br/>when the pipeline observed the event"]:::step
-  n2["<b>3. They diverge</b><br/>network delay, queueing, backpressure, replay"]:::warn
-  n3["<b>4. Correct answers need event time</b><br/>processing-time buckets silently shift under load"]:::core
-  n4["<b>5. The lag is the cost</b><br/>waiting for stragglers buys correctness"]:::stop
-  n0 -->|"1. contrasted with"| n1
-  n1 -->|"2. the gap is"| n2
-  n2 -->|"3. so bucket by"| n3
-  n3 -->|"4. measured as"| n4
-```
-
 1. **Event time is the meaningful one** — For almost any question about users or business — clicks per minute, latency, correctness — the answer should be keyed to **when things happened**, not when your system happened to look at them.
 
 2. **Processing time is the cheap one** — Processing time needs no special machinery — the system clock is right there. **It is the correct clock only for questions about the system itself**, such as current queue depth or "how many events did I process this second".
 
 3. **The lag between them is the cost of correctness** — Event-time correctness requires waiting for stragglers, and waiting costs latency. **The whole art of the Beam model is choosing how long to wait (watermarks) and what to do with events that arrive later (triggers, allowed lateness).**
 
+```java
+// DATA SERVER SIDE — one click carries two timestamps; bucketing by the wrong clock moves the count into the wrong minute
+// DEF: minute — the dashboard's 60-second reporting bucket; here "12:00" and "12:04"
+// DEF: event time — when the click happened, stamped by the device = "12:00:59"
+// DEF: processing time — when the busy pipeline observed it = "12:04:11"
+// STATE (before):
+//    minute_counts : { "12:00": 0, "12:04": 0 }
+// -> click : {user: 42, url: "/shoe/x", event_time: "12:00:59", processing_time: "12:04:11"}
+//    step 1 · bucket by event time -> minute_counts["12:00"] : 0 -> 1   BECAUSE the user clicked at 12:00:59
+//    step 2 · bucket by processing time -> minute_counts["12:04"] : 0 -> 1   BECAUSE the pipeline saw it at 12:04:11
+//    step 3 · the dashboard reports the two answers -> the 12:00 and 12:04 counts disagree   BECAUSE the two clocks are 3m12s apart
+// <- correct answer : minute_counts["12:00"] = 1 is the user truth; the 12:04 count is a pipeline artifact
+//    derivation : lag = 12:04:11 - 12:00:59 = 3m12s   BECAUSE processing time trails event time by the queueing delay
+```
+
 ### Three shapes of data
 
 > **Why this matters:** A pipeline's design falls out of whether its input has an end, so this section separates bounded, unbounded-as-batch, and unbounded-as-streaming and shows which machinery each forces on you.
-
-```mermaid
-flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  n0["<b>1. Bounded</b><br/>a finite dataset - the batch world"]:::start
-  n1["<b>2. Unbounded as batch</b><br/>infinite data chopped into finite windows, each run as a batch"]:::step
-  n2["<b>3. Unbounded as streaming</b><br/>infinite data processed continuously as it arrives"]:::core
-  n3["<b>4. The bridge</b><br/>batch is a special case of streaming - a bounded stream"]:::warn
-  n0 -->|"1. grows into"| n1
-  n1 -->|"2. re-framed as"| n2
-  n2 -->|"3. subsumes"| n3
-  n3 -->|"4. loops back to"| n0
-```
 
 1. **Bounded data** — A finite dataset — one day of logs, a database snapshot. **You can process it to completion; when the job ends you have a final answer.** Classic batch engines (MapReduce) assume this shape.
 
@@ -177,14 +137,6 @@ flowchart TD
   R -->|"comprises"| P2["the dashboard reads the live window counts"]
 ```
 
-```mermaid
-flowchart LR
-  W["producer"] -->|"emits click"| T["unbounded stream"]
-  T -->|"delivers"| C["processor"]
-  C -->|"buckets by event time"| A["window state"]
-  A -->|"reads count"| R["dashboard"]
-```
-
 ```java
 // SYSTEM DESIGN — a producer emits a click, the stream delays it, the processor buckets by event time, the dashboard reads the count
 // DEF: click — the immutable event {user: 42, url: "/shoe/x", event_time: "12:00:59"}
@@ -215,14 +167,6 @@ A dashboard shows clicks per minute, but under a traffic spike the numbers shift
 - Processing time — when the pipeline observed it
 - Lag — the gap between the two clocks
 
-```mermaid
-flowchart LR
-  C["click @ 12:00:59"] -->|"delayed by"| N["network + queue"]
-  N -->|"observed at"| P["processor @ 12:04:11"]
-  P -->|processing time| B1["12:04 bucket (wrong)"]
-  C -->|event time| B2["12:00 bucket (right)"]
-```
-
 ```java
 // the click carries two timestamps
 //   event_time    = 12:00:59  (the user's real click time)
@@ -250,14 +194,6 @@ A team runs a daily ETL job over a click stream. A fraud alert that should fire 
 - Batch chunk — the artificial 24h boundary
 - Streaming — process each event on arrival
 
-```mermaid
-flowchart LR
-  E["click stream (unbounded)"] -->|"sliced into"| B["daily batch chunk"]
-  B -->|next midnight| A["answer up to 24h late"]
-  E -->|"processed as"| S["streaming"]
-  S -->|on arrival| L["answer ~ live"]
-```
-
 ```java
 // unbounded-as-batch : slice into 1-day chunks, run a job per chunk
 //   -> a change is reflected only at the next chunk boundary (up to 24h)
@@ -282,12 +218,12 @@ _From the 28 problems:_ 21-ad-click-aggregation · 20-metrics-monitoring
 
 Event time is the time at which an event actually occurred, as stamped by the producing system.
 
-```mermaid
-flowchart LR
-  C["click @ 12:00:59"] -->|"delayed by"| N["network + queue"]
-  N -->|"observed at"| P["processor @ 12:04:11"]
-  P -->|processing time| B1["12:04 bucket (wrong)"]
-  C -->|event time| B2["12:00 bucket (right)"]
+```java
+// the click carries two timestamps
+//   event_time    = 12:00:59  (the user's real click time)
+//   processing_time = 12:04:11 (when the busy pipeline saw it)
+// bucket by processing_time -> the click lands at 12:04 -> wrong
+// bucket by event_time      -> the click lands at 12:00 -> right
 ```
 
 

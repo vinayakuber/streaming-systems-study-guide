@@ -10,24 +10,6 @@ _Also known as: SS Ch03 · Watermark · Event-time Progress · Heuristic Waterma
 
 > **Why this matters:** A window cannot close until the pipeline believes no more data for that window will arrive, so watermarks exist to state that belief explicitly and let downstream stages act on it.
 
-```mermaid
-flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  n0["<b>1. Unbounded data has no end</b><br/>so a window can never know it is complete"]:::start
-  n1["<b>2. Watermark = completeness estimate</b><br/>a statement of how complete event time is right now"]:::core
-  n2["<b>3. Monotonic</b><br/>the estimate only moves forward, never backward"]:::step
-  n3["<b>4. Perfect vs heuristic</b><br/>exact lag is unknowable in practice - heuristics approximate it"]:::warn
-  n4["<b>5. After the watermark</b><br/>events with older event times are late"]:::stop
-  n0 -->|"1. answered by"| n1
-  n1 -->|"2. it is"| n2
-  n2 -->|"3. two kinds"| n3
-  n3 -->|"4. anything older is"| n4
-```
-
 1. **A timestamp that moves forward** — A watermark is a **monotonically increasing** event-time value: once it advances past a point, the pipeline declares it will not see event time earlier than that point again.
 
 2. **It is a statement about completeness** — The watermark is the pipeline's best estimate of event-time completeness. **It is not the wall clock and it is not a guarantee — it is a promise the pipeline makes so triggers can fire.**
@@ -51,24 +33,6 @@ flowchart TD
 ### Heuristic watermarks and skew
 
 > **Why this matters:** Real sources are out of order — a phone with no network can send an hour-old event — so pipelines estimate watermarks from what they have seen, and the estimate can be wrong in both directions.
-
-```mermaid
-flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  n0["<b>1. Perfect watermarks are impossible</b><br/>you cannot know the true lag of every event"]:::start
-  n1["<b>2. Heuristic watermark</b><br/>estimate lag from what is observed - arrival minus event time"]:::core
-  n2["<b>3. Skew</b><br/>the out-of-orderness bound, often a percentile of observed lag"]:::step
-  n3["<b>4. Too short vs too long</b><br/>too short - more late data; too long - higher latency"]:::warn
-  n4["<b>5. Recap</b><br/>the skew parameter trades correctness against latency"]:::stop
-  n0 -->|"1. so use a"| n1
-  n1 -->|"2. parameterized by"| n2
-  n2 -->|"3. the tuning tension"| n3
-  n3 -->|"4. summarized as"| n4
-```
 
 1. **Estimate from observed event time minus lag** — A common heuristic: track the **maximum event time seen so far** and subtract a fixed skew (a bound on out-of-orderness). **watermark = max_seen_event_time - skew.**
 
@@ -94,22 +58,6 @@ flowchart TD
 ### Propagation and correctness
 
 > **Why this matters:** A watermark only matters if every downstream stage sees a coherent value, and a coherent value only helps if the pipeline knows what to do when the estimate is wrong, so this section covers propagation and the failure mode.
-
-```mermaid
-flowchart TD
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-  n0["<b>1. One watermark per source</b><br/>each input has its own estimate of completeness"]:::start
-  n1["<b>2. Propagated through stages</b><br/>a stage's output watermark is the min of its inputs"]:::core
-  n2["<b>3. Upstream changes flow down</b><br/>a source updating its watermark advances downstream estimates"]:::step
-  n3["<b>4. Correctness depends on it</b><br/>a wrong watermark emits results too early or too late"]:::warn
-  n0 -->|"1. combined by"| n1
-  n1 -->|"2. as"| n2
-  n2 -->|"3. because"| n3
-```
 
 1. **The watermark is the minimum across inputs** — When a stage has multiple upstream sources, **its watermark is the minimum of its inputs' watermarks** — a stage cannot claim more completeness than its least-complete input.
 
@@ -190,14 +138,6 @@ flowchart TD
   R -->|"comprises"| P2["a late pane re-emits the updated window result to the dashboard"]
 ```
 
-```mermaid
-flowchart LR
-  S["sources"] -->|"report event time"| G["watermark generator"]
-  G -->|"advances watermark"| W["window assigner"]
-  W -->|"closes windows"| T["trigger / emitter"]
-  T -->|"emits results"| D["dashboard"]
-```
-
 ```java
 // SYSTEM DESIGN — a watermark closes a window on time and allowed lateness catches one straggler
 // DEF: watermark — the pipeline's completeness signal = max_seen - skew = 12:06:30
@@ -230,17 +170,6 @@ A mobile analytics pipeline groups events by event time, but phones that go offl
 - Allowed lateness — accepts late data for a bounded horizon
 - On-time trigger — fires at the watermark
 
-```mermaid
-flowchart LR
-  E["events"] -->|"report"| M["max seen event time"]
-  M -->|"subtract skew"| W["watermark = max - skew"]
-  W -->|"advances"| T{passes window end?}
-  T -->|yes| O[emit on-time]
-  L["late event"] -->|"arrives late"| A{within allowed lateness?}
-  A -->|yes| U[update + re-emit]
-  A -->|no| D[drop]
-```
-
 ```java
 // max_seen = 12:08:30, skew = 2 min
 //   watermark = 12:08:30 - 2:00 = 12:06:30
@@ -268,14 +197,6 @@ A streaming join reads two sources, one fast and one slow; results for 12:05 kee
 - Per-source watermarks
 - Join buffer — holds the fast side
 
-```mermaid
-flowchart LR
-  A["fast source wm=12:06"] -->|"contributes"| J{join watermark}
-  B["slow source wm=12:04"] -->|"contributes"| J
-  J -->|"takes min"| W["wm = min = 12:04"]
-  W -->|"gates"| R["emit only when both sides complete"]
-```
-
 ```java
 // stage_watermark = min(12:06:00, 12:04:30) = 12:04:30
 //   join keyed at 12:05:00 -> cannot emit -> waits on slow source
@@ -299,15 +220,12 @@ _From the 28 problems:_ 21-ad-click-aggregation
 
 A perfect watermark is possible for ordered inputs — a single log consumed in order, or ingestion-time processing.
 
-```mermaid
-flowchart LR
-  E["events"] -->|"report"| M["max seen event time"]
-  M -->|"subtract skew"| W["watermark = max - skew"]
-  W -->|"advances"| T{passes window end?}
-  T -->|yes| O[emit on-time]
-  L["late event"] -->|"arrives late"| A{within allowed lateness?}
-  A -->|yes| U[update + re-emit]
-  A -->|no| D[drop]
+```java
+// max_seen = 12:08:30, skew = 2 min
+//   watermark = 12:08:30 - 2:00 = 12:06:30
+//   window [12:00,12:05) -> closed (12:06:30 > 12:05:00)
+//   event @ 12:05:10 arrives -> 80 s older than watermark -> late
+//   allowed lateness 1 min -> still accepted -> re-emit
 ```
 
 
