@@ -143,9 +143,9 @@ _Role: two streams — feed the join with event-time rows_
 ```mermaid
 flowchart TD
   R["click stream + impression stream"]
-  R --> P0["a click {campaign: #quot;C1#quot;, event_time: #quot;12:03:00#quot;} arrives"]
-  R --> P1["an impression {campaign: #quot;C1#quot;, event_time: #quot;12:02:00#quot;} arrives"]
-  R --> P2["each side carries its own watermark"]
+  R -->|"comprises"| P0["a click {campaign: #quot;C1#quot;, event_time: #quot;12:03:00#quot;} arrives"]
+  R -->|"comprises"| P1["an impression {campaign: #quot;C1#quot;, event_time: #quot;12:02:00#quot;} arrives"]
+  R -->|"comprises"| P2["each side carries its own watermark"]
 ```
 
 ### windowed join (buffer + watermark)
@@ -155,9 +155,9 @@ _Role: windowed join — buffers one side and matches within a window_
 ```mermaid
 flowchart TD
   R["windowed join (buffer + watermark)"]
-  R --> P0["the impression buffer holds rows within 5 min of a click"]
-  R --> P1["the click probes the buffer and finds the 12:02 impression"]
-  R --> P2["the match is held until both watermarks pass 12:05:00"]
+  R -->|"comprises"| P0["the impression buffer holds rows within 5 min of a click"]
+  R -->|"comprises"| P1["the click probes the buffer and finds the 12:02 impression"]
+  R -->|"comprises"| P2["the match is held until both watermarks pass 12:05:00"]
 ```
 
 ### retraction emitter
@@ -167,9 +167,9 @@ _Role: retraction emitter — corrects matches when late data arrives_
 ```mermaid
 flowchart TD
   R["retraction emitter"]
-  R --> P0["a late impression within allowed lateness changes the match"]
-  R --> P1["the old match is retracted downstream"]
-  R --> P2["the corrected match is emitted"]
+  R -->|"comprises"| P0["a late impression within allowed lateness changes the match"]
+  R -->|"comprises"| P1["the old match is retracted downstream"]
+  R -->|"comprises"| P2["the corrected match is emitted"]
 ```
 
 ### attribution store
@@ -179,17 +179,17 @@ _Role: attribution store — holds the final matches_
 ```mermaid
 flowchart TD
   R["attribution store"]
-  R --> P0["the store applies retractions so old matches do not double-count"]
-  R --> P1["the final state shows the corrected (click, impression) pair"]
-  R --> P2["join state is garbage-collected past the window + lateness"]
+  R -->|"comprises"| P0["the store applies retractions so old matches do not double-count"]
+  R -->|"comprises"| P1["the final state shows the corrected (click, impression) pair"]
+  R -->|"comprises"| P2["join state is garbage-collected past the window + lateness"]
 ```
 
 ```mermaid
 flowchart LR
-  C["click stream"] --> J["windowed join"]
-  I["impression stream"] --> J
-  J --> R["retraction emitter"]
-  R --> S[(attribution store)]
+  C["click stream"] -->|"joins"| J["windowed join"]
+  I["impression stream"] -->|"joins"| J
+  J -->|"emits matches"| R["retraction emitter"]
+  R -->|"updates"| S[(attribution store)]
 ```
 
 ```java
@@ -225,12 +225,12 @@ An attribution pipeline joins ad impressions with clicks to attribute conversion
 
 ```mermaid
 flowchart LR
-  C["clicks"] --> J{join window}
-  I["impressions"] --> J
-  J --> W{both watermarks pass?}
+  C["clicks"] -->|"joins"| J{join window}
+  I["impressions"] -->|"joins"| J
+  J -->|"checks"| W{both watermarks pass?}
   W -->|yes| E[emit match]
   W -->|no| H[hold]
-  L["late row"] --> R[retract + re-emit]
+  L["late row"] -->|"triggers"| R[retract + re-emit]
 ```
 
 ```java
@@ -261,9 +261,9 @@ A click stream needs each click enriched with the user's current subscription ti
 
 ```mermaid
 flowchart LR
-  C["click stream"] --> T["temporal join"]
-  U[(user table)] --> T
-  T --> E["enriched click"]
+  C["click stream"] -->|"joins"| T["temporal join"]
+  U[(user table)] -->|"joins"| T
+  T -->|"enriches"| E["enriched click"]
 ```
 
 ```java
@@ -291,12 +291,12 @@ A windowed join matches rows whose time attributes are within a window of each o
 
 ```mermaid
 flowchart LR
-  C["clicks"] --> J{join window}
-  I["impressions"] --> J
-  J --> W{both watermarks pass?}
+  C["clicks"] -->|"joins"| J{join window}
+  I["impressions"] -->|"joins"| J
+  J -->|"checks"| W{both watermarks pass?}
   W -->|yes| E[emit match]
   W -->|no| H[hold]
-  L["late row"] --> R[retract + re-emit]
+  L["late row"] -->|"triggers"| R[retract + re-emit]
 ```
 
 

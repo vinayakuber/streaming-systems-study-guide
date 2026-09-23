@@ -135,9 +135,9 @@ _Role: writer — emits events with event time_
 ```mermaid
 flowchart TD
   R["writer (event source)"]
-  R --> P0["a purchase event {user: 42, amount: 10, event_time: #quot;12:04:00#quot;} is emitted"]
-  R --> P1["event time is stamped by the source, not the pipeline"]
-  R --> P2["events are immutable once produced"]
+  R -->|"comprises"| P0["a purchase event {user: 42, amount: 10, event_time: #quot;12:04:00#quot;} is emitted"]
+  R -->|"comprises"| P1["event time is stamped by the source, not the pipeline"]
+  R -->|"comprises"| P2["events are immutable once produced"]
 ```
 
 ### transport (stream)
@@ -147,9 +147,9 @@ _Role: transport — carries events and computes the watermark_
 ```mermaid
 flowchart TD
   R["transport (stream)"]
-  R --> P0["the stream delivers the event and tracks the watermark = 12:05:00"]
-  R --> P1["the watermark says no events earlier than 12:05:00 will arrive"]
-  R --> P2["network delay keeps the watermark behind the wall clock"]
+  R -->|"comprises"| P0["the stream delivers the event and tracks the watermark = 12:05:00"]
+  R -->|"comprises"| P1["the watermark says no events earlier than 12:05:00 will arrive"]
+  R -->|"comprises"| P2["network delay keeps the watermark behind the wall clock"]
 ```
 
 ### collector (window assigner)
@@ -159,9 +159,9 @@ _Role: collector — assigns events to event-time windows_
 ```mermaid
 flowchart TD
   R["collector (window assigner)"]
-  R --> P0["the window assigner places the event in fixed window [12:00, 12:05)"]
-  R --> P1["a trigger decides when the window result is emitted"]
-  R --> P2["allowed lateness keeps the window open for stragglers"]
+  R -->|"comprises"| P0["the window assigner places the event in fixed window [12:00, 12:05)"]
+  R -->|"comprises"| P1["a trigger decides when the window result is emitted"]
+  R -->|"comprises"| P2["allowed lateness keeps the window open for stragglers"]
 ```
 
 ### aggregator/store (per-window state)
@@ -171,17 +171,17 @@ _Role: aggregator/store — holds the running sum per window_
 ```mermaid
 flowchart TD
   R["aggregator/store (per-window state)"]
-  R --> P0["window [12:00, 12:05) sum : 0 -&gt; 10 as the purchase folds in"]
-  R --> P1["an early pane emits {sum: 10}, an on-time pane re-emits {sum: 10}"]
-  R --> P2["a late straggler updates sum : 10 -&gt; 20 if inside allowed lateness"]
+  R -->|"comprises"| P0["window [12:00, 12:05) sum : 0 -&gt; 10 as the purchase folds in"]
+  R -->|"comprises"| P1["an early pane emits {sum: 10}, an on-time pane re-emits {sum: 10}"]
+  R -->|"comprises"| P2["a late straggler updates sum : 10 -&gt; 20 if inside allowed lateness"]
 ```
 
 ```mermaid
 flowchart LR
-  W["event source"] --> T["stream + watermark"]
-  T --> C["window assigner"]
-  C --> A["per-window state"]
-  A --> R["dashboard"]
+  W["event source"] -->|"emits purchase"| T["stream + watermark"]
+  T -->|"assigns window"| C["window assigner"]
+  C -->|"accumulates"| A["per-window state"]
+  A -->|"reads count"| R["dashboard"]
 ```
 
 ```java
@@ -217,10 +217,10 @@ A real-time dashboard sums purchases per 5-minute window, but it can't say wheth
 
 ```mermaid
 flowchart LR
-  W["window 12:00-12:05"] --> WM{watermark >= 12:05?}
+  W["window 12:00-12:05"] -->|"closes when"| WM{watermark >= 12:05?}
   WM -->|no| E[early / wait]
   WM -->|yes| O[emit on-time]
-  S["late event @ 12:04:59"] --> L{within allowed lateness?}
+  S["late event @ 12:04:59"] -->|"arrives late"| L{within allowed lateness?}
   L -->|yes| U[update + re-emit]
   L -->|no| D[drop]
 ```
@@ -254,10 +254,10 @@ Two teams build 'the same' streaming aggregation, but one emits a running total 
 
 ```mermaid
 flowchart LR
-  P1["pane 1: sum=3"] --> S[(sink=3)]
-  P2["pane 2: sum=4"] --> R["retract pane 1"]
-  R --> S
-  P2 --> S2[(sink=4)]
+  P1["pane 1: sum=3"] -->|"writes"| S[(sink=3)]
+  P2["pane 2: sum=4"] -->|"retracts"| R["retract pane 1"]
+  R -->|"replaces"| S
+  P2 -->|"writes"| S2[(sink=4)]
 ```
 
 ```java
@@ -285,10 +285,10 @@ Transformations are the computations — sum, filter, join, keyed aggregation �
 
 ```mermaid
 flowchart LR
-  W["window 12:00-12:05"] --> WM{watermark >= 12:05?}
+  W["window 12:00-12:05"] -->|"closes when"| WM{watermark >= 12:05?}
   WM -->|no| E[early / wait]
   WM -->|yes| O[emit on-time]
-  S["late event @ 12:04:59"] --> L{within allowed lateness?}
+  S["late event @ 12:04:59"] -->|"arrives late"| L{within allowed lateness?}
   L -->|yes| U[update + re-emit]
   L -->|no| D[drop]
 ```

@@ -143,9 +143,9 @@ _Role: streams — feed the SQL engine with event-time data_
 ```mermaid
 flowchart TD
   R["streams (clicks, impressions)"]
-  R --> P0["a click {campaign: #quot;C1#quot;, event_time: #quot;12:03:00#quot;} arrives"]
-  R --> P1["an impression {campaign: #quot;C1#quot;, event_time: #quot;12:02:00#quot;} arrives"]
-  R --> P2["both carry event time for the query's time attribute"]
+  R -->|"comprises"| P0["a click {campaign: #quot;C1#quot;, event_time: #quot;12:03:00#quot;} arrives"]
+  R -->|"comprises"| P1["an impression {campaign: #quot;C1#quot;, event_time: #quot;12:02:00#quot;} arrives"]
+  R -->|"comprises"| P2["both carry event time for the query's time attribute"]
 ```
 
 ### SQL engine (continuous query)
@@ -155,9 +155,9 @@ _Role: SQL engine — runs the query forever_
 ```mermaid
 flowchart TD
   R["SQL engine (continuous query)"]
-  R --> P0["the query groups by TUMBLE(event_time, 5 min) and campaign"]
-  R --> P1["the engine folds each row into the right window"]
-  R --> P2["updating results emit retractions for changed keys"]
+  R -->|"comprises"| P0["the query groups by TUMBLE(event_time, 5 min) and campaign"]
+  R -->|"comprises"| P1["the engine folds each row into the right window"]
+  R -->|"comprises"| P2["updating results emit retractions for changed keys"]
 ```
 
 ### watermark + window
@@ -167,9 +167,9 @@ _Role: watermark + window — decides when results emit_
 ```mermaid
 flowchart TD
   R["watermark + window"]
-  R --> P0["the watermark at 12:06:30 closes the [12:00, 12:05) window"]
-  R --> P1["a HOP window would emit the same event into multiple spans"]
-  R --> P2["a join waits for both sides' watermarks"]
+  R -->|"comprises"| P0["the watermark at 12:06:30 closes the [12:00, 12:05) window"]
+  R -->|"comprises"| P1["a HOP window would emit the same event into multiple spans"]
+  R -->|"comprises"| P2["a join waits for both sides' watermarks"]
 ```
 
 ### sink
@@ -179,16 +179,16 @@ _Role: sink — applies the updating result_
 ```mermaid
 flowchart TD
   R["sink"]
-  R --> P0["the sink receives (C1, 3) retracted then (C1, 4) added"]
-  R --> P1["append-only sinks are simpler but wrong for updating results"]
-  R --> P2["an upsert sink applies retractions correctly"]
+  R -->|"comprises"| P0["the sink receives (C1, 3) retracted then (C1, 4) added"]
+  R -->|"comprises"| P1["append-only sinks are simpler but wrong for updating results"]
+  R -->|"comprises"| P2["an upsert sink applies retractions correctly"]
 ```
 
 ```mermaid
 flowchart LR
-  S["streams"] --> Q["SQL engine"]
-  Q --> W["watermark + window"]
-  W --> K["sink (upsert)"]
+  S["streams"] -->|"feed"| Q["SQL engine"]
+  Q -->|"groups by tumble"| W["watermark + window"]
+  W -->|"closes windows"| K["sink (upsert)"]
 ```
 
 ```java
@@ -224,8 +224,8 @@ A team wants analysts to write ad-click aggregations in SQL over a live stream, 
 
 ```mermaid
 flowchart LR
-  C["clicks stream"] --> Q["SELECT ... GROUP BY TUMBLE(event_time, 5 min)"]
-  Q --> W{watermark >= window end?}
+  C["clicks stream"] -->|"queries"| Q["SELECT ... GROUP BY TUMBLE(event_time, 5 min)"]
+  Q -->|"checks"| W{watermark >= window end?}
   W -->|yes| E[emit result]
   W -->|no| H[hold]
 ```
@@ -258,9 +258,9 @@ A SQL query joins clicks with impressions, but it emits matches before a late im
 
 ```mermaid
 flowchart LR
-  C["clicks wm=12:06"] --> J{join window}
-  I["impressions wm=12:04"] --> J
-  J --> W["emit when both wm pass 12:05"]
+  C["clicks wm=12:06"] -->|"joins"| J{join window}
+  I["impressions wm=12:04"] -->|"joins"| J
+  J -->|"waits for min wm"| W["emit when both wm pass 12:05"]
 ```
 
 ```java
@@ -291,8 +291,8 @@ A continuous query emits updated results as data arrives, rather than reading a 
 
 ```mermaid
 flowchart LR
-  C["clicks stream"] --> Q["SELECT ... GROUP BY TUMBLE(event_time, 5 min)"]
-  Q --> W{watermark >= window end?}
+  C["clicks stream"] -->|"queries"| Q["SELECT ... GROUP BY TUMBLE(event_time, 5 min)"]
+  Q -->|"checks"| W{watermark >= window end?}
   W -->|yes| E[emit result]
   W -->|no| H[hold]
 ```

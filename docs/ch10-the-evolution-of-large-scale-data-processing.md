@@ -143,9 +143,9 @@ _Role: log — retains input history for replay_
 ```mermaid
 flowchart TD
   R["log (replayable)"]
-  R --> P0["the log holds records [ r1, r2, r3 ] with offsets"]
-  R --> P1["retention is long enough to re-run when code changes"]
-  R --> P2["the log is the source of truth"]
+  R -->|"comprises"| P0["the log holds records [ r1, r2, r3 ] with offsets"]
+  R -->|"comprises"| P1["retention is long enough to re-run when code changes"]
+  R -->|"comprises"| P2["the log is the source of truth"]
 ```
 
 ### one streaming pipeline
@@ -155,9 +155,9 @@ _Role: one streaming pipeline — the only codebase_
 ```mermaid
 flowchart TD
   R["one streaming pipeline"]
-  R --> P0["the pipeline folds records into the running result"]
-  R --> P1["windows and watermarks apply whether the input ends or not"]
-  R --> P2["there is no separate batch implementation to drift"]
+  R -->|"comprises"| P0["the pipeline folds records into the running result"]
+  R -->|"comprises"| P1["windows and watermarks apply whether the input ends or not"]
+  R -->|"comprises"| P2["there is no separate batch implementation to drift"]
 ```
 
 ### speed result
@@ -167,9 +167,9 @@ _Role: speed result — the live output_
 ```mermaid
 flowchart TD
   R["speed result"]
-  R --> P0["the live result reflects the current fold of the log"]
-  R --> P1["it is low-latency but uses the same code as any reprocess"]
-  R --> P2["a bug means the result is wrong until replay"]
+  R -->|"comprises"| P0["the live result reflects the current fold of the log"]
+  R -->|"comprises"| P1["it is low-latency but uses the same code as any reprocess"]
+  R -->|"comprises"| P2["a bug means the result is wrong until replay"]
 ```
 
 ### replay path -> corrected result
@@ -179,17 +179,17 @@ _Role: replay path — recomputes history after a code change_
 ```mermaid
 flowchart TD
   R["replay path -&gt; corrected result"]
-  R --> P0["the log is rewound to offset 0"]
-  R --> P1["the same pipeline (v2) folds r1, r2, r3 again"]
-  R --> P2["the corrected result replaces the buggy one"]
+  R -->|"comprises"| P0["the log is rewound to offset 0"]
+  R -->|"comprises"| P1["the same pipeline (v2) folds r1, r2, r3 again"]
+  R -->|"comprises"| P2["the corrected result replaces the buggy one"]
 ```
 
 ```mermaid
 flowchart LR
-  L[(log)] --> P["one pipeline"]
-  P --> S[(speed result)]
+  L[(log)] -->|"feeds"| P["one pipeline"]
+  P -->|"writes"| S[(speed result)]
   L -->|replay v2| P2["same pipeline"]
-  P2 --> C[(corrected result)]
+  P2 -->|"rewrites"| C[(corrected result)]
 ```
 
 ```java
@@ -226,10 +226,10 @@ A team runs a batch job and a streaming job that compute the same metric, and th
 
 ```mermaid
 flowchart LR
-  L[(log)] --> P["one pipeline"]
-  P --> S[(speed result)]
+  L[(log)] -->|"feeds"| P["one pipeline"]
+  P -->|"writes"| S[(speed result)]
   L -->|replay| P2["same pipeline (reprocess)"]
-  P2 --> B[(corrected result)]
+  P2 -->|"rewrites"| B[(corrected result)]
 ```
 
 ```java
@@ -259,8 +259,8 @@ An analyst asks why the company maintains separate batch and streaming pipelines
 
 ```mermaid
 flowchart LR
-  P["one pipeline"] --> B["bounded input = batch"]
-  P --> S["unbounded input = streaming"]
+  P["one pipeline"] -->|"reads"| B["bounded input = batch"]
+  P -->|"reads"| S["unbounded input = streaming"]
 ```
 
 ```java
@@ -289,10 +289,10 @@ Lambda runs a batch layer (correct) and a speed layer (low-latency) computing th
 
 ```mermaid
 flowchart LR
-  L[(log)] --> P["one pipeline"]
-  P --> S[(speed result)]
+  L[(log)] -->|"feeds"| P["one pipeline"]
+  P -->|"writes"| S[(speed result)]
   L -->|replay| P2["same pipeline (reprocess)"]
-  P2 --> B[(corrected result)]
+  P2 -->|"rewrites"| B[(corrected result)]
 ```
 
 

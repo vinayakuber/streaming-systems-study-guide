@@ -151,9 +151,9 @@ _Role: replayable source — emits records with stable ids and a checkpoint_
 ```mermaid
 flowchart TD
   R["replayable source (offset)"]
-  R --> P0["a record {id: #quot;r7#quot;, order: #quot;order-99#quot;, amount: 10} is emitted"]
-  R --> P1["the checkpoint (offset) lets the pipeline resume after a crash"]
-  R --> P2["records carry stable ids so they can be deduplicated"]
+  R -->|"comprises"| P0["a record {id: #quot;r7#quot;, order: #quot;order-99#quot;, amount: 10} is emitted"]
+  R -->|"comprises"| P1["the checkpoint (offset) lets the pipeline resume after a crash"]
+  R -->|"comprises"| P2["records carry stable ids so they can be deduplicated"]
 ```
 
 ### dedup shuffle
@@ -163,9 +163,9 @@ _Role: dedup shuffle — drops duplicate record deliveries_
 ```mermaid
 flowchart TD
   R["dedup shuffle"]
-  R --> P0["the receiver keeps seen = { r1, r2, r3 }"]
-  R --> P1["first delivery of r7 records it -&gt; seen grows to { r1, r2, r3, r7 }"]
-  R --> P2["a retry of r7 is dropped because the id is already seen"]
+  R -->|"comprises"| P0["the receiver keeps seen = { r1, r2, r3 }"]
+  R -->|"comprises"| P1["first delivery of r7 records it -&gt; seen grows to { r1, r2, r3, r7 }"]
+  R -->|"comprises"| P2["a retry of r7 is dropped because the id is already seen"]
 ```
 
 ### idempotent sink (idempotency key)
@@ -175,9 +175,9 @@ _Role: idempotent sink — applies effects exactly once_
 ```mermaid
 flowchart TD
   R["idempotent sink (idempotency key)"]
-  R --> P0["the sink writes with an idempotency key = order-99"]
-  R --> P1["a SET/upsert replaces the value rather than incrementing"]
-  R --> P2["a retry with the same key is a no-op at the sink"]
+  R -->|"comprises"| P0["the sink writes with an idempotency key = order-99"]
+  R -->|"comprises"| P1["a SET/upsert replaces the value rather than incrementing"]
+  R -->|"comprises"| P2["a retry with the same key is a no-op at the sink"]
 ```
 
 ### external system
@@ -187,16 +187,16 @@ _Role: external system — the outside-world effect_
 ```mermaid
 flowchart TD
   R["external system"]
-  R --> P0["the payment API deduplicates on the idempotency key"]
-  R --> P1["a new key charges once; a seen key returns the prior result"]
-  R --> P2["without the key, two attempts would double-bill"]
+  R -->|"comprises"| P0["the payment API deduplicates on the idempotency key"]
+  R -->|"comprises"| P1["a new key charges once; a seen key returns the prior result"]
+  R -->|"comprises"| P2["without the key, two attempts would double-bill"]
 ```
 
 ```mermaid
 flowchart LR
-  S["replayable source"] --> D["dedup shuffle"]
-  D --> K["idempotent sink"]
-  K --> X["external system"]
+  S["replayable source"] -->|"replays events"| D["dedup shuffle"]
+  D -->|"drops duplicates"| K["idempotent sink"]
+  K -->|"charges once"| X["external system"]
 ```
 
 ```java
@@ -232,9 +232,9 @@ A payment pipeline charges cards from a stream; after a crash, some charges were
 
 ```mermaid
 flowchart LR
-  S["source (replayable)"] --> D["dedup shuffle"]
-  D --> K["sink with idempotency key"]
-  K --> P["payment API"]
+  S["source (replayable)"] -->|"replays"| D["dedup shuffle"]
+  D -->|"drops duplicates"| K["sink with idempotency key"]
+  K -->|"calls"| P["payment API"]
   P -->|key seen| N["no-op"]
   P -->|key new| C["charge once"]
 ```
@@ -267,9 +267,9 @@ A metrics pipeline recomputes per-key counts from a replayable source after a cr
 
 ```mermaid
 flowchart LR
-  R["replay from offset"] --> D["dedup"]
-  D --> U["upsert count"]
-  U --> S[(count = 10)]
+  R["replay from offset"] -->|"replays"| D["dedup"]
+  D -->|"upserts"| U["upsert count"]
+  U -->|"writes"| S[(count = 10)]
 ```
 
 ```java
@@ -298,9 +298,9 @@ An idempotent operation has the same effect whether run once or many times — S
 
 ```mermaid
 flowchart LR
-  S["source (replayable)"] --> D["dedup shuffle"]
-  D --> K["sink with idempotency key"]
-  K --> P["payment API"]
+  S["source (replayable)"] -->|"replays"| D["dedup shuffle"]
+  D -->|"drops duplicates"| K["sink with idempotency key"]
+  K -->|"calls"| P["payment API"]
   P -->|key seen| N["no-op"]
   P -->|key new| C["charge once"]
 ```

@@ -149,9 +149,9 @@ _Role: sources — emit events that may be out of order_
 ```mermaid
 flowchart TD
   R["sources (events with event time)"]
-  R --> P0["a phone emits {event_time: #quot;12:08:30#quot;} after a network delay"]
-  R --> P1["event time is stamped at the source, not at ingestion"]
-  R --> P2["a straggler {event_time: #quot;12:05:10#quot;} may arrive after newer events"]
+  R -->|"comprises"| P0["a phone emits {event_time: #quot;12:08:30#quot;} after a network delay"]
+  R -->|"comprises"| P1["event time is stamped at the source, not at ingestion"]
+  R -->|"comprises"| P2["a straggler {event_time: #quot;12:05:10#quot;} may arrive after newer events"]
 ```
 
 ### watermark generator (max_seen − skew)
@@ -161,9 +161,9 @@ _Role: watermark generator — estimates event-time completeness_
 ```mermaid
 flowchart TD
   R["watermark generator (max_seen − skew)"]
-  R --> P0["max_seen : 12:07:00 -&gt; 12:08:30 as the newest event arrives"]
-  R --> P1["watermark = max_seen - skew = 12:08:30 - 2:00 = 12:06:30"]
-  R --> P2["per-source watermarks are min-ed together at the stage"]
+  R -->|"comprises"| P0["max_seen : 12:07:00 -&gt; 12:08:30 as the newest event arrives"]
+  R -->|"comprises"| P1["watermark = max_seen - skew = 12:08:30 - 2:00 = 12:06:30"]
+  R -->|"comprises"| P2["per-source watermarks are min-ed together at the stage"]
 ```
 
 ### window assigner
@@ -173,9 +173,9 @@ _Role: window assigner — assigns events to event-time windows_
 ```mermaid
 flowchart TD
   R["window assigner"]
-  R --> P0["event {event_time: #quot;12:08:30#quot;} lands in window [12:05, 12:10)"]
-  R --> P1["the watermark at 12:06:30 means windows up to 12:06:30 are complete"]
-  R --> P2["window [12:00, 12:05) is closed because 12:06:30 &gt; 12:05:00"]
+  R -->|"comprises"| P0["event {event_time: #quot;12:08:30#quot;} lands in window [12:05, 12:10)"]
+  R -->|"comprises"| P1["the watermark at 12:06:30 means windows up to 12:06:30 are complete"]
+  R -->|"comprises"| P2["window [12:00, 12:05) is closed because 12:06:30 &gt; 12:05:00"]
 ```
 
 ### trigger/emitter
@@ -185,17 +185,17 @@ _Role: trigger/emitter — fires on the watermark and handles late data_
 ```mermaid
 flowchart TD
   R["trigger/emitter"]
-  R --> P0["the on-time trigger fires when the watermark passes the window end"]
-  R --> P1["a late event {event_time: #quot;12:05:10#quot;} is accepted if inside allowed lateness"]
-  R --> P2["a late pane re-emits the updated window result to the dashboard"]
+  R -->|"comprises"| P0["the on-time trigger fires when the watermark passes the window end"]
+  R -->|"comprises"| P1["a late event {event_time: #quot;12:05:10#quot;} is accepted if inside allowed lateness"]
+  R -->|"comprises"| P2["a late pane re-emits the updated window result to the dashboard"]
 ```
 
 ```mermaid
 flowchart LR
-  S["sources"] --> G["watermark generator"]
-  G --> W["window assigner"]
-  W --> T["trigger / emitter"]
-  T --> D["dashboard"]
+  S["sources"] -->|"report event time"| G["watermark generator"]
+  G -->|"advances watermark"| W["window assigner"]
+  W -->|"closes windows"| T["trigger / emitter"]
+  T -->|"emits results"| D["dashboard"]
 ```
 
 ```java
@@ -232,11 +232,11 @@ A mobile analytics pipeline groups events by event time, but phones that go offl
 
 ```mermaid
 flowchart LR
-  E["events"] --> M["max seen event time"]
-  M --> W["watermark = max - skew"]
-  W --> T{passes window end?}
+  E["events"] -->|"report"| M["max seen event time"]
+  M -->|"subtract skew"| W["watermark = max - skew"]
+  W -->|"advances"| T{passes window end?}
   T -->|yes| O[emit on-time]
-  L["late event"] --> A{within allowed lateness?}
+  L["late event"] -->|"arrives late"| A{within allowed lateness?}
   A -->|yes| U[update + re-emit]
   A -->|no| D[drop]
 ```
@@ -270,10 +270,10 @@ A streaming join reads two sources, one fast and one slow; results for 12:05 kee
 
 ```mermaid
 flowchart LR
-  A["fast source wm=12:06"] --> J{join watermark}
-  B["slow source wm=12:04"] --> J
-  J --> W["wm = min = 12:04"]
-  W --> R["emit only when both sides complete"]
+  A["fast source wm=12:06"] -->|"contributes"| J{join watermark}
+  B["slow source wm=12:04"] -->|"contributes"| J
+  J -->|"takes min"| W["wm = min = 12:04"]
+  W -->|"gates"| R["emit only when both sides complete"]
 ```
 
 ```java
@@ -301,11 +301,11 @@ A perfect watermark is possible for ordered inputs — a single log consumed in 
 
 ```mermaid
 flowchart LR
-  E["events"] --> M["max seen event time"]
-  M --> W["watermark = max - skew"]
-  W --> T{passes window end?}
+  E["events"] -->|"report"| M["max seen event time"]
+  M -->|"subtract skew"| W["watermark = max - skew"]
+  W -->|"advances"| T{passes window end?}
   T -->|yes| O[emit on-time]
-  L["late event"] --> A{within allowed lateness?}
+  L["late event"] -->|"arrives late"| A{within allowed lateness?}
   A -->|yes| U[update + re-emit]
   A -->|no| D[drop]
 ```

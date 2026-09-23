@@ -143,9 +143,9 @@ _Role: stream — delivers records with a source offset_
 ```mermaid
 flowchart TD
   R["stream"]
-  R --> P0["a record for key 42 arrives at offset 500"]
-  R --> P1["the offset is the replayable source position"]
-  R --> P2["events after the offset are not yet folded"]
+  R -->|"comprises"| P0["a record for key 42 arrives at offset 500"]
+  R -->|"comprises"| P1["the offset is the replayable source position"]
+  R -->|"comprises"| P2["events after the offset are not yet folded"]
 ```
 
 ### processor (state store)
@@ -155,9 +155,9 @@ _Role: processor — folds records into a state store_
 ```mermaid
 flowchart TD
   R["processor (state store)"]
-  R --> P0["the count for key 42 updates { 42: 10 } -&gt; { 42: 13 }"]
-  R --> P1["hot keys stay in memory, the rest spill to disk"]
-  R --> P2["the state store holds the running aggregation"]
+  R -->|"comprises"| P0["the count for key 42 updates { 42: 10 } -&gt; { 42: 13 }"]
+  R -->|"comprises"| P1["hot keys stay in memory, the rest spill to disk"]
+  R -->|"comprises"| P2["the state store holds the running aggregation"]
 ```
 
 ### checkpoint (state + offset)
@@ -167,9 +167,9 @@ _Role: checkpoint — snapshots state and offset together_
 ```mermaid
 flowchart TD
   R["checkpoint (state + offset)"]
-  R --> P0["a barrier triggers the snapshot at offset 500"]
-  R --> P1["the snapshot captures { count: { 42: 13 }, offset: 500 }"]
-  R --> P2["incremental mode uploads only the changed keys"]
+  R -->|"comprises"| P0["a barrier triggers the snapshot at offset 500"]
+  R -->|"comprises"| P1["the snapshot captures { count: { 42: 13 }, offset: 500 }"]
+  R -->|"comprises"| P2["incremental mode uploads only the changed keys"]
 ```
 
 ### durable storage
@@ -179,16 +179,16 @@ _Role: durable storage — holds the checkpoint bytes_
 ```mermaid
 flowchart TD
   R["durable storage"]
-  R --> P0["the checkpoint is written to durable storage (S3/HDFS)"]
-  R --> P1["it survives the processor's crash"]
-  R --> P2["restart reads it back to resume"]
+  R -->|"comprises"| P0["the checkpoint is written to durable storage (S3/HDFS)"]
+  R -->|"comprises"| P1["it survives the processor's crash"]
+  R -->|"comprises"| P2["restart reads it back to resume"]
 ```
 
 ```mermaid
 flowchart LR
-  S["stream"] --> P["processor + state store"]
-  P --> C["checkpoint"]
-  C --> D[(durable storage)]
+  S["stream"] -->|"feeds"| P["processor + state store"]
+  P -->|"checkpoints"| C["checkpoint"]
+  C -->|"persists"| D[(durable storage)]
   D -->|restore| P
 ```
 
@@ -225,9 +225,9 @@ A streaming aggregation keeps a running count per user in memory; when the job r
 
 ```mermaid
 flowchart LR
-  S["stream"] --> P["processor + state store"]
-  P --> C["checkpoint (state + offset)"]
-  C --> R["restart resumes from offset"]
+  S["stream"] -->|"feeds"| P["processor + state store"]
+  P -->|"checkpoints"| C["checkpoint (state + offset)"]
+  C -->|"resumes"| R["restart resumes from offset"]
 ```
 
 ```java
@@ -258,7 +258,7 @@ A metrics pipeline has 10 GB of state; snapshotting the whole thing every minute
 
 ```mermaid
 flowchart LR
-  S[(10 GB state)] --> D["delta = changed keys"]
+  S[(10 GB state)] -->|"diffs"| D["delta = changed keys"]
   D -->|upload 12 keys| C["checkpoint"]
 ```
 
@@ -288,9 +288,9 @@ A checkpoint captures every stage's state at one logical point in the stream, al
 
 ```mermaid
 flowchart LR
-  S["stream"] --> P["processor + state store"]
-  P --> C["checkpoint (state + offset)"]
-  C --> R["restart resumes from offset"]
+  S["stream"] -->|"feeds"| P["processor + state store"]
+  P -->|"checkpoints"| C["checkpoint (state + offset)"]
+  C -->|"resumes"| R["restart resumes from offset"]
 ```
 
 

@@ -143,9 +143,9 @@ _Role: database — holds the source table_
 ```mermaid
 flowchart TD
   R["database (table)"]
-  R --> P0["account 42 balance is 7, then updates to 12"]
-  R --> P1["the database is table-centric state"]
-  R --> P2["the update is the event that CDC will capture"]
+  R -->|"comprises"| P0["account 42 balance is 7, then updates to 12"]
+  R -->|"comprises"| P1["the database is table-centric state"]
+  R -->|"comprises"| P2["the update is the event that CDC will capture"]
 ```
 
 ### change capture (CDC)
@@ -155,9 +155,9 @@ _Role: change capture — turns table writes into a changelog_
 ```mermaid
 flowchart TD
   R["change capture (CDC)"]
-  R --> P0["the update 7 -&gt; 12 emits the changelog record (7,12)"]
-  R --> P1["the record carries the old value for retraction"]
-  R --> P2["the changelog is append-only and ordered"]
+  R -->|"comprises"| P0["the update 7 -&gt; 12 emits the changelog record (7,12)"]
+  R -->|"comprises"| P1["the record carries the old value for retraction"]
+  R -->|"comprises"| P2["the changelog is append-only and ordered"]
 ```
 
 ### changelog stream
@@ -167,9 +167,9 @@ _Role: changelog stream — the stream view of the data_
 ```mermaid
 flowchart TD
   R["changelog stream"]
-  R --> P0["the stream is [ (0,10), (10,7), (7,12) ]"]
-  R --> P1["it is the source of truth — history is retained"]
-  R --> P2["any past table is a fold up to that point"]
+  R -->|"comprises"| P0["the stream is [ (0,10), (10,7), (7,12) ]"]
+  R -->|"comprises"| P1["it is the source of truth — history is retained"]
+  R -->|"comprises"| P2["any past table is a fold up to that point"]
 ```
 
 ### stream processor (fold)
@@ -179,16 +179,16 @@ _Role: stream processor — derives tables from the stream_
 ```mermaid
 flowchart TD
   R["stream processor (fold)"]
-  R --> P0["the fold applies each (old, new) pair"]
-  R --> P1["after (7,12) the materialized balance is 12"]
-  R --> P2["the derived table matches the source database"]
+  R -->|"comprises"| P0["the fold applies each (old, new) pair"]
+  R -->|"comprises"| P1["after (7,12) the materialized balance is 12"]
+  R -->|"comprises"| P2["the derived table matches the source database"]
 ```
 
 ```mermaid
 flowchart LR
   D[(database table)] -->|CDC| C["changelog stream"]
   C -->|fold| P["stream processor"]
-  P --> V[(materialized view)]
+  P -->|"updates"| V[(materialized view)]
   V -.matches.-> D
 ```
 
@@ -259,8 +259,8 @@ An ad-click pipeline needs both a per-minute event feed and a per-campaign runni
 
 ```mermaid
 flowchart LR
-  E["click stream"] --> A["aggregate by campaign"]
-  A --> T[(campaign totals)]
+  E["click stream"] -->|"folds"| A["aggregate by campaign"]
+  A -->|"updates"| T[(campaign totals)]
 ```
 
 ```java

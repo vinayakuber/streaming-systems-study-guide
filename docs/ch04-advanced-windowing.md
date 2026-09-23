@@ -144,9 +144,9 @@ _Role: event source — emits events with event time and a key_
 ```mermaid
 flowchart TD
   R["event source"]
-  R --> P0["a click {user: 42, event_time: #quot;12:20:00#quot;} arrives"]
-  R --> P1["the key is user 42, so sessions are per-user"]
-  R --> P2["a late event may arrive with event_time earlier than the watermark"]
+  R -->|"comprises"| P0["a click {user: 42, event_time: #quot;12:20:00#quot;} arrives"]
+  R -->|"comprises"| P1["the key is user 42, so sessions are per-user"]
+  R -->|"comprises"| P2["a late event may arrive with event_time earlier than the watermark"]
 ```
 
 ### window assigner
@@ -156,9 +156,9 @@ _Role: window assigner — assigns events to session windows_
 ```mermaid
 flowchart TD
   R["window assigner"]
-  R --> P0["the event is assigned to a new or existing session for user 42"]
-  R --> P1["the gap threshold is 30 min of inactivity"]
-  R --> P2["sessions are data-driven, not clock-aligned"]
+  R -->|"comprises"| P0["the event is assigned to a new or existing session for user 42"]
+  R -->|"comprises"| P1["the gap threshold is 30 min of inactivity"]
+  R -->|"comprises"| P2["sessions are data-driven, not clock-aligned"]
 ```
 
 ### session merger
@@ -168,9 +168,9 @@ _Role: session merger — merges sessions that a bridging event connects_
 ```mermaid
 flowchart TD
   R["session merger"]
-  R --> P0["s1 [12:00,12:10) and s2 [12:40,12:50) both sit within 30 min of the event"]
-  R --> P1["the merger collapses them into sMerged [12:00, 12:50)"]
-  R --> P2["the merged count folds s1 + s2 + the bridging event"]
+  R -->|"comprises"| P0["s1 [12:00,12:10) and s2 [12:40,12:50) both sit within 30 min of the event"]
+  R -->|"comprises"| P1["the merger collapses them into sMerged [12:00, 12:50)"]
+  R -->|"comprises"| P2["the merged count folds s1 + s2 + the bridging event"]
 ```
 
 ### trigger/retraction emitter
@@ -180,17 +180,17 @@ _Role: trigger/retraction emitter — emits and corrects panes_
 ```mermaid
 flowchart TD
   R["trigger/retraction emitter"]
-  R --> P0["the on-time trigger fires when the watermark passes a session end"]
-  R --> P1["a late merge retracts the two earlier panes"]
-  R --> P2["the merged pane is emitted so the store shows one session, not three"]
+  R -->|"comprises"| P0["the on-time trigger fires when the watermark passes a session end"]
+  R -->|"comprises"| P1["a late merge retracts the two earlier panes"]
+  R -->|"comprises"| P2["the merged pane is emitted so the store shows one session, not three"]
 ```
 
 ```mermaid
 flowchart LR
-  E["event source"] --> A["window assigner"]
-  A --> M["session merger"]
-  M --> T["trigger / retraction emitter"]
-  T --> S["analytics store"]
+  E["event source"] -->|"emits sessions"| A["window assigner"]
+  A -->|"keys by session"| M["session merger"]
+  M -->|"retracts stale panes"| T["trigger / retraction emitter"]
+  T -->|"updates result"| S["analytics store"]
 ```
 
 ```java
@@ -226,10 +226,10 @@ An analytics pipeline reports 'sessions per user', but a user who pauses for 20 
 
 ```mermaid
 flowchart LR
-  E["event @ 12:20"] --> G{gap <= 30min?}
+  E["event @ 12:20"] -->|"checks gap"| G{gap <= 30min?}
   G -->|yes to both| M["merge s1 + s2 + event"]
-  M --> R["retract s1, s2"]
-  R --> O["emit merged session"]
+  M -->|"retracts"| R["retract s1, s2"]
+  R -->|"emits"| O["emit merged session"]
 ```
 
 ```java
@@ -260,8 +260,8 @@ A dashboard needs both an hourly total and a rolling 10-minute average, but the 
 
 ```mermaid
 flowchart LR
-  H["hourly total"] --> F["fixed [12:00,13:00)"]
-  R["rolling avg"] --> S["sliding 10min / 1min"]
+  H["hourly total"] -->|"uses"| F["fixed [12:00,13:00)"]
+  R["rolling avg"] -->|"uses"| S["sliding 10min / 1min"]
 ```
 
 ```java
@@ -289,10 +289,10 @@ Fixed windows partition time into equal, non-overlapping, contiguous spans; each
 
 ```mermaid
 flowchart LR
-  E["event @ 12:20"] --> G{gap <= 30min?}
+  E["event @ 12:20"] -->|"checks gap"| G{gap <= 30min?}
   G -->|yes to both| M["merge s1 + s2 + event"]
-  M --> R["retract s1, s2"]
-  R --> O["emit merged session"]
+  M -->|"retracts"| R["retract s1, s2"]
+  R -->|"emits"| O["emit merged session"]
 ```
 
 

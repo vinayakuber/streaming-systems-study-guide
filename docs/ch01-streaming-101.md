@@ -136,9 +136,9 @@ _Role: writer — stamps events with event time_
 ```mermaid
 flowchart TD
   R["writer (event producer)"]
-  R --> P0["a device stamps a click {user: 42, url: #quot;/shoe/x#quot;, event_time: #quot;12:00:59#quot;}"]
-  R --> P1["the timestamp is the user-interaction instant, not the send instant"]
-  R --> P2["each event is immutable once emitted"]
+  R -->|"comprises"| P0["a device stamps a click {user: 42, url: #quot;/shoe/x#quot;, event_time: #quot;12:00:59#quot;}"]
+  R -->|"comprises"| P1["the timestamp is the user-interaction instant, not the send instant"]
+  R -->|"comprises"| P2["each event is immutable once emitted"]
 ```
 
 ### transport (unbounded stream)
@@ -148,9 +148,9 @@ _Role: transport — carries events and delays them_
 ```mermaid
 flowchart TD
   R["transport (unbounded stream)"]
-  R --> P0["the click is queued and delayed 3m12s by the network"]
-  R --> P1["processing time trails event time by the accumulated lag"]
-  R --> P2["a watermark at 12:03:00 declares how complete event time is"]
+  R -->|"comprises"| P0["the click is queued and delayed 3m12s by the network"]
+  R -->|"comprises"| P1["processing time trails event time by the accumulated lag"]
+  R -->|"comprises"| P2["a watermark at 12:03:00 declares how complete event time is"]
 ```
 
 ### collector (processor)
@@ -160,9 +160,9 @@ _Role: collector — reads events and assigns buckets_
 ```mermaid
 flowchart TD
   R["collector (processor)"]
-  R --> P0["the processor reads the click at processing time 12:04:11"]
-  R --> P1["it buckets by event time, placing the click in the 12:00 window"]
-  R --> P2["a straggler arriving after the watermark is flagged late"]
+  R -->|"comprises"| P0["the processor reads the click at processing time 12:04:11"]
+  R -->|"comprises"| P1["it buckets by event time, placing the click in the 12:00 window"]
+  R -->|"comprises"| P2["a straggler arriving after the watermark is flagged late"]
 ```
 
 ### aggregator/store (window state)
@@ -172,17 +172,17 @@ _Role: aggregator/store — holds per-window counts_
 ```mermaid
 flowchart TD
   R["aggregator/store (window state)"]
-  R --> P0["window 12:00 count : 0 -&gt; 1 as the click is folded in"]
-  R --> P1["window 12:04 stays 0 BECAUSE the click belongs to 12:00"]
-  R --> P2["the dashboard reads the live window counts"]
+  R -->|"comprises"| P0["window 12:00 count : 0 -&gt; 1 as the click is folded in"]
+  R -->|"comprises"| P1["window 12:04 stays 0 BECAUSE the click belongs to 12:00"]
+  R -->|"comprises"| P2["the dashboard reads the live window counts"]
 ```
 
 ```mermaid
 flowchart LR
-  W["producer"] --> T["unbounded stream"]
-  T --> C["processor"]
-  C --> A["window state"]
-  A --> R["dashboard"]
+  W["producer"] -->|"emits click"| T["unbounded stream"]
+  T -->|"delivers"| C["processor"]
+  C -->|"buckets by event time"| A["window state"]
+  A -->|"reads count"| R["dashboard"]
 ```
 
 ```java
@@ -217,8 +217,8 @@ A dashboard shows clicks per minute, but under a traffic spike the numbers shift
 
 ```mermaid
 flowchart LR
-  C["click @ 12:00:59"] --> N["network + queue"]
-  N --> P["processor @ 12:04:11"]
+  C["click @ 12:00:59"] -->|"delayed by"| N["network + queue"]
+  N -->|"observed at"| P["processor @ 12:04:11"]
   P -->|processing time| B1["12:04 bucket (wrong)"]
   C -->|event time| B2["12:00 bucket (right)"]
 ```
@@ -252,9 +252,9 @@ A team runs a daily ETL job over a click stream. A fraud alert that should fire 
 
 ```mermaid
 flowchart LR
-  E["click stream (unbounded)"] --> B["daily batch chunk"]
+  E["click stream (unbounded)"] -->|"sliced into"| B["daily batch chunk"]
   B -->|next midnight| A["answer up to 24h late"]
-  E --> S["streaming"]
+  E -->|"processed as"| S["streaming"]
   S -->|on arrival| L["answer ~ live"]
 ```
 
@@ -284,8 +284,8 @@ Event time is the time at which an event actually occurred, as stamped by the pr
 
 ```mermaid
 flowchart LR
-  C["click @ 12:00:59"] --> N["network + queue"]
-  N --> P["processor @ 12:04:11"]
+  C["click @ 12:00:59"] -->|"delayed by"| N["network + queue"]
+  N -->|"observed at"| P["processor @ 12:04:11"]
   P -->|processing time| B1["12:04 bucket (wrong)"]
   C -->|event time| B2["12:00 bucket (right)"]
 ```
