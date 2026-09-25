@@ -91,49 +91,25 @@ _Also known as: SS Ch04 · Session Windows · Fixed Window · Sliding Window · 
 
 _Role: event source — emits events with event time and a key_
 
-```mermaid
-flowchart TD
-  R["event source"]
-  R -->|"comprises"| P0["a click {user: 42, event_time: #quot;12:20:00#quot;} arrives"]
-  R -->|"comprises"| P1["the key is user 42, so sessions are per-user"]
-  R -->|"comprises"| P2["a late event may arrive with event_time earlier than the watermark"]
-```
+![event source](../diagrams/d2/decomp/ch04-0.png)
 
 ### window assigner
 
 _Role: window assigner — assigns events to session windows_
 
-```mermaid
-flowchart TD
-  R["window assigner"]
-  R -->|"comprises"| P0["the event is assigned to a new or existing session for user 42"]
-  R -->|"comprises"| P1["the gap threshold is 30 min of inactivity"]
-  R -->|"comprises"| P2["sessions are data-driven, not clock-aligned"]
-```
+![window assigner](../diagrams/d2/decomp/ch04-1.png)
 
 ### session merger
 
 _Role: session merger — merges sessions that a bridging event connects_
 
-```mermaid
-flowchart TD
-  R["session merger"]
-  R -->|"comprises"| P0["s1 [12:00,12:10) and s2 [12:40,12:50) both sit within 30 min of the event"]
-  R -->|"comprises"| P1["the merger collapses them into sMerged [12:00, 12:50)"]
-  R -->|"comprises"| P2["the merged count folds s1 + s2 + the bridging event"]
-```
+![session merger](../diagrams/d2/decomp/ch04-2.png)
 
 ### trigger/retraction emitter
 
 _Role: trigger/retraction emitter — emits and corrects panes_
 
-```mermaid
-flowchart TD
-  R["trigger/retraction emitter"]
-  R -->|"comprises"| P0["the on-time trigger fires when the watermark passes a session end"]
-  R -->|"comprises"| P1["a late merge retracts the two earlier panes"]
-  R -->|"comprises"| P2["the merged pane is emitted so the store shows one session, not three"]
-```
+![trigger/retraction emitter](../diagrams/d2/decomp/ch04-3.png)
 
 ```java
 // SYSTEM DESIGN — a late event merges two sessions and the pipeline retracts the stale panes
@@ -261,21 +237,7 @@ Fixed windows partition time into equal, non-overlapping, contiguous spans; each
 
 **In the wild.** Beam, Flink, and Dataflow all expose these three window types.
 
-```mermaid
-flowchart TD
-  S(["<b>1. One shape does not fit all</b><br/>different questions need different windows"]):::start
-  A["<b>2. Fixed</b><br/>uniform, non-overlapping accounting"]:::core
-  B["<b>3. Sliding</b><br/>moving views with a period"]:::step
-  C["<b>4. Session</b><br/>bursts bounded by inactivity"]:::warn
-  S -->|"1. the choices"| A
-  A -->|"2. and"| B
-  B -->|"3. and"| C
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-```
+![1. One window shape does not fit all questions](../diagrams/d2/card/ch04-0.png)
 ### Shape: 2. Fixed windows
 
 **Why.** Periodic, comparable aggregates need equal, non-overlapping time buckets.
@@ -286,21 +248,7 @@ flowchart TD
 
 **In the wild.** A 5-minute tumbling window in Flink is a fixed window.
 
-```mermaid
-flowchart TD
-  S(["<b>1. Fixed windows</b><br/>equal, non-overlapping slices"]):::start
-  A["<b>2. Aligned to the clock</b><br/>e.g. every hour, on the hour"]:::core
-  B["<b>3. One window each</b><br/>an event lands in exactly one"]:::step
-  C["<b>4. Best for</b><br/>uniform, per-period accounting"]:::warn
-  S -->|"1. they are"| A
-  A -->|"2. so"| B
-  B -->|"3. ideal"| C
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-```
+![2. Fixed windows](../diagrams/d2/card/ch04-1.png)
 ### Shape: 3. Sliding windows
 
 **Why.** Moving averages need overlapping spans so a point in time contributes to several recent windows.
@@ -311,21 +259,7 @@ flowchart TD
 
 **In the wild.** A 10-minute window sliding every 2 minutes is the canonical rolling average.
 
-```mermaid
-flowchart TD
-  S(["<b>1. Sliding windows</b><br/>fixed length with a fixed period"]):::start
-  A["<b>2. Overlap or gaps</b><br/>period smaller or larger than length"]:::core
-  B["<b>3. One event, many windows</b><br/>an event may land in several"]:::step
-  C["<b>4. Best for</b><br/>moving averages and recent-window views"]:::warn
-  S -->|"1. defined by"| A
-  A -->|"2. so"| B
-  B -->|"3. ideal"| C
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-```
+![3. Sliding windows](../diagrams/d2/card/ch04-2.png)
 ### Shape: 4. Session windows
 
 **Why.** User behavior is bursty and its boundaries follow the data, not the clock.
@@ -336,21 +270,7 @@ flowchart TD
 
 **In the wild.** Web-analytics sessionization is the canonical session-window use case.
 
-```mermaid
-flowchart TD
-  S(["<b>1. Session windows</b><br/>bounded by a gap of inactivity"]):::start
-  A["<b>2. Data-defined</b><br/>the events decide the boundaries"]:::core
-  B["<b>3. Merge across the gap</b><br/>a bridging event joins two sessions"]:::step
-  C["<b>4. Best for</b><br/>user sessions, bursts, clickstreams"]:::warn
-  S -->|"1. they are"| A
-  A -->|"2. and"| B
-  B -->|"3. ideal"| C
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-```
+![4. Session windows](../diagrams/d2/card/ch04-3.png)
 ### Lifecycle: 5. The window lifecycle
 
 **Why.** Windowing is a pipeline of steps — assign, merge, group, trigger, accumulate, garbage-collect — not a single bucket lookup.
@@ -361,21 +281,7 @@ flowchart TD
 
 **In the wild.** Beam's WindowFn, trigger, and accumulation mode map onto these stages.
 
-```mermaid
-flowchart TD
-  S(["<b>1. The window lifecycle</b><br/>five stages"]):::start
-  A["<b>2. Assign, merge</b><br/>place events, join sessions"]:::core
-  B["<b>3. Group, trigger, accumulate</b><br/>key events, emit, fold panes"]:::step
-  C["<b>4. Garbage collect</b><br/>drop state that can never change"]:::warn
-  S -->|"1. first"| A
-  A -->|"2. then"| B
-  B -->|"3. finally"| C
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-```
+![5. The window lifecycle](../diagrams/d2/card/ch04-4.png)
 ### Merge: 6. Session merging
 
 **Why.** Sessions that were separate can turn out to be one session when a bridging event arrives.
@@ -386,21 +292,7 @@ flowchart TD
 
 **In the wild.** Beam's mergeWindows is the production form.
 
-```mermaid
-flowchart TD
-  S(["<b>1. Session merging</b><br/>a late event bridges a gap"]):::start
-  A["<b>2. Two sessions become one</b><br/>their events and state merge"]:::core
-  B["<b>3. After emission</b><br/>already-emitted panes must be corrected"]:::warn
-  C["<b>4. Via retraction</b><br/>cancel the old, emit the merged"]:::step
-  S -->|"1. so"| A
-  A -->|"2. even"| B
-  B -->|"3. handled"| C
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-```
+![6. Session merging](../diagrams/d2/card/ch04-5.png)
 ### Pitfall: 7. Late merges need retractions
 
 **Why.** A late event can bridge two sessions already emitted separately, so the earlier panes are now wrong.
@@ -411,21 +303,7 @@ flowchart TD
 
 **In the wild.** Accumulating-and-retracting mode in Beam handles this.
 
-```mermaid
-flowchart TD
-  S(["<b>1. Late merges</b><br/>a session changes after it emitted"]):::start
-  A["<b>2. The downstream saw stale panes</b><br/>two separate session results"]:::warn
-  B["<b>3. Retraction needed</b><br/>downstream must undo the stale result"]:::core
-  C["<b>4. The cost</b><br/>retractions complicate every downstream consumer"]:::step
-  S -->|"1. means"| A
-  A -->|"2. so"| B
-  B -->|"3. and"| C
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-```
+![7. Late merges need retractions](../diagrams/d2/card/ch04-6.png)
 ### Scope: 8. Sessions are keyed
 
 **Why.** A gap must be measured within one entity, not across unrelated entities.
@@ -436,21 +314,7 @@ flowchart TD
 
 **In the wild.** Grouping by user id before sessionizing is the production pattern.
 
-```mermaid
-flowchart TD
-  S(["<b>1. Sessions are keyed</b><br/>a session belongs to a key"]):::start
-  A["<b>2. Per-user sessions</b><br/>merging happens within a key, never across"]:::core
-  B["<b>3. Keyed state</b><br/>session state is per key, so it partitions"]:::step
-  C["<b>4. The trap</b><br/>forgetting the key merges unrelated activity"]:::warn
-  S -->|"1. e.g."| A
-  A -->|"2. held in"| B
-  B -->|"3. avoid"| C
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-```
+![8. Sessions are keyed](../diagrams/d2/card/ch04-7.png)
 
 </details>
 

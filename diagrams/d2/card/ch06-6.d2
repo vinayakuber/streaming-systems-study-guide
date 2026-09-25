@@ -1,0 +1,69 @@
+direction: down
+
+S: {
+  label: |md
+    **1. Materialize vs recompute**
+
+    store the view, or rebuild it
+  |
+  shape: rectangle
+  style: {
+    fill: "#238636"
+    stroke: "#2ea043"
+    font-color: "#FFFFFF"
+    border-radius: 8
+    font-size: 16
+  }
+}
+
+A: {
+  label: |md
+    **2. Materialize**
+
+    fast reads, but storage and update cost
+  |
+  shape: rectangle
+  style: {
+    fill: "#8250df"
+    stroke: "#8250df"
+    font-color: "#FFFFFF"
+    border-radius: 6
+    font-size: 16
+  }
+}
+
+B: {
+  label: |md
+    **3. Recompute**
+
+    no storage, but slow reads
+  |
+  shape: rectangle
+  style: {
+    fill: "#1f6feb"
+    stroke: "#388bfd"
+    font-color: "#FFFFFF"
+    border-radius: 6
+    font-size: 16
+  }
+}
+
+C: {
+  label: |md
+    **4. The trade**
+
+    pick per access pattern
+  |
+  shape: rectangle
+  style: {
+    fill: "#d29922"
+    stroke: "#d29922"
+    font-color: "#FFFFFF"
+    border-radius: 6
+    font-size: 16
+  }
+}
+
+S -> A: "1. option"
+A -> B: "2. option"
+B -> C: "3. choose"

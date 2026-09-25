@@ -1,0 +1,70 @@
+direction: down
+
+S: {
+  label: |md
+    **1. Two clocks per event**
+
+    they disagree by the network delay
+  |
+  shape: rectangle
+  style: {
+    fill: "#238636"
+    stroke: "#2ea043"
+    font-color: "#FFFFFF"
+    border-radius: 8
+    font-size: 16
+  }
+}
+
+A: {
+  label: |md
+    **2. Event time**
+
+    correct answers, but wait for stragglers
+  |
+  shape: rectangle
+  style: {
+    fill: "#8250df"
+    stroke: "#8250df"
+    font-color: "#FFFFFF"
+    border-radius: 6
+    font-size: 16
+  }
+}
+
+B: {
+  label: |md
+    **3. Processing time**
+
+    instant answers, but they shift under load
+  |
+  shape: rectangle
+  style: {
+    fill: "#d29922"
+    stroke: "#d29922"
+    font-color: "#FFFFFF"
+    border-radius: 6
+    font-size: 16
+  }
+}
+
+C: {
+  label: |md
+    **4. The trade**
+
+    latency vs correctness - the book's central tension
+  |
+  shape: rectangle
+  style: {
+    fill: "#b62324"
+    stroke: "#da3633"
+    font-color: "#FFFFFF"
+    border-radius: 6
+    font-size: 16
+  }
+}
+
+S -> A: "1. choose"
+S -> B: "2. or choose"
+A -> C: "3. both frame"
+B -> C: "4. both frame"

@@ -92,49 +92,25 @@ _Also known as: SS Ch09 · Streaming Join · Windowed Join · Temporal Join · S
 
 _Role: two streams — feed the join with event-time rows_
 
-```mermaid
-flowchart TD
-  R["click stream + impression stream"]
-  R -->|"comprises"| P0["a click {campaign: #quot;C1#quot;, event_time: #quot;12:03:00#quot;} arrives"]
-  R -->|"comprises"| P1["an impression {campaign: #quot;C1#quot;, event_time: #quot;12:02:00#quot;} arrives"]
-  R -->|"comprises"| P2["each side carries its own watermark"]
-```
+![click stream + impression stream](../diagrams/d2/decomp/ch09-0.png)
 
 ### windowed join (buffer + watermark)
 
 _Role: windowed join — buffers one side and matches within a window_
 
-```mermaid
-flowchart TD
-  R["windowed join (buffer + watermark)"]
-  R -->|"comprises"| P0["the impression buffer holds rows within 5 min of a click"]
-  R -->|"comprises"| P1["the click probes the buffer and finds the 12:02 impression"]
-  R -->|"comprises"| P2["the match is held until both watermarks pass 12:05:00"]
-```
+![windowed join (buffer + watermark)](../diagrams/d2/decomp/ch09-1.png)
 
 ### retraction emitter
 
 _Role: retraction emitter — corrects matches when late data arrives_
 
-```mermaid
-flowchart TD
-  R["retraction emitter"]
-  R -->|"comprises"| P0["a late impression within allowed lateness changes the match"]
-  R -->|"comprises"| P1["the old match is retracted downstream"]
-  R -->|"comprises"| P2["the corrected match is emitted"]
-```
+![retraction emitter](../diagrams/d2/decomp/ch09-2.png)
 
 ### attribution store
 
 _Role: attribution store — holds the final matches_
 
-```mermaid
-flowchart TD
-  R["attribution store"]
-  R -->|"comprises"| P0["the store applies retractions so old matches do not double-count"]
-  R -->|"comprises"| P1["the final state shows the corrected (click, impression) pair"]
-  R -->|"comprises"| P2["join state is garbage-collected past the window + lateness"]
-```
+![attribution store](../diagrams/d2/decomp/ch09-3.png)
 
 ```java
 // SYSTEM DESIGN — a windowed join holds a match until both watermarks pass, then a late row corrects it
@@ -262,21 +238,7 @@ A windowed join matches rows whose time attributes are within a window of each o
 
 **In the wild.** Flink SQL requires an interval for stream-stream joins.
 
-```mermaid
-flowchart TD
-  S(["<b>1. Unbounded joins never finish</b><br/>a matching key may arrive any time"]):::start
-  A["<b>2. So a plain join waits forever</b><br/>and holds state without bound"]:::warn
-  B["<b>3. The fix</b><br/>bound the wait with a window"]:::core
-  C["<b>4. The cost</b><br/>state per key until the window closes"]:::step
-  S -->|"1. which means"| A
-  A -->|"2. hence"| B
-  B -->|"3. paid as"| C
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-```
+![1. Unbounded joins never finish](../diagrams/d2/card/ch09-0.png)
 ### Stream-stream: 2. Windowed joins
 
 **Why.** Two streams need a time window to bound which rows can match.
@@ -287,21 +249,7 @@ flowchart TD
 
 **In the wild.** Flink SQL interval joins are the production form.
 
-```mermaid
-flowchart TD
-  S(["<b>1. Windowed join</b><br/>stream-to-stream"]):::start
-  A["<b>2. Shared time window</b><br/>both sides bounded by the same slice"]:::core
-  B["<b>3. Emit at watermark</b><br/>with late updates after"]:::step
-  C["<b>4. Use when</b><br/>two live streams must match in time"]:::warn
-  S -->|"1. joins within a"| A
-  A -->|"2. and"| B
-  B -->|"3. i.e."| C
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-```
+![2. Windowed joins](../diagrams/d2/card/ch09-1.png)
 ### Stream-table: 3. Temporal joins
 
 **Why.** Enriching a stream against a slowly-changing table is a lookup, not a windowed match.
@@ -312,21 +260,7 @@ flowchart TD
 
 **In the wild.** Flink SQL temporal joins against a changelog table.
 
-```mermaid
-flowchart TD
-  S(["<b>1. Temporal join</b><br/>stream-to-table"]):::start
-  A["<b>2. Join against a version</b><br/>the table snapshot as of event time"]:::core
-  B["<b>3. Enrichment pattern</b><br/>look up a user, product, or currency"]:::step
-  C["<b>4. No window needed</b><br/>the table side is already state"]:::warn
-  S -->|"1. it joins"| A
-  A -->|"2. the classic"| B
-  B -->|"3. so"| C
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-```
+![3. Temporal joins](../diagrams/d2/card/ch09-2.png)
 ### Buffer: 4. Join state
 
 **Why.** Rows from one side must wait for their counterpart on the other side.
@@ -337,21 +271,7 @@ flowchart TD
 
 **In the wild.** Flink holds the buffered side in managed state.
 
-```mermaid
-flowchart TD
-  S(["<b>1. Join state</b><br/>both sides held per key"]):::start
-  A["<b>2. Until the window closes</b><br/>or the match is complete"]:::core
-  B["<b>3. Keyed and partitioned</b><br/>state scales by key"]:::step
-  C["<b>4. The risk</b><br/>unbounded state if never released"]:::warn
-  S -->|"1. held"| A
-  A -->|"2. it is"| B
-  B -->|"3. with"| C
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-```
+![4. Join state](../diagrams/d2/card/ch09-3.png)
 ### Signal: 5. Watermarks bound the wait
 
 **Why.** The pipeline needs to know when no more matching rows will arrive for a time range.
@@ -362,21 +282,7 @@ flowchart TD
 
 **In the wild.** Flink SQL fires interval joins on the watermark.
 
-```mermaid
-flowchart TD
-  S(["<b>1. Watermarks bound the wait</b><br/>a window is matchable until it passes"]):::start
-  A["<b>2. Then emit</b><br/>the join result for that slice"]:::core
-  B["<b>3. Then release state</b><br/>the key's events can be dropped"]:::step
-  C["<b>4. The dependency</b><br/>join correctness rides on the watermark"]:::warn
-  S -->|"1. after which"| A
-  A -->|"2. and"| B
-  B -->|"3. so"| C
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-```
+![5. Watermarks bound the wait](../diagrams/d2/card/ch09-4.png)
 ### Correctness: 6. Late data and retractions
 
 **Why.** A late row can arrive after a match was emitted and change it.
@@ -387,21 +293,7 @@ flowchart TD
 
 **In the wild.** Retract streams in Flink SQL correct emitted joins.
 
-```mermaid
-flowchart TD
-  S(["<b>1. Late data</b><br/>arrives after the watermark"]):::start
-  A["<b>2. May change a join result</b><br/>a missed match, or a wrong one"]:::warn
-  B["<b>3. Retractions</b><br/>withdraw the stale result, emit the corrected"]:::core
-  C["<b>4. The cost</b><br/>downstream must handle withdrawals"]:::step
-  S -->|"1. which"| A
-  A -->|"2. handled by"| B
-  B -->|"3. meaning"| C
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-```
+![6. Late data and retractions](../diagrams/d2/card/ch09-5.png)
 ### Growth: 7. Garbage-collect join state
 
 **Why.** A join buffer that never shrinks exhausts memory.
@@ -412,21 +304,7 @@ flowchart TD
 
 **In the wild.** Flink cleans up interval-join state past the window + lateness.
 
-```mermaid
-flowchart TD
-  S(["<b>1. Garbage-collect join state</b><br/>drop it when it can no longer match"]):::start
-  A["<b>2. After the watermark</b><br/>the window is closed"]:::core
-  B["<b>3. Per-key cleanup</b><br/>release each key's buffered events"]:::step
-  C["<b>4. The discipline</b><br/>no GC means unbounded memory"]:::warn
-  S -->|"1. i.e."| A
-  A -->|"2. done as"| B
-  B -->|"3. because"| C
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-```
+![7. Garbage-collect join state](../diagrams/d2/card/ch09-6.png)
 ### Mistake: 8. Stream-stream vs stream-table confusion
 
 **Why.** Applying the wrong join type produces unbounded buffers or wrong matches.
@@ -437,21 +315,7 @@ flowchart TD
 
 **In the wild.** A common bug is a windowed join where a temporal lookup was intended.
 
-```mermaid
-flowchart TD
-  S(["<b>1. Stream-stream</b><br/>two moving inputs"]):::start
-  A["<b>2. Stream-table</b><br/>one moving, one at rest"]:::core
-  B["<b>3. The confusion</b><br/>using a windowed join where a temporal join fits"]:::warn
-  C["<b>4. The rule</b><br/>two streams - window; a table side - temporal"]:::step
-  S -->|"1. vs"| A
-  A -->|"2. avoid"| B
-  B -->|"3. so"| C
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-```
+![8. Stream-stream vs stream-table confusion](../diagrams/d2/card/ch09-7.png)
 
 </details>
 

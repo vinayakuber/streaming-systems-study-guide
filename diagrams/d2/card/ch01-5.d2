@@ -1,0 +1,69 @@
+direction: down
+
+S: {
+  label: |md
+    **1. Unbounded data**
+
+    never completes
+  |
+  shape: rectangle
+  style: {
+    fill: "#238636"
+    stroke: "#2ea043"
+    font-color: "#FFFFFF"
+    border-radius: 8
+    font-size: 16
+  }
+}
+
+A: {
+  label: |md
+    **2. Chopped into finite windows**
+
+    process each window as a batch
+  |
+  shape: rectangle
+  style: {
+    fill: "#8250df"
+    stroke: "#8250df"
+    font-color: "#FFFFFF"
+    border-radius: 6
+    font-size: 16
+  }
+}
+
+B: {
+  label: |md
+    **3. Repeated batch runs**
+
+    hourly or daily jobs over the latest chunk
+  |
+  shape: rectangle
+  style: {
+    fill: "#1f6feb"
+    stroke: "#388bfd"
+    font-color: "#FFFFFF"
+    border-radius: 6
+    font-size: 16
+  }
+}
+
+C: {
+  label: |md
+    **4. The price**
+
+    arbitrary boundaries; latency and correctness suffer
+  |
+  shape: rectangle
+  style: {
+    fill: "#d29922"
+    stroke: "#d29922"
+    font-color: "#FFFFFF"
+    border-radius: 6
+    font-size: 16
+  }
+}
+
+S -> A: "1. re-framed by"
+A -> B: "2. implemented as"
+B -> C: "3. pays"

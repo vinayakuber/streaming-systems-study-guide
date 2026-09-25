@@ -1,0 +1,69 @@
+direction: down
+
+S: {
+  label: |md
+    **1. Late merges**
+
+    a session changes after it emitted
+  |
+  shape: rectangle
+  style: {
+    fill: "#238636"
+    stroke: "#2ea043"
+    font-color: "#FFFFFF"
+    border-radius: 8
+    font-size: 16
+  }
+}
+
+A: {
+  label: |md
+    **2. The downstream saw stale panes**
+
+    two separate session results
+  |
+  shape: rectangle
+  style: {
+    fill: "#d29922"
+    stroke: "#d29922"
+    font-color: "#FFFFFF"
+    border-radius: 6
+    font-size: 16
+  }
+}
+
+B: {
+  label: |md
+    **3. Retraction needed**
+
+    downstream must undo the stale result
+  |
+  shape: rectangle
+  style: {
+    fill: "#8250df"
+    stroke: "#8250df"
+    font-color: "#FFFFFF"
+    border-radius: 6
+    font-size: 16
+  }
+}
+
+C: {
+  label: |md
+    **4. The cost**
+
+    retractions complicate every downstream consumer
+  |
+  shape: rectangle
+  style: {
+    fill: "#1f6feb"
+    stroke: "#388bfd"
+    font-color: "#FFFFFF"
+    border-radius: 6
+    font-size: 16
+  }
+}
+
+S -> A: "1. means"
+A -> B: "2. so"
+B -> C: "3. and"

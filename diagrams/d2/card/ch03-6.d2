@@ -1,0 +1,70 @@
+direction: down
+
+S: {
+  label: |md
+    **1. Latency vs correctness**
+
+    the watermark's central trade
+  |
+  shape: rectangle
+  style: {
+    fill: "#238636"
+    stroke: "#2ea043"
+    font-color: "#FFFFFF"
+    border-radius: 8
+    font-size: 16
+  }
+}
+
+A: {
+  label: |md
+    **2. Early emission**
+
+    low latency, but late data missed
+  |
+  shape: rectangle
+  style: {
+    fill: "#8250df"
+    stroke: "#8250df"
+    font-color: "#FFFFFF"
+    border-radius: 6
+    font-size: 16
+  }
+}
+
+B: {
+  label: |md
+    **3. Late emission**
+
+    more complete, but results are stale
+  |
+  shape: rectangle
+  style: {
+    fill: "#d29922"
+    stroke: "#d29922"
+    font-color: "#FFFFFF"
+    border-radius: 6
+    font-size: 16
+  }
+}
+
+C: {
+  label: |md
+    **4. No free lunch**
+
+    pick a skew; the trade is structural
+  |
+  shape: rectangle
+  style: {
+    fill: "#b62324"
+    stroke: "#da3633"
+    font-color: "#FFFFFF"
+    border-radius: 6
+    font-size: 16
+  }
+}
+
+S -> A: "1. choose"
+S -> B: "2. or choose"
+A -> C: "3. either way"
+B -> C: "4. either way"

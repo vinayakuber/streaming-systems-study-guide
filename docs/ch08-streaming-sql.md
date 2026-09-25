@@ -92,49 +92,25 @@ _Also known as: SS Ch08 · Streaming SQL · Continuous Query · TUMBLE · HOP ·
 
 _Role: streams — feed the SQL engine with event-time data_
 
-```mermaid
-flowchart TD
-  R["streams (clicks, impressions)"]
-  R -->|"comprises"| P0["a click {campaign: #quot;C1#quot;, event_time: #quot;12:03:00#quot;} arrives"]
-  R -->|"comprises"| P1["an impression {campaign: #quot;C1#quot;, event_time: #quot;12:02:00#quot;} arrives"]
-  R -->|"comprises"| P2["both carry event time for the query's time attribute"]
-```
+![streams (clicks, impressions)](../diagrams/d2/decomp/ch08-0.png)
 
 ### SQL engine (continuous query)
 
 _Role: SQL engine — runs the query forever_
 
-```mermaid
-flowchart TD
-  R["SQL engine (continuous query)"]
-  R -->|"comprises"| P0["the query groups by TUMBLE(event_time, 5 min) and campaign"]
-  R -->|"comprises"| P1["the engine folds each row into the right window"]
-  R -->|"comprises"| P2["updating results emit retractions for changed keys"]
-```
+![SQL engine (continuous query)](../diagrams/d2/decomp/ch08-1.png)
 
 ### watermark + window
 
 _Role: watermark + window — decides when results emit_
 
-```mermaid
-flowchart TD
-  R["watermark + window"]
-  R -->|"comprises"| P0["the watermark at 12:06:30 closes the [12:00, 12:05) window"]
-  R -->|"comprises"| P1["a HOP window would emit the same event into multiple spans"]
-  R -->|"comprises"| P2["a join waits for both sides' watermarks"]
-```
+![watermark + window](../diagrams/d2/decomp/ch08-2.png)
 
 ### sink
 
 _Role: sink — applies the updating result_
 
-```mermaid
-flowchart TD
-  R["sink"]
-  R -->|"comprises"| P0["the sink receives (C1, 3) retracted then (C1, 4) added"]
-  R -->|"comprises"| P1["append-only sinks are simpler but wrong for updating results"]
-  R -->|"comprises"| P2["an upsert sink applies retractions correctly"]
-```
+![sink](../diagrams/d2/decomp/ch08-3.png)
 
 ```java
 // SYSTEM DESIGN — a continuous SQL query updates a campaign count as the watermark closes a TUMBLE window
@@ -265,21 +241,7 @@ GROUP BY TUMBLE(event_time, INTERVAL '5' MINUTE), campaign
 
 **In the wild.** Flink SQL, Beam SQL, and ksqlDB are production streaming-SQL engines.
 
-```mermaid
-flowchart TD
-  S(["<b>1. Streaming is too low-level</b><br/>hand-rolled operators are verbose"]):::start
-  A["<b>2. SQL is declarative</b><br/>say what, not how"]:::core
-  B["<b>3. Streaming SQL</b><br/>continuous queries over streams"]:::step
-  C["<b>4. The payoff</b><br/>familiar syntax, engine-optimized execution"]:::warn
-  S -->|"1. the fix"| A
-  A -->|"2. applied as"| B
-  B -->|"3. giving"| C
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-```
+![1. Stream processing is too low-level](../diagrams/d2/card/ch08-0.png)
 ### Query: 2. Continuous queries
 
 **Why.** A stream never ends, so a query over it must run forever, not once.
@@ -290,21 +252,7 @@ flowchart TD
 
 **In the wild.** A materialized view over a Kafka topic is a continuous query.
 
-```mermaid
-flowchart TD
-  S(["<b>1. Continuous query</b><br/>runs forever"]):::start
-  A["<b>2. Emits as data arrives</b><br/>not once at the end"]:::core
-  B["<b>3. Table semantics</b><br/>append-only or updating results"]:::step
-  C["<b>4. In practice</b><br/>Flink SQL, Beam SQL, ksqlDB"]:::warn
-  S -->|"1. it"| A
-  A -->|"2. with"| B
-  B -->|"3. e.g."| C
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-```
+![2. Continuous queries](../diagrams/d2/card/ch08-1.png)
 ### Time: 3. Time attributes
 
 **Why.** Windows and joins need to know which time to use — when the event happened or when it was processed.
@@ -315,21 +263,7 @@ flowchart TD
 
 **In the wild.** Flink SQL's event-time attribute drives watermark-based windows.
 
-```mermaid
-flowchart TD
-  S(["<b>1. Time attributes</b><br/>event-time or processing-time columns"]):::start
-  A["<b>2. Declared per table</b><br/>the engine must know the clock"]:::core
-  B["<b>3. Event time needs a watermark</b><br/>else the engine cannot close windows"]:::step
-  C["<b>4. The rule</b><br/>every windowed query names its time attribute"]:::warn
-  S -->|"1. they are"| A
-  A -->|"2. and"| B
-  B -->|"3. so"| C
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-```
+![3. Time attributes](../diagrams/d2/card/ch08-2.png)
 ### Window: 4. TUMBLE, HOP, SESSION
 
 **Why.** Aggregates over a stream need an explicit time slice, spelled out in SQL.
@@ -340,21 +274,7 @@ flowchart TD
 
 **In the wild.** Flink SQL and Beam SQL both support these.
 
-```mermaid
-flowchart TD
-  S(["<b>1. TUMBLE</b><br/>fixed, non-overlapping windows"]):::start
-  A["<b>2. HOP</b><br/>sliding - fixed size, fixed period"]:::core
-  B["<b>3. SESSION</b><br/>activity-bounded, merging"]:::step
-  C["<b>4. All emit on the watermark</b><br/>when the window's end passes"]:::warn
-  S -->|"1. then"| A
-  A -->|"2. then"| B
-  B -->|"3. each"| C
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-```
+![4. TUMBLE, HOP, SESSION](../diagrams/d2/card/ch08-3.png)
 ### Mode: 5. Append-only vs updating results
 
 **Why.** Some results only add rows; others change existing rows, which sinks must handle differently.
@@ -365,21 +285,7 @@ flowchart TD
 
 **In the wild.** Flink SQL emits retract streams for updating queries.
 
-```mermaid
-flowchart TD
-  S(["<b>1. Append-only results</b><br/>each row is a new fact"]):::start
-  A["<b>2. Updating results</b><br/>a key's value changes over time"]:::core
-  B["<b>3. Retractions</b><br/>updates ship the old value as a withdrawal"]:::step
-  C["<b>4. The difference</b><br/>whether downstream sees history or current state"]:::warn
-  S -->|"1. vs"| A
-  A -->|"2. needing"| B
-  B -->|"3. which is"| C
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-```
+![5. Append-only vs updating results](../diagrams/d2/card/ch08-4.png)
 ### Join: 6. Windowed joins
 
 **Why.** Two unbounded streams have no natural join boundary, so time must supply one.
@@ -390,21 +296,7 @@ flowchart TD
 
 **In the wild.** Flink SQL interval joins are the production form.
 
-```mermaid
-flowchart TD
-  S(["<b>1. Windowed joins</b><br/>two streams in a shared window"]):::start
-  A["<b>2. Bounded by the window</b><br/>matches only within the time slice"]:::core
-  B["<b>3. Emit on watermark</b><br/>plus late updates"]:::step
-  C["<b>4. In SQL</b><br/>JOIN ... WITHIN or a window clause"]:::warn
-  S -->|"1. they are"| A
-  A -->|"2. and"| B
-  B -->|"3. e.g."| C
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-```
+![6. Windowed joins](../diagrams/d2/card/ch08-5.png)
 ### Watermark: 7. The watermark drives SQL emission
 
 **Why.** A windowed result must wait until the engine believes the window is complete.
@@ -415,21 +307,7 @@ flowchart TD
 
 **In the wild.** Flink SQL uses the watermark to fire windows.
 
-```mermaid
-flowchart TD
-  S(["<b>1. The watermark drives SQL emission</b><br/>windows close when it passes"]):::start
-  A["<b>2. No watermark</b><br/>no final result"]:::warn
-  B["<b>3. Late data</b><br/>updates or retractions after emission"]:::core
-  C["<b>4. The takeaway</b><br/>SQL correctness rides on the watermark"]:::step
-  S -->|"1. so"| A
-  A -->|"2. while"| B
-  B -->|"3. hence"| C
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-```
+![7. The watermark drives SQL emission](../diagrams/d2/card/ch08-6.png)
 ### Choice: 8. Event time vs processing time
 
 **Why.** The time attribute is a correctness decision, not a syntax detail.
@@ -440,22 +318,7 @@ flowchart TD
 
 **In the wild.** Production SQL pipelines default to event time.
 
-```mermaid
-flowchart TD
-  S(["<b>1. Event time vs processing time</b><br/>in SQL, the same choice"]):::start
-  A["<b>2. Event time</b><br/>correct, but waits on the watermark"]:::core
-  B["<b>3. Processing time</b><br/>instant, but shifts under load"]:::warn
-  C["<b>4. Declare it</b><br/>the time attribute picks the clock"]:::step
-  S -->|"1. choose"| A
-  S -->|"2. or"| B
-  A -->|"3. via"| C
-  B -->|"4. via"| C
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-```
+![8. Event time vs processing time](../diagrams/d2/card/ch08-7.png)
 
 </details>
 

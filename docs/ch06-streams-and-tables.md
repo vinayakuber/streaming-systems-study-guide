@@ -92,49 +92,25 @@ _Also known as: SS Ch06 · Stream-Table Duality · Change Log · Materialized Vi
 
 _Role: database — holds the source table_
 
-```mermaid
-flowchart TD
-  R["database (table)"]
-  R -->|"comprises"| P0["account 42 balance is 7, then updates to 12"]
-  R -->|"comprises"| P1["the database is table-centric state"]
-  R -->|"comprises"| P2["the update is the event that CDC will capture"]
-```
+![database (table)](../diagrams/d2/decomp/ch06-0.png)
 
 ### change capture (CDC)
 
 _Role: change capture — turns table writes into a changelog_
 
-```mermaid
-flowchart TD
-  R["change capture (CDC)"]
-  R -->|"comprises"| P0["the update 7 -&gt; 12 emits the changelog record (7,12)"]
-  R -->|"comprises"| P1["the record carries the old value for retraction"]
-  R -->|"comprises"| P2["the changelog is append-only and ordered"]
-```
+![change capture (CDC)](../diagrams/d2/decomp/ch06-1.png)
 
 ### changelog stream
 
 _Role: changelog stream — the stream view of the data_
 
-```mermaid
-flowchart TD
-  R["changelog stream"]
-  R -->|"comprises"| P0["the stream is [ (0,10), (10,7), (7,12) ]"]
-  R -->|"comprises"| P1["it is the source of truth — history is retained"]
-  R -->|"comprises"| P2["any past table is a fold up to that point"]
-```
+![changelog stream](../diagrams/d2/decomp/ch06-2.png)
 
 ### stream processor (fold)
 
 _Role: stream processor — derives tables from the stream_
 
-```mermaid
-flowchart TD
-  R["stream processor (fold)"]
-  R -->|"comprises"| P0["the fold applies each (old, new) pair"]
-  R -->|"comprises"| P1["after (7,12) the materialized balance is 12"]
-  R -->|"comprises"| P2["the derived table matches the source database"]
-```
+![stream processor (fold)](../diagrams/d2/decomp/ch06-3.png)
 
 ```java
 // SYSTEM DESIGN — a balance update flows from table to changelog and back to a matching table
@@ -263,21 +239,7 @@ A stream is a sequence of events over time — an append-only change log.
 
 **In the wild.** Kafka (stream) vs a database index (table) are the two projections.
 
-```mermaid
-flowchart TD
-  S(["<b>1. One dataset, two forms</b><br/>motion and state"]):::start
-  A["<b>2. A stream</b><br/>the change log - events over time"]:::core
-  B["<b>3. A table</b><br/>the current value per key"]:::step
-  C["<b>4. The insight</b><br/>each is the other viewed differently"]:::warn
-  S -->|"1. is"| A
-  A -->|"2. materialized as"| B
-  B -->|"3. so"| C
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-```
+![1. One dataset, two forms](../diagrams/d2/card/ch06-0.png)
 ### View: 2. Streams
 
 **Why.** Order of events and history matter when the question is "what happened".
@@ -288,21 +250,7 @@ flowchart TD
 
 **In the wild.** A Kafka topic is a stream.
 
-```mermaid
-flowchart TD
-  S(["<b>1. A stream</b><br/>motion"]):::start
-  A["<b>2. Append-only events</b><br/>each event is a fact that happened"]:::core
-  B["<b>3. Ordered by time</b><br/>event time, possibly out of arrival order"]:::step
-  C["<b>4. The change log</b><br/>a stream is the log of changes to some state"]:::warn
-  S -->|"1. it is"| A
-  A -->|"2. roughly"| B
-  B -->|"3. i.e."| C
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-```
+![2. Streams](../diagrams/d2/card/ch06-1.png)
 ### View: 3. Tables
 
 **Why.** A point-in-time answer needs a snapshot, not a history.
@@ -313,21 +261,7 @@ flowchart TD
 
 **In the wild.** A SQL materialized view or a database index is a table.
 
-```mermaid
-flowchart TD
-  S(["<b>1. A table</b><br/>state"]):::start
-  A["<b>2. Current value per key</b><br/>the latest fact wins"]:::core
-  B["<b>3. A materialized view</b><br/>of its change stream"]:::step
-  C["<b>4. The database shape</b><br/>what you query"]:::warn
-  S -->|"1. holds the"| A
-  A -->|"2. it is"| B
-  B -->|"3. which is"| C
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-```
+![3. Tables](../diagrams/d2/card/ch06-2.png)
 ### Direction: 4. Stream -> table
 
 **Why.** To answer "what is the current total" from a feed of events, aggregate them.
@@ -338,21 +272,7 @@ flowchart TD
 
 **In the wild.** A Flink keyed aggregation produces a stateful table.
 
-```mermaid
-flowchart TD
-  S(["<b>1. Stream to table</b><br/>aggregate events into state"]):::start
-  A["<b>2. Sum, count, last-write-wins</b><br/>each key folds its events"]:::core
-  B["<b>3. Materialization</b><br/>the table is the stream, at rest"]:::step
-  C["<b>4. In practice</b><br/>a feed view, a counter, an inbox"]:::warn
-  S -->|"1. via"| A
-  A -->|"2. called"| B
-  B -->|"3. e.g."| C
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-```
+![4. Stream -> table](../diagrams/d2/card/ch06-3.png)
 ### Direction: 5. Table -> stream
 
 **Why.** To react to database changes in real time, capture them as a feed.
@@ -363,21 +283,7 @@ flowchart TD
 
 **In the wild.** Debezium CDC turns MySQL/Postgres into Kafka changelogs.
 
-```mermaid
-flowchart TD
-  S(["<b>1. Table to stream</b><br/>state emits its changes"]):::start
-  A["<b>2. The change log</b><br/>every insert, update, delete is an event"]:::core
-  B["<b>3. Replication is this</b><br/>a database ships its change log to replicas"]:::step
-  C["<b>4. In practice</b><br/>CDC, binlogs, WAL replay"]:::warn
-  S -->|"1. as"| A
-  A -->|"2. literally"| B
-  B -->|"3. e.g."| C
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-```
+![5. Table -> stream](../diagrams/d2/card/ch06-4.png)
 ### Duality: 6. The round-trip
 
 **Why.** The two directions should be inverses — that is the formal statement of the duality.
@@ -388,21 +294,7 @@ flowchart TD
 
 **In the wild.** This is the theoretical basis for stream-table systems.
 
-```mermaid
-flowchart TD
-  S(["<b>1. The round-trip</b><br/>table of a stream, stream of a table"]):::start
-  A["<b>2. Aggregate a stream into a table</b><br/>then watch the table for changes"]:::core
-  B["<b>3. You get a stream again</b><br/>the derived change log"]:::step
-  C["<b>4. One idea, two directions</b><br/>the duality is closed"]:::warn
-  S -->|"1. step one"| A
-  A -->|"2. step two"| B
-  B -->|"3. so"| C
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-```
+![6. The round-trip](../diagrams/d2/card/ch06-5.png)
 ### Choice: 7. Materialize vs recompute
 
 **Why.** Keeping a table has a cost, and recomputing it also has a cost — the duality makes the trade explicit.
@@ -413,21 +305,7 @@ flowchart TD
 
 **In the wild.** A cache (eager) vs a query-time fold (lazy) is the production choice.
 
-```mermaid
-flowchart TD
-  S(["<b>1. Materialize vs recompute</b><br/>store the view, or rebuild it"]):::start
-  A["<b>2. Materialize</b><br/>fast reads, but storage and update cost"]:::core
-  B["<b>3. Recompute</b><br/>no storage, but slow reads"]:::step
-  C["<b>4. The trade</b><br/>pick per access pattern"]:::warn
-  S -->|"1. option"| A
-  A -->|"2. option"| B
-  B -->|"3. choose"| C
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-```
+![7. Materialize vs recompute](../diagrams/d2/card/ch06-6.png)
 ### Truth: 8. Stream as source of truth
 
 **Why.** A table alone loses history; a stream alone is inconvenient for lookups.
@@ -438,21 +316,7 @@ flowchart TD
 
 **In the wild.** Event-sourced systems are the production form.
 
-```mermaid
-flowchart TD
-  S(["<b>1. Stream as source of truth</b><br/>the log is the ledger"]):::start
-  A["<b>2. Tables are derived</b><br/>views you can rebuild by replay"]:::core
-  B["<b>3. Reprocessing</b><br/>fix a bug, replay, rebuild the views"]:::step
-  C["<b>4. The payoff</b><br/>the past is never lost"]:::warn
-  S -->|"1. so"| A
-  A -->|"2. enabling"| B
-  B -->|"3. and"| C
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-```
+![8. Stream as source of truth](../diagrams/d2/card/ch06-7.png)
 
 </details>
 

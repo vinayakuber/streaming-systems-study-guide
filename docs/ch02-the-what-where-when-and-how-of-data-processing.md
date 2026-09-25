@@ -91,49 +91,25 @@ _Also known as: SS Ch02 · Beam Model · Transformations · Windowing · Trigger
 
 _Role: writer — emits events with event time_
 
-```mermaid
-flowchart TD
-  R["writer (event source)"]
-  R -->|"comprises"| P0["a purchase event {user: 42, amount: 10, event_time: #quot;12:04:00#quot;} is emitted"]
-  R -->|"comprises"| P1["event time is stamped by the source, not the pipeline"]
-  R -->|"comprises"| P2["events are immutable once produced"]
-```
+![writer (event source)](../diagrams/d2/decomp/ch02-0.png)
 
 ### transport (stream)
 
 _Role: transport — carries events and computes the watermark_
 
-```mermaid
-flowchart TD
-  R["transport (stream)"]
-  R -->|"comprises"| P0["the stream delivers the event and tracks the watermark = 12:05:00"]
-  R -->|"comprises"| P1["the watermark says no events earlier than 12:05:00 will arrive"]
-  R -->|"comprises"| P2["network delay keeps the watermark behind the wall clock"]
-```
+![transport (stream)](../diagrams/d2/decomp/ch02-1.png)
 
 ### collector (window assigner)
 
 _Role: collector — assigns events to event-time windows_
 
-```mermaid
-flowchart TD
-  R["collector (window assigner)"]
-  R -->|"comprises"| P0["the window assigner places the event in fixed window [12:00, 12:05)"]
-  R -->|"comprises"| P1["a trigger decides when the window result is emitted"]
-  R -->|"comprises"| P2["allowed lateness keeps the window open for stragglers"]
-```
+![collector (window assigner)](../diagrams/d2/decomp/ch02-2.png)
 
 ### aggregator/store (per-window state)
 
 _Role: aggregator/store — holds the running sum per window_
 
-```mermaid
-flowchart TD
-  R["aggregator/store (per-window state)"]
-  R -->|"comprises"| P0["window [12:00, 12:05) sum : 0 -&gt; 10 as the purchase folds in"]
-  R -->|"comprises"| P1["an early pane emits {sum: 10}, an on-time pane re-emits {sum: 10}"]
-  R -->|"comprises"| P2["a late straggler updates sum : 10 -&gt; 20 if inside allowed lateness"]
-```
+![aggregator/store (per-window state)](../diagrams/d2/decomp/ch02-3.png)
 
 ```java
 // SYSTEM DESIGN — a purchase flows through a fixed window; the watermark closes it on time, allowed lateness catches a straggler
@@ -262,21 +238,7 @@ Transformations are the computations — sum, filter, join, keyed aggregation �
 
 **In the wild.** Beam's PTransform (what), Window (where), Trigger (when), and AccumulationMode (how) map one-to-one onto the four questions.
 
-```mermaid
-flowchart TD
-  S(["<b>1. A named pipeline</b><br/>sum, join, filter - but four questions left open"]):::start
-  A["<b>2. What / Where / When / How</b><br/>transform, window, trigger, accumulate"]:::core
-  B["<b>3. Underspecified = surprising</b><br/>two engines give two different answers for the same code"]:::warn
-  C["<b>4. The checklist</b><br/>answer all four and the pipeline is fully specified"]:::stop
-  S -->|"1. must answer"| A
-  A -->|"2. otherwise"| B
-  B -->|"3. fixed by"| C
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-```
+![1. Pipelines are underspecified](../diagrams/d2/card/ch02-0.png)
 ### Axis: 2. Transformations (what)
 
 **Why.** The output of a pipeline is whatever its transforms compute, so the transform is the first thing a design must pin down.
@@ -287,21 +249,7 @@ flowchart TD
 
 **In the wild.** A Beam ParDo or a Flink map/keyBy/sum is a transform.
 
-```mermaid
-flowchart TD
-  S(["<b>1. What = transformations</b><br/>the per-element computation"]):::start
-  A["<b>2. Element-wise and per-pane</b><br/>map, filter, sum - pure functions over data"]:::core
-  B["<b>3. The first question</b><br/>without it nothing else is defined"]:::step
-  C["<b>4. In Beam</b><br/>ParDo and combiners express it"]:::warn
-  S -->|"1. split into"| A
-  A -->|"2. it is"| B
-  B -->|"3. e.g."| C
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-```
+![2. Transformations (what)](../diagrams/d2/card/ch02-1.png)
 ### Axis: 3. Windowing (where)
 
 **Why.** An unbounded stream has no natural boundary, so aggregates need an explicit event-time slice to be well-defined.
@@ -312,21 +260,7 @@ flowchart TD
 
 **In the wild.** A 5-minute fixed window in Flink is a windowing choice.
 
-```mermaid
-flowchart TD
-  S(["<b>1. Where = windowing</b><br/>the event-time slice a transform runs over"]):::start
-  A["<b>2. Fixed, sliding, session</b><br/>the three shapes of event-time grouping"]:::core
-  B["<b>3. Event time, not processing time</b><br/>the bucket is when the event happened"]:::step
-  C["<b>4. The second question</b><br/>windows decide what a result means"]:::warn
-  S -->|"1. answered with"| A
-  A -->|"2. always in"| B
-  B -->|"3. because"| C
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-```
+![3. Windowing (where)](../diagrams/d2/card/ch02-2.png)
 ### Axis: 4. Triggers (when)
 
 **Why.** Without a trigger a window result sits unemitted forever, so the pipeline must name the processing-time conditions that fire output.
@@ -337,21 +271,7 @@ flowchart TD
 
 **In the wild.** Flink's trigger API fires on watermark passage by default.
 
-```mermaid
-flowchart TD
-  S(["<b>1. When = triggers</b><br/>when results materialize"]):::start
-  A["<b>2. Repeated, not once</b><br/>a window can emit many times as data arrives"]:::core
-  B["<b>3. Kinds</b><br/>processing-time, count-based, watermark, data-driven"]:::step
-  C["<b>4. The third question</b><br/>triggers decide freshness vs cost"]:::warn
-  S -->|"1. they are"| A
-  A -->|"2. the"| B
-  B -->|"3. answering"| C
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-```
+![4. Triggers (when)](../diagrams/d2/card/ch02-3.png)
 ### Signal: 5. Watermarks
 
 **Why.** The pipeline needs a signal for how complete event time is before it can safely close a window.
@@ -362,21 +282,7 @@ flowchart TD
 
 **In the wild.** Flink and Dataflow watermarks are the production completeness signal.
 
-```mermaid
-flowchart TD
-  S(["<b>1. Watermark</b><br/>a monotonic estimate of event-time completeness"]):::start
-  A["<b>2. Gates a trigger</b><br/>emit when the watermark passes the window's end"]:::core
-  B["<b>3. Heuristic, not perfect</b><br/>some events will still arrive late"]:::step
-  C["<b>4. Paired with allowed lateness</b><br/>late data gets a data-driven trigger"]:::warn
-  S -->|"1. it"| A
-  A -->|"2. but it is"| B
-  B -->|"3. so"| C
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-```
+![5. Watermarks](../diagrams/d2/card/ch02-4.png)
 ### Bound: 6. Allowed lateness
 
 **Why.** After the watermark passes, late data still exists, and the pipeline must bound how long it keeps window state around for stragglers.
@@ -387,21 +293,7 @@ flowchart TD
 
 **In the wild.** Dataflow's allowed-lateness setting is the production form.
 
-```mermaid
-flowchart TD
-  S(["<b>1. Allowed lateness</b><br/>the grace period after the watermark"]):::start
-  A["<b>2. A data-driven trigger</b><br/>any late event re-fires the window"]:::core
-  B["<b>3. Trade-off</b><br/>longer grace = more correct, more state, more late updates"]:::warn
-  C["<b>4. After it lapses</b><br/>later data is dropped or parked"]:::step
-  S -->|"1. enables"| A
-  A -->|"2. the"| B
-  B -->|"3. once"| C
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-```
+![6. Allowed lateness](../diagrams/d2/card/ch02-5.png)
 ### Mode: 7. Accumulation (how)
 
 **Why.** A window that emits early and on-time produces multiple panes, and downstream must know if each pane adds to or replaces the last.
@@ -412,21 +304,7 @@ flowchart TD
 
 **In the wild.** Beam's accumulation modes are the production expression of "how".
 
-```mermaid
-flowchart TD
-  S(["<b>1. How = accumulation</b><br/>how a new pane relates to the prior one"]):::start
-  A["<b>2. Discarding</b><br/>each pane independent"]:::core
-  B["<b>3. Accumulating</b><br/>running total grows"]:::step
-  C["<b>4. Accumulating + retracting</b><br/>running total plus a retraction of the old value"]:::warn
-  S -->|"1. mode"| A
-  A -->|"2. next mode"| B
-  B -->|"3. exact mode"| C
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-```
+![7. Accumulation (how)](../diagrams/d2/card/ch02-6.png)
 ### Checklist: 8. The four-question checklist
 
 **Why.** A design review that omits one axis ships a pipeline whose latency or correctness is an accident rather than a decision.
@@ -437,21 +315,7 @@ flowchart TD
 
 **In the wild.** The book's recurring worked example (team score over sessions) is defined by exactly these four answers.
 
-```mermaid
-flowchart TD
-  S(["<b>1. Four questions</b><br/>what, where, when, how"]):::start
-  A["<b>2. Each has a default</b><br/>but the defaults are engine-specific"]:::core
-  B["<b>3. The checklist</b><br/>state all four before you trust a result"]:::step
-  C["<b>4. The payoff</b><br/>a pipeline you can reason about and port"]:::warn
-  S -->|"1. they form"| A
-  A -->|"2. so use"| B
-  B -->|"3. giving"| C
-  classDef step fill:#1f6feb,color:#ffffff,stroke:#388bfd,rx:6
-  classDef core fill:#8250df,color:#ffffff,stroke:#8250df,rx:6
-  classDef warn fill:#d29922,color:#ffffff,stroke:#d29922,rx:6
-  classDef start fill:#238636,color:#ffffff,stroke:#2ea043,rx:6
-  classDef stop fill:#b62324,color:#ffffff,stroke:#da3633,rx:6
-```
+![8. The four-question checklist](../diagrams/d2/card/ch02-7.png)
 
 </details>
 
