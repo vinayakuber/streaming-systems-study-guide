@@ -234,10 +234,11 @@ Event time is the time at which an event actually occurred, as stamped by the pr
 
 ### Real-World Examples
 
-- **Apache Flink** — Stream processor with first-class event-time and watermark support
-- **Apache Kafka** — The unbounded transport that makes streams concrete
-- **Apache Beam** — Unified model over batch and streaming runners
-- **MapReduce** — The classic bounded-data batch engine
+- **Apache Flink** — First-class event-time and processing-time modes; a job over a Kafka topic is streaming in the book's precise sense
+- **Apache Kafka** — An unbounded, append-only topic that makes a stream concrete
+- **Apache Beam** — One pipeline that runs on batch and streaming runners — batch as a special case of streaming
+- **Google Cloud Dataflow** — A fully managed Beam runner that executes the same pipeline over bounded or unbounded input
+- **MapReduce / Hadoop** — The classic bounded-data engine that assumes an input with an end
 
 
 <details><summary>All concepts (index)</summary>
@@ -400,4 +401,11 @@ Event time is the time at which an event actually occurred, as stamped by the pr
 **B.** The gap is caused by everything between the producer and the processor: network, queues, and replays.
 
 </details>
+
+## Sources
+
+- [Tyler Akidau — "The world beyond batch: Streaming 101"](https://www.oreilly.com/radar/the-world-beyond-batch-streaming-101/) — The original framing of event time vs processing time and the bounded/unbounded distinction this chapter builds on
+- [Akidau et al. — "The Dataflow Model" (VLDB 2015)](https://www.vldb.org/pvldb/vol8/p1792-Akidau.pdf) — The paper that makes batch a special case of streaming via the what/where/when/how model
+- [Apache Beam programming guide](https://beam.apache.org/documentation/programming-guide/) — The model as a working API over batch and streaming runners
+- [Apache Flink — Concepts: Time](https://nightlies.apache.org/flink/flink-docs-stable/docs/concepts/time/) — How event time and processing time are treated in a production stream processor
 

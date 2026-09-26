@@ -84,9 +84,10 @@ registerChapter({
       { tag: 'tradeoff', tagLabel: 'Truth', title: '8. Stream as source of truth', content: '<p><strong>Why.</strong> A table alone loses history; a stream alone is inconvenient for lookups.</p><p><strong>Claim.</strong> Keep the stream as the source of truth and derive tables as views — any past table is a fold of the stream up to that point.</p><p><strong>Grounding.</strong> Time-travel is free if the stream is retained.</p><p><strong>In the wild.</strong> Event-sourced systems are the production form.</p>' }
     ],
     examples: [
-      { name: 'Kafka', desc: 'The changelog stream; the log is the source of truth' },
-      { name: 'Debezium', desc: 'Change-data-capture turning tables into changelog streams' },
-      { name: 'Event sourcing', desc: 'Keeping the stream as truth and deriving tables as projections' }
+      { name: 'Apache Kafka', desc: 'A topic is a changelog stream; the retained log is the source of truth' },
+      { name: 'Debezium', desc: 'Change-data-capture turning MySQL and Postgres tables into Kafka changelogs' },
+      { name: 'Kafka Streams', desc: 'KStream (stream) and KTable (table) as the dual API' },
+      { name: 'Event sourcing', desc: 'The pattern of keeping the event stream as truth and deriving projections' }
     ],
     extraHtml: ''
   },
@@ -145,5 +146,11 @@ registerChapter({
     { question: "Aggregating a stream produces a ___ .", options: ["A. stream", "B. table", "C. changelog", "D. watermark"], answer: 2, explanation: "Aggregation folds the stream into a materialized table.", conceptRef: "4. Stream -> table" },
     { question: "What does change-data-capture (CDC) produce?", options: ["A. A table", "B. A changelog stream of a table's changes", "C. A watermark", "D. A window"], answer: 2, explanation: "CDC turns table writes into a changelog stream of (old, new) pairs.", conceptRef: "5. Table -> stream" },
     { question: "Why keep the stream as the source of truth?", options: ["A. It is faster to query", "B. Any past table is recoverable by folding the stream", "C. It uses less storage", "D. It never needs retractions"], answer: 2, explanation: "The stream is the full history, so any past table is a fold up to that point.", conceptRef: "8. Stream as source of truth" }
+  ],
+  sources: [
+    { name: 'Michael Noll — "Of Streams and Tables in Kafka and Stream Processing, Part 1"', url: 'https://www.confluent.io/blog/kafka-streams-tables-part-1-event-streaming/', note: 'The stream-table duality as implemented in Kafka Streams' },
+    { name: 'Apache Kafka — Kafka Streams documentation', url: 'https://kafka.apache.org/documentation/streams/', note: 'KStream and KTable as the two views of the same data' },
+    { name: 'Debezium documentation', url: 'https://debezium.io/documentation/reference/stable/', note: 'Change-data-capture that turns database tables into changelog streams' },
+    { name: 'Akidau et al. — "The Dataflow Model" (VLDB 2015)', url: 'https://www.vldb.org/pvldb/vol8/p1792-Akidau.pdf', note: 'The stream and table relationship in the processing model' }
   ]
 });

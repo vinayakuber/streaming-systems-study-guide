@@ -232,9 +232,10 @@ A stream is a sequence of events over time — an append-only change log.
 
 ### Real-World Examples
 
-- **Kafka** — The changelog stream; the log is the source of truth
-- **Debezium** — Change-data-capture turning tables into changelog streams
-- **Event sourcing** — Keeping the stream as truth and deriving tables as projections
+- **Apache Kafka** — A topic is a changelog stream; the retained log is the source of truth
+- **Debezium** — Change-data-capture turning MySQL and Postgres tables into Kafka changelogs
+- **Kafka Streams** — KStream (stream) and KTable (table) as the dual API
+- **Event sourcing** — The pattern of keeping the event stream as truth and deriving projections
 
 
 <details><summary>All concepts (index)</summary>
@@ -397,4 +398,11 @@ A stream is a sequence of events over time — an append-only change log.
 **B.** The stream is the full history, so any past table is a fold up to that point.
 
 </details>
+
+## Sources
+
+- [Michael Noll — "Of Streams and Tables in Kafka and Stream Processing, Part 1"](https://www.confluent.io/blog/kafka-streams-tables-part-1-event-streaming/) — The stream-table duality as implemented in Kafka Streams
+- [Apache Kafka — Kafka Streams documentation](https://kafka.apache.org/documentation/streams/) — KStream and KTable as the two views of the same data
+- [Debezium documentation](https://debezium.io/documentation/reference/stable/) — Change-data-capture that turns database tables into changelog streams
+- [Akidau et al. — "The Dataflow Model" (VLDB 2015)](https://www.vldb.org/pvldb/vol8/p1792-Akidau.pdf) — The stream and table relationship in the processing model
 

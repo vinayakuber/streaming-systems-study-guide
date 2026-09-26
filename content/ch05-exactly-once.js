@@ -90,9 +90,10 @@ registerChapter({
       { tag: 'tradeoff', tagLabel: 'Boundary', title: '8. Isolate side effects', content: '<p><strong>Why.</strong> Retries are most controllable when the effect is one idempotent write at the edge.</p><p><strong>Claim.</strong> Keep the main computation pure and push side effects to the very end of the pipeline.</p><p><strong>Grounding.</strong> A pure core plus a thin idempotent boundary is the cleanest exactly-once design.</p><p><strong>In the wild.</strong> Enrich -> compute -> idempotent upsert is the standard Dataflow shape.</p>' }
     ],
     examples: [
-      { name: 'Stripe', desc: 'Idempotency-Key header makes charge retries safe' },
-      { name: 'Apache Kafka', desc: 'Exactly-once semantics via idempotent producer + transactions' },
-      { name: 'Apache Flink', desc: 'Two-phase commit sinks for end-to-end exactly-once' }
+      { name: 'Stripe', desc: 'Idempotency-Key header makes payment retries safe' },
+      { name: 'Apache Kafka', desc: 'Idempotent producer plus transactions for exactly-once semantics' },
+      { name: 'Apache Flink', desc: 'Checkpointing plus two-phase commit sinks for end-to-end exactly-once' },
+      { name: 'Google MillWheel', desc: 'Exactly-once stream processing at internet scale' }
     ],
     extraHtml: ''
   },
@@ -150,5 +151,11 @@ registerChapter({
     { question: "What are the three parts of end-to-end exactly-once?", options: ["A. Source, cache, queue", "B. Replayable source, deduplicating shuffle, idempotent sink", "C. Producer, broker, consumer", "D. Trigger, watermark, window"], answer: 2, explanation: "End-to-end exactly-once composes a replayable source, a deduplicating shuffle, and an idempotent sink.", conceptRef: "5. End-to-end exactly-once" },
     { question: "Why are side effects the hard part of exactly-once?", options: ["A. They are slow", "B. They touch the outside world and cannot be recomputed", "C. They use too much memory", "D. They require watermarks"], answer: 2, explanation: "An email or charge cannot be undone by recomputation, so it needs idempotency or a two-phase commit.", conceptRef: "6. Side effects" },
     { question: "Which is preferred for making a charge exactly-once?", options: ["A. Two-phase commit", "B. Idempotency key", "C. Retry without a key", "D. Ignoring failures"], answer: 2, explanation: "An idempotency key is cheap and robust; two-phase commit is expensive and fragile.", conceptRef: "7. Idempotency key vs two-phase commit" }
+  ],
+  sources: [
+    { name: 'Akidau et al. — "MillWheel" (VLDB 2013)', url: 'https://research.google/pubs/pub41378/', note: 'Exactly-once stream processing and the side-effect problem in production' },
+    { name: 'Confluent — "Exactly-Once Semantics Are Possible: Here\'s How Apache Kafka Does It"', url: 'https://www.confluent.io/blog/exactly-once-semantics-are-possible-heres-how-apache-kafka-does-it/', note: 'How an idempotent producer plus transactions give end-to-end exactly-once' },
+    { name: 'Stripe — Idempotency documentation', url: 'https://stripe.com/docs/idempotency', note: 'The Idempotency-Key pattern for retry-safe side effects' },
+    { name: 'Apache Flink — Stateful stream processing', url: 'https://nightlies.apache.org/flink/flink-docs-stable/docs/concepts/stateful-stream-processing/', note: 'Checkpointing and exactly-once state as the engine guarantee' }
   ]
 });

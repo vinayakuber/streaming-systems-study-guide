@@ -238,9 +238,10 @@ An idempotent operation has the same effect whether run once or many times — S
 
 ### Real-World Examples
 
-- **Stripe** — Idempotency-Key header makes charge retries safe
-- **Apache Kafka** — Exactly-once semantics via idempotent producer + transactions
-- **Apache Flink** — Two-phase commit sinks for end-to-end exactly-once
+- **Stripe** — Idempotency-Key header makes payment retries safe
+- **Apache Kafka** — Idempotent producer plus transactions for exactly-once semantics
+- **Apache Flink** — Checkpointing plus two-phase commit sinks for end-to-end exactly-once
+- **Google MillWheel** — Exactly-once stream processing at internet scale
 
 
 <details><summary>All concepts (index)</summary>
@@ -403,4 +404,11 @@ An idempotent operation has the same effect whether run once or many times — S
 **B.** An idempotency key is cheap and robust; two-phase commit is expensive and fragile.
 
 </details>
+
+## Sources
+
+- [Akidau et al. — "MillWheel" (VLDB 2013)](https://research.google/pubs/pub41378/) — Exactly-once stream processing and the side-effect problem in production
+- [Confluent — "Exactly-Once Semantics Are Possible: Here's How Apache Kafka Does It"](https://www.confluent.io/blog/exactly-once-semantics-are-possible-heres-how-apache-kafka-does-it/) — How an idempotent producer plus transactions give end-to-end exactly-once
+- [Stripe — Idempotency documentation](https://stripe.com/docs/idempotency) — The Idempotency-Key pattern for retry-safe side effects
+- [Apache Flink — Stateful stream processing](https://nightlies.apache.org/flink/flink-docs-stable/docs/concepts/stateful-stream-processing/) — Checkpointing and exactly-once state as the engine guarantee
 

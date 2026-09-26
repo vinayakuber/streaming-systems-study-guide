@@ -233,8 +233,8 @@ A checkpoint captures every stage's state at one logical point in the stream, al
 ### Real-World Examples
 
 - **RocksDB** — Embedded disk-backed state store for large streaming state
-- **Apache Flink** — Aligned, incremental, exactly-once checkpoints
-- **Chandy-Lamport** — The snapshot algorithm behind checkpoint barriers
+- **Apache Flink** — Aligned, incremental, exactly-once checkpoints with the RocksDB state backend
+- **Chandy-Lamport** — The distributed snapshot algorithm behind checkpoint barriers
 
 
 <details><summary>All concepts (index)</summary>
@@ -397,4 +397,11 @@ A checkpoint captures every stage's state at one logical point in the stream, al
 **B.** Aligning state with offsets means resume is at the right position.
 
 </details>
+
+## Sources
+
+- [Apache Flink — Stateful stream processing](https://nightlies.apache.org/flink/flink-docs-stable/docs/concepts/stateful-stream-processing/) — Checkpoints, state stores, and exactly-once recovery in a production engine
+- [RocksDB](https://rocksdb.org/) — The embedded key-value store used for disk-backed streaming state
+- [Chandy & Lamport — "Distributed Snapshots"](https://lamport.azurewebsites.net/pubs/chandy.pdf) — The snapshot algorithm that checkpoint barriers implement
+- [Akidau et al. — "MillWheel" (VLDB 2013)](https://research.google/pubs/pub41378/) — Persistent state and checkpointing at internet scale
 

@@ -86,9 +86,10 @@ registerChapter({
       { tag: 'tradeoff', tagLabel: 'Safety net', title: '8. Watermarks + allowed lateness', content: '<p><strong>Why.</strong> A heuristic watermark can be wrong, so a pipeline needs a bounded way to accept data that arrives after the watermark.</p><p><strong>Claim.</strong> Allowed lateness keeps the window alive for a bounded horizon after the watermark, then drops stragglers.</p><p><strong>Grounding.</strong> It is the garbage collector for window state that outlives the watermark.</p><p><strong>In the wild.</strong> Dataflow\'s allowed-lateness setting is the production form.</p>' }
     ],
     examples: [
-      { name: 'Apache Flink', desc: 'BoundedOutOfOrdernessWatermarkGenerator and per-partition watermarks' },
+      { name: 'Apache Flink', desc: 'BoundedOutOfOrdernessWatermarkGenerator subtracts an out-of-orderness bound from the max observed event time; per-partition watermarks and idle sources' },
       { name: 'Google Cloud Dataflow', desc: 'Watermarks with allowed lateness and trigger configuration' },
-      { name: 'Apache Beam', desc: 'Watermark as a first-class pipeline concept' }
+      { name: 'Apache Beam', desc: 'Watermark as a first-class pipeline concept' },
+      { name: 'Google MillWheel', desc: 'The low watermark that pioneered event-time completeness tracking in production' }
     ],
     extraHtml: ''
   },
@@ -147,5 +148,12 @@ registerChapter({
     { question: "What is the canonical heuristic watermark formula?", options: ["A. watermark = wall clock + skew", "B. watermark = min event time + skew", "C. watermark = max seen event time − skew", "D. watermark = event count / skew"], answer: 3, explanation: "The heuristic subtracts a skew (out-of-orderness bound) from the max seen event time.", conceptRef: "3. Heuristic watermarks" },
     { question: "A stage's watermark with multiple inputs is the ___ of its inputs' watermarks.", options: ["A. maximum", "B. minimum", "C. sum", "D. average"], answer: 2, explanation: "Completeness is bounded by the least-complete input, so the stage watermark is the minimum.", conceptRef: "6. Watermark propagation" },
     { question: "What is the downside of an over-eager (too-fast) watermark?", options: ["A. Higher latency", "B. Delayed data is mislabeled as late", "C. Windows never close", "D. Memory exhaustion"], answer: 2, explanation: "An over-eager watermark gains latency but loses correctness by treating delayed data as late.", conceptRef: "7. Latency vs correctness" }
+  ],
+  sources: [
+    { name: 'Slava Chernyak — "Watermarks: Time and Progress in Apache Beam and Beyond" (talk)', url: 'https://www.youtube.com/watch?v=TWxSLmkWPm4', note: 'A conference talk on how watermarks track event-time progress in Beam and beyond' },
+    { name: 'Akidau et al. — "MillWheel: Fault-Tolerant Stream Processing at Internet Scale" (VLDB 2013)', url: 'https://research.google/pubs/pub41378/', note: 'Introduced the low watermark for out-of-order stream processing at Google' },
+    { name: 'Akidau et al. — "The Dataflow Model" (VLDB 2015)', url: 'https://www.vldb.org/pvldb/vol8/p1792-Akidau.pdf', note: 'Defines watermarks as the mechanism that trades latency against correctness' },
+    { name: 'Apache Flink — Generating watermarks', url: 'https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/datastream/event-time/generating_watermarks/', note: 'How a production engine computes bounded-out-of-orderness and per-partition watermarks' },
+    { name: 'Apache Beam programming guide', url: 'https://beam.apache.org/documentation/programming-guide/', note: 'Watermarks and lateness as part of the Beam model' }
   ]
 });

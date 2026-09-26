@@ -231,8 +231,9 @@ Fixed windows partition time into equal, non-overlapping, contiguous spans; each
 ### Real-World Examples
 
 - **Google Analytics** — Sessionization of user visits with a 30-minute inactivity gap
-- **Apache Beam** — Sessions with mergeWindows and accumulating-and-retracting
-- **Apache Flink** — Event-time session windows with a gap
+- **Apache Beam** — Session windows with mergeWindows and accumulating-and-retracting for late merges
+- **Apache Flink** — Event-time session windows with a gap and dynamic session merging
+- **Flink SQL** — TUMBLE/HOP/SESSION constructs as the SQL spellings of the three window shapes
 
 
 <details><summary>All concepts (index)</summary>
@@ -395,4 +396,11 @@ Fixed windows partition time into equal, non-overlapping, contiguous spans; each
 **B.** Sessions are per key — one user's session never merges with another's.
 
 </details>
+
+## Sources
+
+- [Akidau et al. — "The Dataflow Model" (VLDB 2015)](https://www.vldb.org/pvldb/vol8/p1792-Akidau.pdf) — Session windows, merging, and the window lifecycle this chapter is built on
+- [Apache Beam programming guide](https://beam.apache.org/documentation/programming-guide/) — The window assign/merge/group/trigger/accumulate lifecycle as an API
+- [Apache Flink — Windows](https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/datastream/operators/windows/) — Fixed, sliding, and session windows in a production engine
+- [Apache Flink — Table API and SQL overview](https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/table/overview/) — TUMBLE/HOP/SESSION as SQL window constructs
 

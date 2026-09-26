@@ -84,7 +84,7 @@ registerChapter({
       { tag: 'tradeoff', tagLabel: 'Choice', title: '8. Event time vs processing time', content: '<p><strong>Why.</strong> The time attribute is a correctness decision, not a syntax detail.</p><p><strong>Claim.</strong> Event time is correct but can be late; processing time is simple but wrong for out-of-order data.</p><p><strong>Grounding.</strong> Event time is the right default for correctness.</p><p><strong>In the wild.</strong> Production SQL pipelines default to event time.</p>' }
     ],
     examples: [
-      { name: 'Flink SQL', desc: 'TUMBLE/HOP/SESSION, event-time attributes, and interval joins' },
+      { name: 'Flink SQL', desc: 'TUMBLE/HOP/SESSION, event-time attributes, interval joins, and retract streams' },
       { name: 'ksqlDB', desc: 'Continuous SQL over Kafka streams and tables' },
       { name: 'Beam SQL', desc: 'Declarative queries over Beam pipelines' }
     ],
@@ -144,5 +144,11 @@ registerChapter({
     { question: "What does a time attribute provide?", options: ["A. A wall-clock reading", "B. An event-time or processing-time column windows and joins key on", "C. A window size", "D. A retraction"], answer: 2, explanation: "A time attribute tells windows and joins which time to use.", conceptRef: "3. Time attributes" },
     { question: "An updating query result requires ___ .", options: ["A. only append rows", "B. a retraction of the old row", "C. no sink", "D. a batch table"], answer: 2, explanation: "When a key's value changes, the old row must be retracted.", conceptRef: "5. Append-only vs updating results" },
     { question: "When does a windowed SQL join emit a match?", options: ["A. When the first row arrives", "B. When both sides' watermarks pass the join window", "C. Every second", "D. When the query starts"], answer: 2, explanation: "The join waits until both streams are complete for the window.", conceptRef: "6. Windowed joins" }
+  ],
+  sources: [
+    { name: 'Apache Flink — Table API and SQL overview', url: 'https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/table/overview/', note: 'Continuous queries, time attributes, and window constructs in streaming SQL' },
+    { name: 'ksqlDB documentation', url: 'https://docs.ksqldb.io/', note: 'A streaming SQL engine over Kafka streams and tables' },
+    { name: 'Apache Beam — Beam SQL', url: 'https://beam.apache.org/documentation/dsls/sql/', note: 'Declarative SQL over Beam pipelines' },
+    { name: 'Akidau et al. — "The Dataflow Model" (VLDB 2015)', url: 'https://www.vldb.org/pvldb/vol8/p1792-Akidau.pdf', note: 'The model that streaming SQL engines implement underneath' }
   ]
 });

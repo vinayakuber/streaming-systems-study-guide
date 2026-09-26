@@ -84,9 +84,10 @@ registerChapter({
       { tag: 'tradeoff', tagLabel: 'Checklist', title: '8. The four-question checklist', content: '<p><strong>Why.</strong> A design review that omits one axis ships a pipeline whose latency or correctness is an accident rather than a decision.</p><p><strong>Claim.</strong> Ask what, where, when, and how of every pipeline, and its behavior is fully specified.</p><p><strong>Grounding.</strong> Omit "when" and latency is unspecified; omit "how" and refinement correctness is unspecified.</p><p><strong>In the wild.</strong> The book\'s recurring worked example (team score over sessions) is defined by exactly these four answers.</p>' }
     ],
     examples: [
-      { name: 'Apache Beam', desc: 'Exposes what/where/when/how as PTransform, Window, Trigger, AccumulationMode' },
-      { name: 'Apache Flink', desc: 'Event-time windows with watermark-driven triggers' },
-      { name: 'Google Cloud Dataflow', desc: 'Fully managed Beam runner with watermarks and allowed lateness' }
+      { name: 'Apache Beam', desc: 'What/where/when/how exposed as PTransform, Window, Trigger, and AccumulationMode' },
+      { name: 'Apache Flink', desc: 'Event-time windows with watermark-driven triggers and early/on-time/late firing' },
+      { name: 'Google Cloud Dataflow', desc: 'Fully managed Beam runner with watermarks and allowed lateness' },
+      { name: 'Flink SQL', desc: 'TUMBLE windows plus watermark emission — a declarative spelling of where and when' }
     ],
     extraHtml: ''
   },
@@ -144,5 +145,11 @@ registerChapter({
     { question: "What is allowed lateness?", options: ["A. A window that never closes", "B. The horizon after the watermark during which a window still accepts late events", "C. The maximum event size", "D. A type of trigger"], answer: 2, explanation: "Allowed lateness bounds how long after the watermark a window keeps accepting and updating with stragglers.", conceptRef: "6. Allowed lateness" },
     { question: "Which accumulation mode avoids double-counting when a window refines an earlier result?", options: ["A. Discarding", "B. Accumulating", "C. Accumulating-and-retracting", "D. None of the above"], answer: 3, explanation: "Accumulating-and-retracting emits the delta plus a retraction of the previous pane so sinks can undo the old value.", conceptRef: "7. Accumulation (how)" },
     { question: "When does an on-time trigger fire?", options: ["A. When the first event arrives", "B. When the watermark passes the window end", "C. Every second", "D. When the window is empty"], answer: 2, explanation: "On-time emission is driven by the watermark crossing the window's end.", conceptRef: "4. Triggers (when)" }
+  ],
+  sources: [
+    { name: 'Tyler Akidau — "The world beyond batch: Streaming 102"', url: 'https://www.oreilly.com/radar/the-world-beyond-batch-streaming-102/', note: 'The original statement of the what/where/when/how questions and their triggers, watermarks, and accumulation' },
+    { name: 'Akidau et al. — "The Dataflow Model" (VLDB 2015)', url: 'https://www.vldb.org/pvldb/vol8/p1792-Akidau.pdf', note: 'The formal model behind the four questions' },
+    { name: 'Apache Beam programming guide', url: 'https://beam.apache.org/documentation/programming-guide/', note: 'The four questions as first-class API concepts' },
+    { name: 'Apache Flink — Concepts: Time', url: 'https://nightlies.apache.org/flink/flink-docs-stable/docs/concepts/time/', note: 'Windowing and watermark semantics in a production engine' }
   ]
 });

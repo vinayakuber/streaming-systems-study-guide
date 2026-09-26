@@ -85,7 +85,8 @@ registerChapter({
     ],
     examples: [
       { name: 'Apache Beam', desc: 'One pipeline that runs in batch or streaming mode' },
-      { name: 'Kafka + Kappa', desc: 'Replayable log enabling one-pipeline reprocessing' },
+      { name: 'Apache Flink', desc: 'A single engine for stream and batch, treating batch as bounded streaming' },
+      { name: 'Kafka + Kappa', desc: 'A replayable log enabling one-pipeline reprocessing' },
       { name: 'Google MillWheel / Dataflow', desc: 'The lineage from early streaming to the unified model' }
     ],
     extraHtml: ''
@@ -145,5 +146,12 @@ registerChapter({
     { question: "What is batch in the unified model?", options: ["A. A separate paradigm", "B. Streaming over a bounded input", "C. A faster streaming mode", "D. A type of window"], answer: 2, explanation: "Batch is just streaming over an input that ends.", conceptRef: "4. Batch is a special case" },
     { question: "What does reprocessing require?", options: ["A. A second codebase", "B. A replayable, persistent log", "C. A batch layer", "D. No state"], answer: 2, explanation: "Replay needs retained, re-readable input history.", conceptRef: "6. Replayable logs" },
     { question: "What stays distinct between batch and streaming after unification?", options: ["A. The window types", "B. When results are final — batch ends, streams wait on watermarks", "C. The transform logic", "D. The key grouping"], answer: 2, explanation: "The model unifies the how, not the fact that streams never end.", conceptRef: "8. What stays distinct" }
+  ],
+  sources: [
+    { name: 'Dean & Ghemawat — "MapReduce" (OSDI 2004)', url: 'https://research.google/pubs/pub62/', note: 'The batch model that streaming evolved from' },
+    { name: 'Nathan Marz — "How to beat the CAP theorem"', url: 'http://nathanmarz.com/blog/how-to-beat-the-cap-theorem.html', note: 'The origin of the Lambda architecture' },
+    { name: 'Jay Kreps — "Questioning the Lambda Architecture"', url: 'https://www.oreilly.com/radar/questioning-the-lambda-architecture/', note: 'The origin of the Kappa architecture' },
+    { name: 'Akidau et al. — "The Dataflow Model" (VLDB 2015)', url: 'https://www.vldb.org/pvldb/vol8/p1792-Akidau.pdf', note: 'The paper that unified batch and streaming' },
+    { name: 'Akidau et al. — "MillWheel" (VLDB 2013)', url: 'https://research.google/pubs/pub41378/', note: 'The early-streaming lineage' }
   ]
 });

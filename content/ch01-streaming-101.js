@@ -86,10 +86,11 @@ registerChapter({
       { tag: 'solution', tagLabel: 'Model', title: '8. Batch is a special case of streaming', content: '<p><strong>Why.</strong> If one abstraction covers both finite and infinite inputs, you maintain one pipeline instead of two that must agree.</p><p><strong>Claim.</strong> A bounded dataset is just an unbounded dataset that stops, so a streaming model generalizes batch for free.</p><p><strong>Grounding.</strong> The Beam model treats both with one what/where/when/how vocabulary.</p><p><strong>In the wild.</strong> Apache Beam runs the same pipeline on batch and streaming runners.</p>' }
     ],
     examples: [
-      { name: 'Apache Flink', desc: 'Stream processor with first-class event-time and watermark support' },
-      { name: 'Apache Kafka', desc: 'The unbounded transport that makes streams concrete' },
-      { name: 'Apache Beam', desc: 'Unified model over batch and streaming runners' },
-      { name: 'MapReduce', desc: 'The classic bounded-data batch engine' }
+      { name: 'Apache Flink', desc: 'First-class event-time and processing-time modes; a job over a Kafka topic is streaming in the book\'s precise sense' },
+      { name: 'Apache Kafka', desc: 'An unbounded, append-only topic that makes a stream concrete' },
+      { name: 'Apache Beam', desc: 'One pipeline that runs on batch and streaming runners — batch as a special case of streaming' },
+      { name: 'Google Cloud Dataflow', desc: 'A fully managed Beam runner that executes the same pipeline over bounded or unbounded input' },
+      { name: 'MapReduce / Hadoop', desc: 'The classic bounded-data engine that assumes an input with an end' }
     ],
     extraHtml: ''
   },
@@ -147,5 +148,11 @@ registerChapter({
     { question: "What is the cost of unbounded data processed as batch?", options: ["A. Higher throughput", "B. Results lag by up to one chunk boundary", "C. It cannot scale", "D. It loses events"], answer: 2, explanation: "Slicing a never-ending stream into fixed chunks means a change is reflected only at the next boundary.", conceptRef: "6. Unbounded as batch" },
     { question: "How does batch relate to streaming in the Beam model?", options: ["A. They are unrelated", "B. Batch is a special case of streaming — a bounded dataset is an unbounded one that stops", "C. Streaming is a special case of batch", "D. Batch always outperforms streaming"], answer: 2, explanation: "One model handles both: bounded data is just unbounded data that happens to end.", conceptRef: "8. Batch is a special case of streaming" },
     { question: "Why do event time and processing time diverge?", options: ["A. They never diverge", "B. Network delay, queueing, backpressure, and replay keep them apart", "C. Because of clock drift only", "D. Because event time is measured in a different timezone"], answer: 2, explanation: "The gap is caused by everything between the producer and the processor: network, queues, and replays.", conceptRef: "4. Event vs processing time" }
+  ],
+  sources: [
+    { name: 'Tyler Akidau — "The world beyond batch: Streaming 101"', url: 'https://www.oreilly.com/radar/the-world-beyond-batch-streaming-101/', note: 'The original framing of event time vs processing time and the bounded/unbounded distinction this chapter builds on' },
+    { name: 'Akidau et al. — "The Dataflow Model" (VLDB 2015)', url: 'https://www.vldb.org/pvldb/vol8/p1792-Akidau.pdf', note: 'The paper that makes batch a special case of streaming via the what/where/when/how model' },
+    { name: 'Apache Beam programming guide', url: 'https://beam.apache.org/documentation/programming-guide/', note: 'The model as a working API over batch and streaming runners' },
+    { name: 'Apache Flink — Concepts: Time', url: 'https://nightlies.apache.org/flink/flink-docs-stable/docs/concepts/time/', note: 'How event time and processing time are treated in a production stream processor' }
   ]
 });

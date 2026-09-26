@@ -84,8 +84,9 @@ registerChapter({
     ],
     examples: [
       { name: 'Google Analytics', desc: 'Sessionization of user visits with a 30-minute inactivity gap' },
-      { name: 'Apache Beam', desc: 'Sessions with mergeWindows and accumulating-and-retracting' },
-      { name: 'Apache Flink', desc: 'Event-time session windows with a gap' }
+      { name: 'Apache Beam', desc: 'Session windows with mergeWindows and accumulating-and-retracting for late merges' },
+      { name: 'Apache Flink', desc: 'Event-time session windows with a gap and dynamic session merging' },
+      { name: 'Flink SQL', desc: 'TUMBLE/HOP/SESSION constructs as the SQL spellings of the three window shapes' }
     ],
     extraHtml: ''
   },
@@ -143,5 +144,11 @@ registerChapter({
     { question: "When does a session window merge with another?", options: ["A. When the watermark passes", "B. When an event lands inside the gap of both", "C. When they share a key", "D. When allowed lateness expires"], answer: 2, explanation: "A bridging event inside the gap of two sessions merges them into one.", conceptRef: "6. Session merging" },
     { question: "Why do late session merges need retractions?", options: ["A. To save memory", "B. To cancel already-emitted panes and avoid double-counting", "C. To speed up the pipeline", "D. To reduce latency"], answer: 2, explanation: "Earlier panes are now wrong, so they must be retracted before the merged pane is emitted.", conceptRef: "7. Late merges need retractions" },
     { question: "Session windows are measured within a ___ .", options: ["A. partition", "B. key group", "C. global stream", "D. time zone"], answer: 2, explanation: "Sessions are per key — one user's session never merges with another's.", conceptRef: "8. Sessions are keyed" }
+  ],
+  sources: [
+    { name: 'Akidau et al. — "The Dataflow Model" (VLDB 2015)', url: 'https://www.vldb.org/pvldb/vol8/p1792-Akidau.pdf', note: 'Session windows, merging, and the window lifecycle this chapter is built on' },
+    { name: 'Apache Beam programming guide', url: 'https://beam.apache.org/documentation/programming-guide/', note: 'The window assign/merge/group/trigger/accumulate lifecycle as an API' },
+    { name: 'Apache Flink — Windows', url: 'https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/datastream/operators/windows/', note: 'Fixed, sliding, and session windows in a production engine' },
+    { name: 'Apache Flink — Table API and SQL overview', url: 'https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/table/overview/', note: 'TUMBLE/HOP/SESSION as SQL window constructs' }
   ]
 });

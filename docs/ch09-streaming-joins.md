@@ -233,7 +233,7 @@ A windowed join matches rows whose time attributes are within a window of each o
 
 - **Flink SQL** — Interval (windowed) joins and temporal joins
 - **Apache Beam** — CoGroupByKey as the join primitive with windowing
-- **ksqlDB** — Stream-stream and stream-table joins over Kafka
+- **Kafka Streams** — Stream-stream (windowed) and stream-table joins over topics
 
 
 <details><summary>All concepts (index)</summary>
@@ -396,4 +396,11 @@ A windowed join matches rows whose time attributes are within a window of each o
 **B.** State past the window + allowed lateness is garbage-collected.
 
 </details>
+
+## Sources
+
+- [Apache Flink — SQL joins](https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/table/sql/queries/joins/) — Interval and temporal joins and their watermark semantics
+- [Akidau et al. — "The Dataflow Model" (VLDB 2015)](https://www.vldb.org/pvldb/vol8/p1792-Akidau.pdf) — Join semantics under the streaming model
+- [Apache Beam programming guide](https://beam.apache.org/documentation/programming-guide/) — CoGroupByKey as the join primitive
+- [Apache Kafka — Kafka Streams documentation](https://kafka.apache.org/documentation/streams/) — Stream-stream and stream-table joins over topics
 

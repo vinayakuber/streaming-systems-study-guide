@@ -236,9 +236,10 @@ A perfect watermark is possible for ordered inputs — a single log consumed in 
 
 ### Real-World Examples
 
-- **Apache Flink** — BoundedOutOfOrdernessWatermarkGenerator and per-partition watermarks
+- **Apache Flink** — BoundedOutOfOrdernessWatermarkGenerator subtracts an out-of-orderness bound from the max observed event time; per-partition watermarks and idle sources
 - **Google Cloud Dataflow** — Watermarks with allowed lateness and trigger configuration
 - **Apache Beam** — Watermark as a first-class pipeline concept
+- **Google MillWheel** — The low watermark that pioneered event-time completeness tracking in production
 
 
 <details><summary>All concepts (index)</summary>
@@ -401,4 +402,12 @@ A perfect watermark is possible for ordered inputs — a single log consumed in 
 **B.** An over-eager watermark gains latency but loses correctness by treating delayed data as late.
 
 </details>
+
+## Sources
+
+- [Slava Chernyak — "Watermarks: Time and Progress in Apache Beam and Beyond" (talk)](https://www.youtube.com/watch?v=TWxSLmkWPm4) — A conference talk on how watermarks track event-time progress in Beam and beyond
+- [Akidau et al. — "MillWheel: Fault-Tolerant Stream Processing at Internet Scale" (VLDB 2013)](https://research.google/pubs/pub41378/) — Introduced the low watermark for out-of-order stream processing at Google
+- [Akidau et al. — "The Dataflow Model" (VLDB 2015)](https://www.vldb.org/pvldb/vol8/p1792-Akidau.pdf) — Defines watermarks as the mechanism that trades latency against correctness
+- [Apache Flink — Generating watermarks](https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/datastream/event-time/generating_watermarks/) — How a production engine computes bounded-out-of-orderness and per-partition watermarks
+- [Apache Beam programming guide](https://beam.apache.org/documentation/programming-guide/) — Watermarks and lateness as part of the Beam model
 

@@ -86,7 +86,7 @@ registerChapter({
     examples: [
       { name: 'Flink SQL', desc: 'Interval (windowed) joins and temporal joins' },
       { name: 'Apache Beam', desc: 'CoGroupByKey as the join primitive with windowing' },
-      { name: 'ksqlDB', desc: 'Stream-stream and stream-table joins over Kafka' }
+      { name: 'Kafka Streams', desc: 'Stream-stream (windowed) and stream-table joins over topics' }
     ],
     extraHtml: ''
   },
@@ -144,5 +144,11 @@ registerChapter({
     { question: "What is a temporal join?", options: ["A. A join of two streams in a window", "B. Enriching a stream against a table version current at event time", "C. A join with no key", "D. A join of two tables"], answer: 2, explanation: "A temporal join probes a table at the join key for the current version.", conceptRef: "3. Temporal joins" },
     { question: "When does a windowed join emit a match?", options: ["A. When the first row arrives", "B. When both sides' watermarks pass the join window", "C. Every second", "D. When the buffer is empty"], answer: 2, explanation: "The join waits until both streams are complete for the window.", conceptRef: "5. Watermarks bound the wait" },
     { question: "How is join state bounded?", options: ["A. It is never bounded", "B. By garbage-collecting past the window plus allowed lateness", "C. By the CPU", "D. By the number of keys"], answer: 2, explanation: "State past the window + allowed lateness is garbage-collected.", conceptRef: "7. Garbage-collect join state" }
+  ],
+  sources: [
+    { name: 'Apache Flink — SQL joins', url: 'https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/table/sql/queries/joins/', note: 'Interval and temporal joins and their watermark semantics' },
+    { name: 'Akidau et al. — "The Dataflow Model" (VLDB 2015)', url: 'https://www.vldb.org/pvldb/vol8/p1792-Akidau.pdf', note: 'Join semantics under the streaming model' },
+    { name: 'Apache Beam programming guide', url: 'https://beam.apache.org/documentation/programming-guide/', note: 'CoGroupByKey as the join primitive' },
+    { name: 'Apache Kafka — Kafka Streams documentation', url: 'https://kafka.apache.org/documentation/streams/', note: 'Stream-stream and stream-table joins over topics' }
   ]
 });

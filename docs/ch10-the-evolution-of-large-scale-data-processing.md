@@ -232,7 +232,8 @@ Lambda runs a batch layer (correct) and a speed layer (low-latency) computing th
 ### Real-World Examples
 
 - **Apache Beam** — One pipeline that runs in batch or streaming mode
-- **Kafka + Kappa** — Replayable log enabling one-pipeline reprocessing
+- **Apache Flink** — A single engine for stream and batch, treating batch as bounded streaming
+- **Kafka + Kappa** — A replayable log enabling one-pipeline reprocessing
 - **Google MillWheel / Dataflow** — The lineage from early streaming to the unified model
 
 
@@ -396,4 +397,12 @@ Lambda runs a batch layer (correct) and a speed layer (low-latency) computing th
 **B.** The model unifies the how, not the fact that streams never end.
 
 </details>
+
+## Sources
+
+- [Dean & Ghemawat — "MapReduce" (OSDI 2004)](https://research.google/pubs/pub62/) — The batch model that streaming evolved from
+- [Nathan Marz — "How to beat the CAP theorem"](http://nathanmarz.com/blog/how-to-beat-the-cap-theorem.html) — The origin of the Lambda architecture
+- [Jay Kreps — "Questioning the Lambda Architecture"](https://www.oreilly.com/radar/questioning-the-lambda-architecture/) — The origin of the Kappa architecture
+- [Akidau et al. — "The Dataflow Model" (VLDB 2015)](https://www.vldb.org/pvldb/vol8/p1792-Akidau.pdf) — The paper that unified batch and streaming
+- [Akidau et al. — "MillWheel" (VLDB 2013)](https://research.google/pubs/pub41378/) — The early-streaming lineage
 

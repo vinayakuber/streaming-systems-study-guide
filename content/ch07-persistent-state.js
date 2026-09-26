@@ -85,8 +85,8 @@ registerChapter({
     ],
     examples: [
       { name: 'RocksDB', desc: 'Embedded disk-backed state store for large streaming state' },
-      { name: 'Apache Flink', desc: 'Aligned, incremental, exactly-once checkpoints' },
-      { name: 'Chandy-Lamport', desc: 'The snapshot algorithm behind checkpoint barriers' }
+      { name: 'Apache Flink', desc: 'Aligned, incremental, exactly-once checkpoints with the RocksDB state backend' },
+      { name: 'Chandy-Lamport', desc: 'The distributed snapshot algorithm behind checkpoint barriers' }
     ],
     extraHtml: ''
   },
@@ -144,5 +144,11 @@ registerChapter({
     { question: "What is the benefit of incremental checkpoints?", options: ["A. They capture every key", "B. They upload only the keys that changed", "C. They never need a barrier", "D. They eliminate recovery"], answer: 2, explanation: "Incremental checkpoints upload only the delta, cutting I/O sharply.", conceptRef: "4. Incremental checkpoints" },
     { question: "What aligns a multi-stage snapshot?", options: ["A. A watermark", "B. A checkpoint barrier", "C. A trigger", "D. A window"], answer: 2, explanation: "A barrier flows through the stream and each stage snapshots on seeing it.", conceptRef: "5. Checkpoint barriers" },
     { question: "Exactly-once recovery means ___ .", options: ["A. no state is ever stored", "B. state and offsets align so no record is lost or double-counted", "C. the pipeline never restarts", "D. watermarks are perfect"], answer: 2, explanation: "Aligning state with offsets means resume is at the right position.", conceptRef: "6. Exactly-once recovery" }
+  ],
+  sources: [
+    { name: 'Apache Flink — Stateful stream processing', url: 'https://nightlies.apache.org/flink/flink-docs-stable/docs/concepts/stateful-stream-processing/', note: 'Checkpoints, state stores, and exactly-once recovery in a production engine' },
+    { name: 'RocksDB', url: 'https://rocksdb.org/', note: 'The embedded key-value store used for disk-backed streaming state' },
+    { name: 'Chandy & Lamport — "Distributed Snapshots"', url: 'https://lamport.azurewebsites.net/pubs/chandy.pdf', note: 'The snapshot algorithm that checkpoint barriers implement' },
+    { name: 'Akidau et al. — "MillWheel" (VLDB 2013)', url: 'https://research.google/pubs/pub41378/', note: 'Persistent state and checkpointing at internet scale' }
   ]
 });

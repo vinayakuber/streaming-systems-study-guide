@@ -234,7 +234,7 @@ GROUP BY TUMBLE(event_time, INTERVAL '5' MINUTE), campaign
 
 ### Real-World Examples
 
-- **Flink SQL** — TUMBLE/HOP/SESSION, event-time attributes, and interval joins
+- **Flink SQL** — TUMBLE/HOP/SESSION, event-time attributes, interval joins, and retract streams
 - **ksqlDB** — Continuous SQL over Kafka streams and tables
 - **Beam SQL** — Declarative queries over Beam pipelines
 
@@ -399,4 +399,11 @@ GROUP BY TUMBLE(event_time, INTERVAL '5' MINUTE), campaign
 **B.** The join waits until both streams are complete for the window.
 
 </details>
+
+## Sources
+
+- [Apache Flink — Table API and SQL overview](https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/table/overview/) — Continuous queries, time attributes, and window constructs in streaming SQL
+- [ksqlDB documentation](https://docs.ksqldb.io/) — A streaming SQL engine over Kafka streams and tables
+- [Apache Beam — Beam SQL](https://beam.apache.org/documentation/dsls/sql/) — Declarative SQL over Beam pipelines
+- [Akidau et al. — "The Dataflow Model" (VLDB 2015)](https://www.vldb.org/pvldb/vol8/p1792-Akidau.pdf) — The model that streaming SQL engines implement underneath
 

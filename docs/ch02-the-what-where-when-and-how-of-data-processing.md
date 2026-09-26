@@ -231,9 +231,10 @@ Transformations are the computations — sum, filter, join, keyed aggregation �
 
 ### Real-World Examples
 
-- **Apache Beam** — Exposes what/where/when/how as PTransform, Window, Trigger, AccumulationMode
-- **Apache Flink** — Event-time windows with watermark-driven triggers
+- **Apache Beam** — What/where/when/how exposed as PTransform, Window, Trigger, and AccumulationMode
+- **Apache Flink** — Event-time windows with watermark-driven triggers and early/on-time/late firing
 - **Google Cloud Dataflow** — Fully managed Beam runner with watermarks and allowed lateness
+- **Flink SQL** — TUMBLE windows plus watermark emission — a declarative spelling of where and when
 
 
 <details><summary>All concepts (index)</summary>
@@ -396,4 +397,11 @@ Transformations are the computations — sum, filter, join, keyed aggregation �
 **B.** On-time emission is driven by the watermark crossing the window's end.
 
 </details>
+
+## Sources
+
+- [Tyler Akidau — "The world beyond batch: Streaming 102"](https://www.oreilly.com/radar/the-world-beyond-batch-streaming-102/) — The original statement of the what/where/when/how questions and their triggers, watermarks, and accumulation
+- [Akidau et al. — "The Dataflow Model" (VLDB 2015)](https://www.vldb.org/pvldb/vol8/p1792-Akidau.pdf) — The formal model behind the four questions
+- [Apache Beam programming guide](https://beam.apache.org/documentation/programming-guide/) — The four questions as first-class API concepts
+- [Apache Flink — Concepts: Time](https://nightlies.apache.org/flink/flink-docs-stable/docs/concepts/time/) — Windowing and watermark semantics in a production engine
 
