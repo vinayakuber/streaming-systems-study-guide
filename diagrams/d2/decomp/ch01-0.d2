@@ -1,22 +1,26 @@
 direction: down
 
-R: {
+S0: {
   label: |md
-    **writer (event producer)**
+    **writer**
+
+    event producer
   |
   shape: rectangle
   style: {
     fill: "#238636"
     stroke: "#2ea043"
     font-color: "#FFFFFF"
-    border-radius: 8
+    border-radius: 6
     font-size: 16
   }
 }
 
-P0: {
+S1: {
   label: |md
-    a device stamps a click {user: 42, url: "/shoe/x", event\_time: "12:00:59"}
+    **transport**
+
+    unbounded stream
   |
   shape: rectangle
   style: {
@@ -24,13 +28,15 @@ P0: {
     stroke: "#388bfd"
     font-color: "#FFFFFF"
     border-radius: 6
-    font-size: 15
+    font-size: 16
   }
 }
 
-P1: {
+S2: {
   label: |md
-    the timestamp is the user-interaction instant, not the send instant
+    **collector**
+
+    processor
   |
   shape: rectangle
   style: {
@@ -38,13 +44,15 @@ P1: {
     stroke: "#388bfd"
     font-color: "#FFFFFF"
     border-radius: 6
-    font-size: 15
+    font-size: 16
   }
 }
 
-P2: {
+S3: {
   label: |md
-    each event is immutable once emitted
+    **aggregator/store**
+
+    window state
   |
   shape: rectangle
   style: {
@@ -52,10 +60,27 @@ P2: {
     stroke: "#388bfd"
     font-color: "#FFFFFF"
     border-radius: 6
-    font-size: 15
+    font-size: 16
   }
 }
 
-R -> P0: "1. comprises"
-R -> P1: "2. comprises"
-R -> P2: "3. comprises"
+S4: {
+  label: |md
+    **reader**
+
+    dashboard
+  |
+  shape: rectangle
+  style: {
+    fill: "#8250df"
+    stroke: "#8250df"
+    font-color: "#FFFFFF"
+    border-radius: 6
+    font-size: 16
+  }
+}
+
+S0 -> S1: "1. event producer"
+S1 -> S2: "2. unbounded stream"
+S2 -> S3: "3. processor"
+S3 -> S4: "4. window state"

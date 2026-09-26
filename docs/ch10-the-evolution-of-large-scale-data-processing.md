@@ -88,29 +88,39 @@ _Also known as: SS Ch10 · Lambda Architecture · Kappa Architecture · Batch-St
 
 **The pipeline:** log (replayable) -> one streaming pipeline -> speed result; replay path -> same pipeline -> corrected result
 
+![system design pipeline](../diagrams/d2/decomp/ch10-0.png)
+
 ### log (replayable)
 
 _Role: log — retains input history for replay_
 
-![log (replayable)](../diagrams/d2/decomp/ch10-0.png)
+- the log holds records [ r1, r2, r3 ] with offsets
+- retention is long enough to re-run when code changes
+- the log is the source of truth
 
 ### one streaming pipeline
 
 _Role: one streaming pipeline — the only codebase_
 
-![one streaming pipeline](../diagrams/d2/decomp/ch10-1.png)
+- the pipeline folds records into the running result
+- windows and watermarks apply whether the input ends or not
+- there is no separate batch implementation to drift
 
 ### speed result
 
 _Role: speed result — the live output_
 
-![speed result](../diagrams/d2/decomp/ch10-2.png)
+- the live result reflects the current fold of the log
+- it is low-latency but uses the same code as any reprocess
+- a bug means the result is wrong until replay
 
 ### replay path -> corrected result
 
 _Role: replay path — recomputes history after a code change_
 
-![replay path -> corrected result](../diagrams/d2/decomp/ch10-3.png)
+- the log is rewound to offset 0
+- the same pipeline (v2) folds r1, r2, r3 again
+- the corrected result replaces the buggy one
 
 ```java
 // SYSTEM DESIGN — a bug fix is deployed once and history is replayed through the same pipeline

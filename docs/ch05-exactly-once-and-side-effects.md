@@ -94,29 +94,39 @@ _Also known as: SS Ch05 · Exactly-Once · Idempotency · Deduplication · Side 
 
 **The pipeline:** replayable source (offset) -> dedup shuffle -> idempotent sink (idempotency key) -> external system
 
+![system design pipeline](../diagrams/d2/decomp/ch05-0.png)
+
 ### replayable source (offset)
 
 _Role: replayable source — emits records with stable ids and a checkpoint_
 
-![replayable source (offset)](../diagrams/d2/decomp/ch05-0.png)
+- a record {id: "r7", order: "order-99", amount: 10} is emitted
+- the checkpoint (offset) lets the pipeline resume after a crash
+- records carry stable ids so they can be deduplicated
 
 ### dedup shuffle
 
 _Role: dedup shuffle — drops duplicate record deliveries_
 
-![dedup shuffle](../diagrams/d2/decomp/ch05-1.png)
+- the receiver keeps seen = { r1, r2, r3 }
+- first delivery of r7 records it -> seen grows to { r1, r2, r3, r7 }
+- a retry of r7 is dropped because the id is already seen
 
 ### idempotent sink (idempotency key)
 
 _Role: idempotent sink — applies effects exactly once_
 
-![idempotent sink (idempotency key)](../diagrams/d2/decomp/ch05-2.png)
+- the sink writes with an idempotency key = order-99
+- a SET/upsert replaces the value rather than incrementing
+- a retry with the same key is a no-op at the sink
 
 ### external system
 
 _Role: external system — the outside-world effect_
 
-![external system](../diagrams/d2/decomp/ch05-3.png)
+- the payment API deduplicates on the idempotency key
+- a new key charges once; a seen key returns the prior result
+- without the key, two attempts would double-bill
 
 ```java
 // SYSTEM DESIGN — a crash and retry still charge the card exactly once via the idempotency key

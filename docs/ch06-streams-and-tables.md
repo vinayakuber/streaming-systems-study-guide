@@ -88,29 +88,39 @@ _Also known as: SS Ch06 · Stream-Table Duality · Change Log · Materialized Vi
 
 **The pipeline:** database (table) -> change capture (CDC) -> changelog stream -> stream processor (fold) -> materialized view (table)
 
+![system design pipeline](../diagrams/d2/decomp/ch06-0.png)
+
 ### database (table)
 
 _Role: database — holds the source table_
 
-![database (table)](../diagrams/d2/decomp/ch06-0.png)
+- account 42 balance is 7, then updates to 12
+- the database is table-centric state
+- the update is the event that CDC will capture
 
 ### change capture (CDC)
 
 _Role: change capture — turns table writes into a changelog_
 
-![change capture (CDC)](../diagrams/d2/decomp/ch06-1.png)
+- the update 7 -> 12 emits the changelog record (7,12)
+- the record carries the old value for retraction
+- the changelog is append-only and ordered
 
 ### changelog stream
 
 _Role: changelog stream — the stream view of the data_
 
-![changelog stream](../diagrams/d2/decomp/ch06-2.png)
+- the stream is [ (0,10), (10,7), (7,12) ]
+- it is the source of truth — history is retained
+- any past table is a fold up to that point
 
 ### stream processor (fold)
 
 _Role: stream processor — derives tables from the stream_
 
-![stream processor (fold)](../diagrams/d2/decomp/ch06-3.png)
+- the fold applies each (old, new) pair
+- after (7,12) the materialized balance is 12
+- the derived table matches the source database
 
 ```java
 // SYSTEM DESIGN — a balance update flows from table to changelog and back to a matching table

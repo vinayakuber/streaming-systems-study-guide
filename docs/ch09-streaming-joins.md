@@ -88,29 +88,39 @@ _Also known as: SS Ch09 · Streaming Join · Windowed Join · Temporal Join · S
 
 **The pipeline:** click stream + impression stream -> windowed join (buffer + watermark) -> retraction emitter -> attribution store
 
+![system design pipeline](../diagrams/d2/decomp/ch09-0.png)
+
 ### click stream + impression stream
 
 _Role: two streams — feed the join with event-time rows_
 
-![click stream + impression stream](../diagrams/d2/decomp/ch09-0.png)
+- a click {campaign: "C1", event_time: "12:03:00"} arrives
+- an impression {campaign: "C1", event_time: "12:02:00"} arrives
+- each side carries its own watermark
 
 ### windowed join (buffer + watermark)
 
 _Role: windowed join — buffers one side and matches within a window_
 
-![windowed join (buffer + watermark)](../diagrams/d2/decomp/ch09-1.png)
+- the impression buffer holds rows within 5 min of a click
+- the click probes the buffer and finds the 12:02 impression
+- the match is held until both watermarks pass 12:05:00
 
 ### retraction emitter
 
 _Role: retraction emitter — corrects matches when late data arrives_
 
-![retraction emitter](../diagrams/d2/decomp/ch09-2.png)
+- a late impression within allowed lateness changes the match
+- the old match is retracted downstream
+- the corrected match is emitted
 
 ### attribution store
 
 _Role: attribution store — holds the final matches_
 
-![attribution store](../diagrams/d2/decomp/ch09-3.png)
+- the store applies retractions so old matches do not double-count
+- the final state shows the corrected (click, impression) pair
+- join state is garbage-collected past the window + lateness
 
 ```java
 // SYSTEM DESIGN — a windowed join holds a match until both watermarks pass, then a late row corrects it

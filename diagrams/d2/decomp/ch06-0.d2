@@ -1,22 +1,26 @@
 direction: down
 
-R: {
+S0: {
   label: |md
-    **database (table)**
+    **database**
+
+    table
   |
   shape: rectangle
   style: {
     fill: "#238636"
     stroke: "#2ea043"
     font-color: "#FFFFFF"
-    border-radius: 8
+    border-radius: 6
     font-size: 16
   }
 }
 
-P0: {
+S1: {
   label: |md
-    account 42 balance is 7, then updates to 12
+    **change capture**
+
+    CDC
   |
   shape: rectangle
   style: {
@@ -24,13 +28,13 @@ P0: {
     stroke: "#388bfd"
     font-color: "#FFFFFF"
     border-radius: 6
-    font-size: 15
+    font-size: 16
   }
 }
 
-P1: {
+S2: {
   label: |md
-    the database is table-centric state
+    **changelog stream**
   |
   shape: rectangle
   style: {
@@ -38,13 +42,15 @@ P1: {
     stroke: "#388bfd"
     font-color: "#FFFFFF"
     border-radius: 6
-    font-size: 15
+    font-size: 16
   }
 }
 
-P2: {
+S3: {
   label: |md
-    the update is the event that CDC will capture
+    **stream processor**
+
+    fold
   |
   shape: rectangle
   style: {
@@ -52,10 +58,27 @@ P2: {
     stroke: "#388bfd"
     font-color: "#FFFFFF"
     border-radius: 6
-    font-size: 15
+    font-size: 16
   }
 }
 
-R -> P0: "1. comprises"
-R -> P1: "2. comprises"
-R -> P2: "3. comprises"
+S4: {
+  label: |md
+    **materialized view**
+
+    table
+  |
+  shape: rectangle
+  style: {
+    fill: "#8250df"
+    stroke: "#8250df"
+    font-color: "#FFFFFF"
+    border-radius: 6
+    font-size: 16
+  }
+}
+
+S0 -> S1: "1. table"
+S1 -> S2: "2. CDC"
+S2 -> S3: "3. changelog stream"
+S3 -> S4: "4. fold"

@@ -89,29 +89,39 @@ _Also known as: SS Ch01 · Event Time · Processing Time · Bounded vs Unbounded
 
 **The pipeline:** writer (event producer) -> transport (unbounded stream) -> collector (processor) -> aggregator/store (window state) -> reader (dashboard)
 
+![system design pipeline](../diagrams/d2/decomp/ch01-0.png)
+
 ### writer (event producer)
 
 _Role: writer — stamps events with event time_
 
-![writer (event producer)](../diagrams/d2/decomp/ch01-0.png)
+- a device stamps a click {user: 42, url: "/shoe/x", event_time: "12:00:59"}
+- the timestamp is the user-interaction instant, not the send instant
+- each event is immutable once emitted
 
 ### transport (unbounded stream)
 
 _Role: transport — carries events and delays them_
 
-![transport (unbounded stream)](../diagrams/d2/decomp/ch01-1.png)
+- the click is queued and delayed 3m12s by the network
+- processing time trails event time by the accumulated lag
+- a watermark at 12:03:00 declares how complete event time is
 
 ### collector (processor)
 
 _Role: collector — reads events and assigns buckets_
 
-![collector (processor)](../diagrams/d2/decomp/ch01-2.png)
+- the processor reads the click at processing time 12:04:11
+- it buckets by event time, placing the click in the 12:00 window
+- a straggler arriving after the watermark is flagged late
 
 ### aggregator/store (window state)
 
 _Role: aggregator/store — holds per-window counts_
 
-![aggregator/store (window state)](../diagrams/d2/decomp/ch01-3.png)
+- window 12:00 count : 0 -> 1 as the click is folded in
+- window 12:04 stays 0 BECAUSE the click belongs to 12:00
+- the dashboard reads the live window counts
 
 ```java
 // SYSTEM DESIGN — a producer emits a click, the stream delays it, the processor buckets by event time, the dashboard reads the count

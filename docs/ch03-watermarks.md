@@ -90,29 +90,39 @@ _Also known as: SS Ch03 · Watermark · Event-time Progress · Heuristic Waterma
 
 **The pipeline:** sources (events with event time) -> watermark generator (max_seen − skew) -> window assigner -> per-window state -> trigger/emitter -> dashboard
 
+![system design pipeline](../diagrams/d2/decomp/ch03-0.png)
+
 ### sources (events with event time)
 
 _Role: sources — emit events that may be out of order_
 
-![sources (events with event time)](../diagrams/d2/decomp/ch03-0.png)
+- a phone emits {event_time: "12:08:30"} after a network delay
+- event time is stamped at the source, not at ingestion
+- a straggler {event_time: "12:05:10"} may arrive after newer events
 
 ### watermark generator (max_seen − skew)
 
 _Role: watermark generator — estimates event-time completeness_
 
-![watermark generator (max_seen − skew)](../diagrams/d2/decomp/ch03-1.png)
+- max_seen : 12:07:00 -> 12:08:30 as the newest event arrives
+- watermark = max_seen - skew = 12:08:30 - 2:00 = 12:06:30
+- per-source watermarks are min-ed together at the stage
 
 ### window assigner
 
 _Role: window assigner — assigns events to event-time windows_
 
-![window assigner](../diagrams/d2/decomp/ch03-2.png)
+- event {event_time: "12:08:30"} lands in window [12:05, 12:10)
+- the watermark at 12:06:30 means windows up to 12:06:30 are complete
+- window [12:00, 12:05) is closed because 12:06:30 > 12:05:00
 
 ### trigger/emitter
 
 _Role: trigger/emitter — fires on the watermark and handles late data_
 
-![trigger/emitter](../diagrams/d2/decomp/ch03-3.png)
+- the on-time trigger fires when the watermark passes the window end
+- a late event {event_time: "12:05:10"} is accepted if inside allowed lateness
+- a late pane re-emits the updated window result to the dashboard
 
 ```java
 // SYSTEM DESIGN — a watermark closes a window on time and allowed lateness catches one straggler

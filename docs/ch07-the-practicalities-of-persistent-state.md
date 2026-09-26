@@ -88,29 +88,39 @@ _Also known as: SS Ch07 · Persistent State · Checkpoint · State Store · Rock
 
 **The pipeline:** stream -> processor (state store) -> checkpoint (state + offset) -> durable storage -> restart recovery
 
+![system design pipeline](../diagrams/d2/decomp/ch07-0.png)
+
 ### stream
 
 _Role: stream — delivers records with a source offset_
 
-![stream](../diagrams/d2/decomp/ch07-0.png)
+- a record for key 42 arrives at offset 500
+- the offset is the replayable source position
+- events after the offset are not yet folded
 
 ### processor (state store)
 
 _Role: processor — folds records into a state store_
 
-![processor (state store)](../diagrams/d2/decomp/ch07-1.png)
+- the count for key 42 updates { 42: 10 } -> { 42: 13 }
+- hot keys stay in memory, the rest spill to disk
+- the state store holds the running aggregation
 
 ### checkpoint (state + offset)
 
 _Role: checkpoint — snapshots state and offset together_
 
-![checkpoint (state + offset)](../diagrams/d2/decomp/ch07-2.png)
+- a barrier triggers the snapshot at offset 500
+- the snapshot captures { count: { 42: 13 }, offset: 500 }
+- incremental mode uploads only the changed keys
 
 ### durable storage
 
 _Role: durable storage — holds the checkpoint bytes_
 
-![durable storage](../diagrams/d2/decomp/ch07-3.png)
+- the checkpoint is written to durable storage (S3/HDFS)
+- it survives the processor's crash
+- restart reads it back to resume
 
 ```java
 // SYSTEM DESIGN — a barrier snapshots state and offset so a restart resumes without loss or double-count

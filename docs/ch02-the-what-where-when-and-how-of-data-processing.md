@@ -87,29 +87,39 @@ _Also known as: SS Ch02 · Beam Model · Transformations · Windowing · Trigger
 
 **The pipeline:** writer (event source) -> transport (stream) -> collector (window assigner) -> aggregator/store (per-window state) -> reader (dashboard)
 
+![system design pipeline](../diagrams/d2/decomp/ch02-0.png)
+
 ### writer (event source)
 
 _Role: writer — emits events with event time_
 
-![writer (event source)](../diagrams/d2/decomp/ch02-0.png)
+- a purchase event {user: 42, amount: 10, event_time: "12:04:00"} is emitted
+- event time is stamped by the source, not the pipeline
+- events are immutable once produced
 
 ### transport (stream)
 
 _Role: transport — carries events and computes the watermark_
 
-![transport (stream)](../diagrams/d2/decomp/ch02-1.png)
+- the stream delivers the event and tracks the watermark = 12:05:00
+- the watermark says no events earlier than 12:05:00 will arrive
+- network delay keeps the watermark behind the wall clock
 
 ### collector (window assigner)
 
 _Role: collector — assigns events to event-time windows_
 
-![collector (window assigner)](../diagrams/d2/decomp/ch02-2.png)
+- the window assigner places the event in fixed window [12:00, 12:05)
+- a trigger decides when the window result is emitted
+- allowed lateness keeps the window open for stragglers
 
 ### aggregator/store (per-window state)
 
 _Role: aggregator/store — holds the running sum per window_
 
-![aggregator/store (per-window state)](../diagrams/d2/decomp/ch02-3.png)
+- window [12:00, 12:05) sum : 0 -> 10 as the purchase folds in
+- an early pane emits {sum: 10}, an on-time pane re-emits {sum: 10}
+- a late straggler updates sum : 10 -> 20 if inside allowed lateness
 
 ```java
 // SYSTEM DESIGN — a purchase flows through a fixed window; the watermark closes it on time, allowed lateness catches a straggler

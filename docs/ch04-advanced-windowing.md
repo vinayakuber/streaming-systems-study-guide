@@ -87,29 +87,39 @@ _Also known as: SS Ch04 · Session Windows · Fixed Window · Sliding Window · 
 
 **The pipeline:** event source -> window assigner -> session merger -> keyed session state -> trigger/retraction emitter -> analytics store
 
+![system design pipeline](../diagrams/d2/decomp/ch04-0.png)
+
 ### event source
 
 _Role: event source — emits events with event time and a key_
 
-![event source](../diagrams/d2/decomp/ch04-0.png)
+- a click {user: 42, event_time: "12:20:00"} arrives
+- the key is user 42, so sessions are per-user
+- a late event may arrive with event_time earlier than the watermark
 
 ### window assigner
 
 _Role: window assigner — assigns events to session windows_
 
-![window assigner](../diagrams/d2/decomp/ch04-1.png)
+- the event is assigned to a new or existing session for user 42
+- the gap threshold is 30 min of inactivity
+- sessions are data-driven, not clock-aligned
 
 ### session merger
 
 _Role: session merger — merges sessions that a bridging event connects_
 
-![session merger](../diagrams/d2/decomp/ch04-2.png)
+- s1 [12:00,12:10) and s2 [12:40,12:50) both sit within 30 min of the event
+- the merger collapses them into sMerged [12:00, 12:50)
+- the merged count folds s1 + s2 + the bridging event
 
 ### trigger/retraction emitter
 
 _Role: trigger/retraction emitter — emits and corrects panes_
 
-![trigger/retraction emitter](../diagrams/d2/decomp/ch04-3.png)
+- the on-time trigger fires when the watermark passes a session end
+- a late merge retracts the two earlier panes
+- the merged pane is emitted so the store shows one session, not three
 
 ```java
 // SYSTEM DESIGN — a late event merges two sessions and the pipeline retracts the stale panes

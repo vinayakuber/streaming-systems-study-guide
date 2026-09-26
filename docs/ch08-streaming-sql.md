@@ -88,29 +88,39 @@ _Also known as: SS Ch08 · Streaming SQL · Continuous Query · TUMBLE · HOP ·
 
 **The pipeline:** streams (clicks, impressions) -> SQL engine (continuous query) -> watermark + window -> updating result -> sink
 
+![system design pipeline](../diagrams/d2/decomp/ch08-0.png)
+
 ### streams (clicks, impressions)
 
 _Role: streams — feed the SQL engine with event-time data_
 
-![streams (clicks, impressions)](../diagrams/d2/decomp/ch08-0.png)
+- a click {campaign: "C1", event_time: "12:03:00"} arrives
+- an impression {campaign: "C1", event_time: "12:02:00"} arrives
+- both carry event time for the query's time attribute
 
 ### SQL engine (continuous query)
 
 _Role: SQL engine — runs the query forever_
 
-![SQL engine (continuous query)](../diagrams/d2/decomp/ch08-1.png)
+- the query groups by TUMBLE(event_time, 5 min) and campaign
+- the engine folds each row into the right window
+- updating results emit retractions for changed keys
 
 ### watermark + window
 
 _Role: watermark + window — decides when results emit_
 
-![watermark + window](../diagrams/d2/decomp/ch08-2.png)
+- the watermark at 12:06:30 closes the [12:00, 12:05) window
+- a HOP window would emit the same event into multiple spans
+- a join waits for both sides' watermarks
 
 ### sink
 
 _Role: sink — applies the updating result_
 
-![sink](../diagrams/d2/decomp/ch08-3.png)
+- the sink receives (C1, 3) retracted then (C1, 4) added
+- append-only sinks are simpler but wrong for updating results
+- an upsert sink applies retractions correctly
 
 ```java
 // SYSTEM DESIGN — a continuous SQL query updates a campaign count as the watermark closes a TUMBLE window

@@ -1,22 +1,26 @@
 direction: down
 
-R: {
+S0: {
   label: |md
-    **sources (events with event time)**
+    **sources**
+
+    events with event time
   |
   shape: rectangle
   style: {
     fill: "#238636"
     stroke: "#2ea043"
     font-color: "#FFFFFF"
-    border-radius: 8
+    border-radius: 6
     font-size: 16
   }
 }
 
-P0: {
+S1: {
   label: |md
-    a phone emits {event\_time: "12:08:30"} after a network delay
+    **watermark generator**
+
+    max\_seen − skew
   |
   shape: rectangle
   style: {
@@ -24,13 +28,13 @@ P0: {
     stroke: "#388bfd"
     font-color: "#FFFFFF"
     border-radius: 6
-    font-size: 15
+    font-size: 16
   }
 }
 
-P1: {
+S2: {
   label: |md
-    event time is stamped at the source, not at ingestion
+    **window assigner**
   |
   shape: rectangle
   style: {
@@ -38,13 +42,13 @@ P1: {
     stroke: "#388bfd"
     font-color: "#FFFFFF"
     border-radius: 6
-    font-size: 15
+    font-size: 16
   }
 }
 
-P2: {
+S3: {
   label: |md
-    a straggler {event\_time: "12:05:10"} may arrive after newer events
+    **per-window state**
   |
   shape: rectangle
   style: {
@@ -52,10 +56,40 @@ P2: {
     stroke: "#388bfd"
     font-color: "#FFFFFF"
     border-radius: 6
-    font-size: 15
+    font-size: 16
   }
 }
 
-R -> P0: "1. comprises"
-R -> P1: "2. comprises"
-R -> P2: "3. comprises"
+S4: {
+  label: |md
+    **trigger/emitter**
+  |
+  shape: rectangle
+  style: {
+    fill: "#1f6feb"
+    stroke: "#388bfd"
+    font-color: "#FFFFFF"
+    border-radius: 6
+    font-size: 16
+  }
+}
+
+S5: {
+  label: |md
+    **dashboard**
+  |
+  shape: rectangle
+  style: {
+    fill: "#8250df"
+    stroke: "#8250df"
+    font-color: "#FFFFFF"
+    border-radius: 6
+    font-size: 16
+  }
+}
+
+S0 -> S1: "1. events with event time"
+S1 -> S2: "2. max_seen − skew"
+S2 -> S3: "3. window assigner"
+S3 -> S4: "4. per-window state"
+S4 -> S5: "5. trigger/emitter"

@@ -1,6 +1,6 @@
 direction: down
 
-R: {
+S0: {
   label: |md
     **event source**
   |
@@ -9,14 +9,14 @@ R: {
     fill: "#238636"
     stroke: "#2ea043"
     font-color: "#FFFFFF"
-    border-radius: 8
+    border-radius: 6
     font-size: 16
   }
 }
 
-P0: {
+S1: {
   label: |md
-    a click {user: 42, event\_time: "12:20:00"} arrives
+    **window assigner**
   |
   shape: rectangle
   style: {
@@ -24,13 +24,13 @@ P0: {
     stroke: "#388bfd"
     font-color: "#FFFFFF"
     border-radius: 6
-    font-size: 15
+    font-size: 16
   }
 }
 
-P1: {
+S2: {
   label: |md
-    the key is user 42, so sessions are per-user
+    **session merger**
   |
   shape: rectangle
   style: {
@@ -38,13 +38,13 @@ P1: {
     stroke: "#388bfd"
     font-color: "#FFFFFF"
     border-radius: 6
-    font-size: 15
+    font-size: 16
   }
 }
 
-P2: {
+S3: {
   label: |md
-    a late event may arrive with event\_time earlier than the watermark
+    **keyed session state**
   |
   shape: rectangle
   style: {
@@ -52,10 +52,40 @@ P2: {
     stroke: "#388bfd"
     font-color: "#FFFFFF"
     border-radius: 6
-    font-size: 15
+    font-size: 16
   }
 }
 
-R -> P0: "1. comprises"
-R -> P1: "2. comprises"
-R -> P2: "3. comprises"
+S4: {
+  label: |md
+    **trigger/retraction emitter**
+  |
+  shape: rectangle
+  style: {
+    fill: "#1f6feb"
+    stroke: "#388bfd"
+    font-color: "#FFFFFF"
+    border-radius: 6
+    font-size: 16
+  }
+}
+
+S5: {
+  label: |md
+    **analytics store**
+  |
+  shape: rectangle
+  style: {
+    fill: "#8250df"
+    stroke: "#8250df"
+    font-color: "#FFFFFF"
+    border-radius: 6
+    font-size: 16
+  }
+}
+
+S0 -> S1: "1. event source"
+S1 -> S2: "2. window assigner"
+S2 -> S3: "3. session merger"
+S3 -> S4: "4. keyed session state"
+S4 -> S5: "5. trigger/retraction emitter"
