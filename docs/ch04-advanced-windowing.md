@@ -87,7 +87,7 @@ _Also known as: SS Ch04 · Session Windows · Fixed Window · Sliding Window · 
 
 **The pipeline:** event source -> window assigner -> session merger -> keyed session state -> trigger/retraction emitter -> analytics store
 
-![system design pipeline](../diagrams/d2/decomp/ch04-0.png)
+<a href="../diagrams/d2/decomp/ch04-0.png"><img src="../diagrams/d2/decomp/ch04-0.png" alt="system design pipeline" width="278"></a>
 
 ### event source
 
@@ -247,7 +247,7 @@ Fixed windows partition time into equal, non-overlapping, contiguous spans; each
 
 **In the wild.** Beam, Flink, and Dataflow all expose these three window types.
 
-![1. One window shape does not fit all questions](../diagrams/d2/card/ch04-0.png)
+<a href="../diagrams/d2/card/ch04-0.png"><img src="../diagrams/d2/card/ch04-0.png" alt="1. One window shape does not fit all questions" width="383"></a>
 ### Shape: 2. Fixed windows
 
 **Why.** Periodic, comparable aggregates need equal, non-overlapping time buckets.
@@ -258,7 +258,7 @@ Fixed windows partition time into equal, non-overlapping, contiguous spans; each
 
 **In the wild.** A 5-minute tumbling window in Flink is a fixed window.
 
-![2. Fixed windows](../diagrams/d2/card/ch04-1.png)
+<a href="../diagrams/d2/card/ch04-1.png"><img src="../diagrams/d2/card/ch04-1.png" alt="2. Fixed windows" width="306"></a>
 ### Shape: 3. Sliding windows
 
 **Why.** Moving averages need overlapping spans so a point in time contributes to several recent windows.
@@ -269,7 +269,7 @@ Fixed windows partition time into equal, non-overlapping, contiguous spans; each
 
 **In the wild.** A 10-minute window sliding every 2 minutes is the canonical rolling average.
 
-![3. Sliding windows](../diagrams/d2/card/ch04-2.png)
+<a href="../diagrams/d2/card/ch04-2.png"><img src="../diagrams/d2/card/ch04-2.png" alt="3. Sliding windows" width="383"></a>
 ### Shape: 4. Session windows
 
 **Why.** User behavior is bursty and its boundaries follow the data, not the clock.
@@ -280,7 +280,7 @@ Fixed windows partition time into equal, non-overlapping, contiguous spans; each
 
 **In the wild.** Web-analytics sessionization is the canonical session-window use case.
 
-![4. Session windows](../diagrams/d2/card/ch04-3.png)
+<a href="../diagrams/d2/card/ch04-3.png"><img src="../diagrams/d2/card/ch04-3.png" alt="4. Session windows" width="327"></a>
 ### Lifecycle: 5. The window lifecycle
 
 **Why.** Windowing is a pipeline of steps — assign, merge, group, trigger, accumulate, garbage-collect — not a single bucket lookup.
@@ -291,7 +291,7 @@ Fixed windows partition time into equal, non-overlapping, contiguous spans; each
 
 **In the wild.** Beam's WindowFn, trigger, and accumulation mode map onto these stages.
 
-![5. The window lifecycle](../diagrams/d2/card/ch04-4.png)
+<a href="../diagrams/d2/card/ch04-4.png"><img src="../diagrams/d2/card/ch04-4.png" alt="5. The window lifecycle" width="315"></a>
 ### Merge: 6. Session merging
 
 **Why.** Sessions that were separate can turn out to be one session when a bridging event arrives.
@@ -302,7 +302,7 @@ Fixed windows partition time into equal, non-overlapping, contiguous spans; each
 
 **In the wild.** Beam's mergeWindows is the production form.
 
-![6. Session merging](../diagrams/d2/card/ch04-5.png)
+<a href="../diagrams/d2/card/ch04-5.png"><img src="../diagrams/d2/card/ch04-5.png" alt="6. Session merging" width="372"></a>
 ### Pitfall: 7. Late merges need retractions
 
 **Why.** A late event can bridge two sessions already emitted separately, so the earlier panes are now wrong.
@@ -313,7 +313,7 @@ Fixed windows partition time into equal, non-overlapping, contiguous spans; each
 
 **In the wild.** Accumulating-and-retracting mode in Beam handles this.
 
-![7. Late merges need retractions](../diagrams/d2/card/ch04-6.png)
+<a href="../diagrams/d2/card/ch04-6.png"><img src="../diagrams/d2/card/ch04-6.png" alt="7. Late merges need retractions" width="445"></a>
 ### Scope: 8. Sessions are keyed
 
 **Why.** A gap must be measured within one entity, not across unrelated entities.
@@ -324,7 +324,7 @@ Fixed windows partition time into equal, non-overlapping, contiguous spans; each
 
 **In the wild.** Grouping by user id before sessionizing is the production pattern.
 
-![8. Sessions are keyed](../diagrams/d2/card/ch04-7.png)
+<a href="../diagrams/d2/card/ch04-7.png"><img src="../diagrams/d2/card/ch04-7.png" alt="8. Sessions are keyed" width="388"></a>
 
 </details>
 

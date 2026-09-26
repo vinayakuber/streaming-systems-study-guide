@@ -88,7 +88,7 @@ _Also known as: SS Ch10 · Lambda Architecture · Kappa Architecture · Batch-St
 
 **The pipeline:** log (replayable) -> one streaming pipeline -> speed result; replay path -> same pipeline -> corrected result
 
-![system design pipeline](../diagrams/d2/decomp/ch10-0.png)
+<a href="../diagrams/d2/decomp/ch10-0.png"><img src="../diagrams/d2/decomp/ch10-0.png" alt="system design pipeline" width="272"></a>
 
 ### log (replayable)
 
@@ -248,7 +248,7 @@ Lambda runs a batch layer (correct) and a speed layer (low-latency) computing th
 
 **In the wild.** Beam, Flink, and Dataflow all run the same pipeline in both modes.
 
-![1. Batch and streaming were separate worlds](../diagrams/d2/card/ch10-0.png)
+<a href="../diagrams/d2/card/ch10-0.png"><img src="../diagrams/d2/card/ch10-0.png" alt="1. Batch and streaming were separate worlds" width="362"></a>
 ### Architecture: 2. Lambda architecture
 
 **Why.** To get both correct and low-latency results, run two layers.
@@ -259,7 +259,7 @@ Lambda runs a batch layer (correct) and a speed layer (low-latency) computing th
 
 **In the wild.** Nathan Marz's Lambda architecture from the Hadoop era.
 
-![2. Lambda architecture](../diagrams/d2/card/ch10-1.png)
+<a href="../diagrams/d2/card/ch10-1.png"><img src="../diagrams/d2/card/ch10-1.png" alt="2. Lambda architecture" width="298"></a>
 ### Architecture: 3. Kappa architecture
 
 **Why.** Eliminating the second codebase removes the drift.
@@ -270,7 +270,7 @@ Lambda runs a batch layer (correct) and a speed layer (low-latency) computing th
 
 **In the wild.** Jay Kreps' Kappa architecture on top of Kafka.
 
-![3. Kappa architecture](../diagrams/d2/card/ch10-2.png)
+<a href="../diagrams/d2/card/ch10-2.png"><img src="../diagrams/d2/card/ch10-2.png" alt="3. Kappa architecture" width="382"></a>
 ### Insight: 4. Batch is a special case
 
 **Why.** If the model is unified, batch needs no separate machinery.
@@ -281,7 +281,7 @@ Lambda runs a batch layer (correct) and a speed layer (low-latency) computing th
 
 **In the wild.** Beam runs batch pipelines with the same windowing as streaming.
 
-![4. Batch is a special case](../diagrams/d2/card/ch10-3.png)
+<a href="../diagrams/d2/card/ch10-3.png"><img src="../diagrams/d2/card/ch10-3.png" alt="4. Batch is a special case" width="357"></a>
 ### Operation: 5. Reprocessing via replay
 
 **Why.** Business logic changes, so history must be recomputed under the new logic.
@@ -292,7 +292,7 @@ Lambda runs a batch layer (correct) and a speed layer (low-latency) computing th
 
 **In the wild.** Kafka retention + replay is the production form.
 
-![5. Reprocessing via replay](../diagrams/d2/card/ch10-4.png)
+<a href="../diagrams/d2/card/ch10-4.png"><img src="../diagrams/d2/card/ch10-4.png" alt="5. Reprocessing via replay" width="291"></a>
 ### Requirement: 6. Replayable logs
 
 **Why.** Replay-based reprocessing requires the input history to be retained and re-readable.
@@ -303,7 +303,7 @@ Lambda runs a batch layer (correct) and a speed layer (low-latency) computing th
 
 **In the wild.** Kafka topic retention is the Kappa prerequisite.
 
-![6. Replayable logs](../diagrams/d2/card/ch10-5.png)
+<a href="../diagrams/d2/card/ch10-5.png"><img src="../diagrams/d2/card/ch10-5.png" alt="6. Replayable logs" width="317"></a>
 ### Cost: 7. Lambda vs Kappa
 
 **Why.** The architectures differ in what they pay for correctness and latency.
@@ -314,7 +314,7 @@ Lambda runs a batch layer (correct) and a speed layer (low-latency) computing th
 
 **In the wild.** Most modern systems choose Kappa-style, given a replayable log.
 
-![7. Lambda vs Kappa](../diagrams/d2/card/ch10-6.png)
+<a href="../diagrams/d2/card/ch10-6.png"><img src="../diagrams/d2/card/ch10-6.png" alt="7. Lambda vs Kappa" width="737"></a>
 ### Remaining: 8. What stays distinct
 
 **Why.** Unification does not make streams finite.
@@ -325,7 +325,7 @@ Lambda runs a batch layer (correct) and a speed layer (low-latency) computing th
 
 **In the wild.** Streaming jobs run until stopped; batch jobs terminate.
 
-![8. What stays distinct](../diagrams/d2/card/ch10-7.png)
+<a href="../diagrams/d2/card/ch10-7.png"><img src="../diagrams/d2/card/ch10-7.png" alt="8. What stays distinct" width="352"></a>
 
 </details>
 

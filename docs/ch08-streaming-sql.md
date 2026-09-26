@@ -88,7 +88,7 @@ _Also known as: SS Ch08 · Streaming SQL · Continuous Query · TUMBLE · HOP ·
 
 **The pipeline:** streams (clicks, impressions) -> SQL engine (continuous query) -> watermark + window -> updating result -> sink
 
-![system design pipeline](../diagrams/d2/decomp/ch08-0.png)
+<a href="../diagrams/d2/decomp/ch08-0.png"><img src="../diagrams/d2/decomp/ch08-0.png" alt="system design pipeline" width="246"></a>
 
 ### streams (clicks, impressions)
 
@@ -251,7 +251,7 @@ GROUP BY TUMBLE(event_time, INTERVAL '5' MINUTE), campaign
 
 **In the wild.** Flink SQL, Beam SQL, and ksqlDB are production streaming-SQL engines.
 
-![1. Stream processing is too low-level](../diagrams/d2/card/ch08-0.png)
+<a href="../diagrams/d2/card/ch08-0.png"><img src="../diagrams/d2/card/ch08-0.png" alt="1. Stream processing is too low-level" width="388"></a>
 ### Query: 2. Continuous queries
 
 **Why.** A stream never ends, so a query over it must run forever, not once.
@@ -262,7 +262,7 @@ GROUP BY TUMBLE(event_time, INTERVAL '5' MINUTE), campaign
 
 **In the wild.** A materialized view over a Kafka topic is a continuous query.
 
-![2. Continuous queries](../diagrams/d2/card/ch08-1.png)
+<a href="../diagrams/d2/card/ch08-1.png"><img src="../diagrams/d2/card/ch08-1.png" alt="2. Continuous queries" width="311"></a>
 ### Time: 3. Time attributes
 
 **Why.** Windows and joins need to know which time to use — when the event happened or when it was processed.
@@ -273,7 +273,7 @@ GROUP BY TUMBLE(event_time, INTERVAL '5' MINUTE), campaign
 
 **In the wild.** Flink SQL's event-time attribute drives watermark-based windows.
 
-![3. Time attributes](../diagrams/d2/card/ch08-2.png)
+<a href="../diagrams/d2/card/ch08-2.png"><img src="../diagrams/d2/card/ch08-2.png" alt="3. Time attributes" width="410"></a>
 ### Window: 4. TUMBLE, HOP, SESSION
 
 **Why.** Aggregates over a stream need an explicit time slice, spelled out in SQL.
@@ -284,7 +284,7 @@ GROUP BY TUMBLE(event_time, INTERVAL '5' MINUTE), campaign
 
 **In the wild.** Flink SQL and Beam SQL both support these.
 
-![4. TUMBLE, HOP, SESSION](../diagrams/d2/card/ch08-3.png)
+<a href="../diagrams/d2/card/ch08-3.png"><img src="../diagrams/d2/card/ch08-3.png" alt="4. TUMBLE, HOP, SESSION" width="310"></a>
 ### Mode: 5. Append-only vs updating results
 
 **Why.** Some results only add rows; others change existing rows, which sinks must handle differently.
@@ -295,7 +295,7 @@ GROUP BY TUMBLE(event_time, INTERVAL '5' MINUTE), campaign
 
 **In the wild.** Flink SQL emits retract streams for updating queries.
 
-![5. Append-only vs updating results](../diagrams/d2/card/ch08-4.png)
+<a href="../diagrams/d2/card/ch08-4.png"><img src="../diagrams/d2/card/ch08-4.png" alt="5. Append-only vs updating results" width="428"></a>
 ### Join: 6. Windowed joins
 
 **Why.** Two unbounded streams have no natural join boundary, so time must supply one.
@@ -306,7 +306,7 @@ GROUP BY TUMBLE(event_time, INTERVAL '5' MINUTE), campaign
 
 **In the wild.** Flink SQL interval joins are the production form.
 
-![6. Windowed joins](../diagrams/d2/card/ch08-5.png)
+<a href="../diagrams/d2/card/ch08-5.png"><img src="../diagrams/d2/card/ch08-5.png" alt="6. Windowed joins" width="328"></a>
 ### Watermark: 7. The watermark drives SQL emission
 
 **Why.** A windowed result must wait until the engine believes the window is complete.
@@ -317,7 +317,7 @@ GROUP BY TUMBLE(event_time, INTERVAL '5' MINUTE), campaign
 
 **In the wild.** Flink SQL uses the watermark to fire windows.
 
-![7. The watermark drives SQL emission](../diagrams/d2/card/ch08-6.png)
+<a href="../diagrams/d2/card/ch08-6.png"><img src="../diagrams/d2/card/ch08-6.png" alt="7. The watermark drives SQL emission" width="365"></a>
 ### Choice: 8. Event time vs processing time
 
 **Why.** The time attribute is a correctness decision, not a syntax detail.
@@ -328,7 +328,7 @@ GROUP BY TUMBLE(event_time, INTERVAL '5' MINUTE), campaign
 
 **In the wild.** Production SQL pipelines default to event time.
 
-![8. Event time vs processing time](../diagrams/d2/card/ch08-7.png)
+<a href="../diagrams/d2/card/ch08-7.png"><img src="../diagrams/d2/card/ch08-7.png" alt="8. Event time vs processing time" width="633"></a>
 
 </details>
 

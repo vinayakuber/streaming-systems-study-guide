@@ -87,7 +87,7 @@ _Also known as: SS Ch02 Â· Beam Model Â· Transformations Â· Windowing Â· Trigger
 
 **The pipeline:** writer (event source) -> transport (stream) -> collector (window assigner) -> aggregator/store (per-window state) -> reader (dashboard)
 
-![system design pipeline](../diagrams/d2/decomp/ch02-0.png)
+<a href="../diagrams/d2/decomp/ch02-0.png"><img src="../diagrams/d2/decomp/ch02-0.png" alt="system design pipeline" width="216"></a>
 
 ### writer (event source)
 
@@ -248,7 +248,7 @@ Transformations are the computations â€” sum, filter, join, keyed aggregation â€
 
 **In the wild.** Beam's PTransform (what), Window (where), Trigger (when), and AccumulationMode (how) map one-to-one onto the four questions.
 
-![1. Pipelines are underspecified](../diagrams/d2/card/ch02-0.png)
+<a href="../diagrams/d2/card/ch02-0.png"><img src="../diagrams/d2/card/ch02-0.png" alt="1. Pipelines are underspecified" width="478"></a>
 ### Axis: 2. Transformations (what)
 
 **Why.** The output of a pipeline is whatever its transforms compute, so the transform is the first thing a design must pin down.
@@ -259,7 +259,7 @@ Transformations are the computations â€” sum, filter, join, keyed aggregation â€
 
 **In the wild.** A Beam ParDo or a Flink map/keyBy/sum is a transform.
 
-![2. Transformations (what)](../diagrams/d2/card/ch02-1.png)
+<a href="../diagrams/d2/card/ch02-1.png"><img src="../diagrams/d2/card/ch02-1.png" alt="2. Transformations (what)" width="375"></a>
 ### Axis: 3. Windowing (where)
 
 **Why.** An unbounded stream has no natural boundary, so aggregates need an explicit event-time slice to be well-defined.
@@ -270,7 +270,7 @@ Transformations are the computations â€” sum, filter, join, keyed aggregation â€
 
 **In the wild.** A 5-minute fixed window in Flink is a windowing choice.
 
-![3. Windowing (where)](../diagrams/d2/card/ch02-2.png)
+<a href="../diagrams/d2/card/ch02-2.png"><img src="../diagrams/d2/card/ch02-2.png" alt="3. Windowing (where)" width="374"></a>
 ### Axis: 4. Triggers (when)
 
 **Why.** Without a trigger a window result sits unemitted forever, so the pipeline must name the processing-time conditions that fire output.
@@ -281,7 +281,7 @@ Transformations are the computations â€” sum, filter, join, keyed aggregation â€
 
 **In the wild.** Flink's trigger API fires on watermark passage by default.
 
-![4. Triggers (when)](../diagrams/d2/card/ch02-3.png)
+<a href="../diagrams/d2/card/ch02-3.png"><img src="../diagrams/d2/card/ch02-3.png" alt="4. Triggers (when)" width="460"></a>
 ### Signal: 5. Watermarks
 
 **Why.** The pipeline needs a signal for how complete event time is before it can safely close a window.
@@ -292,7 +292,7 @@ Transformations are the computations â€” sum, filter, join, keyed aggregation â€
 
 **In the wild.** Flink and Dataflow watermarks are the production completeness signal.
 
-![5. Watermarks](../diagrams/d2/card/ch02-4.png)
+<a href="../diagrams/d2/card/ch02-4.png"><img src="../diagrams/d2/card/ch02-4.png" alt="5. Watermarks" width="437"></a>
 ### Bound: 6. Allowed lateness
 
 **Why.** After the watermark passes, late data still exists, and the pipeline must bound how long it keeps window state around for stragglers.
@@ -303,7 +303,7 @@ Transformations are the computations â€” sum, filter, join, keyed aggregation â€
 
 **In the wild.** Dataflow's allowed-lateness setting is the production form.
 
-![6. Allowed lateness](../diagrams/d2/card/ch02-5.png)
+<a href="../diagrams/d2/card/ch02-5.png"><img src="../diagrams/d2/card/ch02-5.png" alt="6. Allowed lateness" width="488"></a>
 ### Mode: 7. Accumulation (how)
 
 **Why.** A window that emits early and on-time produces multiple panes, and downstream must know if each pane adds to or replaces the last.
@@ -314,7 +314,7 @@ Transformations are the computations â€” sum, filter, join, keyed aggregation â€
 
 **In the wild.** Beam's accumulation modes are the production expression of "how".
 
-![7. Accumulation (how)](../diagrams/d2/card/ch02-6.png)
+<a href="../diagrams/d2/card/ch02-6.png"><img src="../diagrams/d2/card/ch02-6.png" alt="7. Accumulation (how)" width="402"></a>
 ### Checklist: 8. The four-question checklist
 
 **Why.** A design review that omits one axis ships a pipeline whose latency or correctness is an accident rather than a decision.
@@ -325,7 +325,7 @@ Transformations are the computations â€” sum, filter, join, keyed aggregation â€
 
 **In the wild.** The book's recurring worked example (team score over sessions) is defined by exactly these four answers.
 
-![8. The four-question checklist](../diagrams/d2/card/ch02-7.png)
+<a href="../diagrams/d2/card/ch02-7.png"><img src="../diagrams/d2/card/ch02-7.png" alt="8. The four-question checklist" width="369"></a>
 
 </details>
 

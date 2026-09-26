@@ -88,7 +88,7 @@ _Also known as: SS Ch09 · Streaming Join · Windowed Join · Temporal Join · S
 
 **The pipeline:** click stream + impression stream -> windowed join (buffer + watermark) -> retraction emitter -> attribution store
 
-![system design pipeline](../diagrams/d2/decomp/ch09-0.png)
+<a href="../diagrams/d2/decomp/ch09-0.png"><img src="../diagrams/d2/decomp/ch09-0.png" alt="system design pipeline" width="328"></a>
 
 ### click stream + impression stream
 
@@ -248,7 +248,7 @@ A windowed join matches rows whose time attributes are within a window of each o
 
 **In the wild.** Flink SQL requires an interval for stream-stream joins.
 
-![1. Unbounded joins never finish](../diagrams/d2/card/ch09-0.png)
+<a href="../diagrams/d2/card/ch09-0.png"><img src="../diagrams/d2/card/ch09-0.png" alt="1. Unbounded joins never finish" width="342"></a>
 ### Stream-stream: 2. Windowed joins
 
 **Why.** Two streams need a time window to bound which rows can match.
@@ -259,7 +259,7 @@ A windowed join matches rows whose time attributes are within a window of each o
 
 **In the wild.** Flink SQL interval joins are the production form.
 
-![2. Windowed joins](../diagrams/d2/card/ch09-1.png)
+<a href="../diagrams/d2/card/ch09-1.png"><img src="../diagrams/d2/card/ch09-1.png" alt="2. Windowed joins" width="345"></a>
 ### Stream-table: 3. Temporal joins
 
 **Why.** Enriching a stream against a slowly-changing table is a lookup, not a windowed match.
@@ -270,7 +270,7 @@ A windowed join matches rows whose time attributes are within a window of each o
 
 **In the wild.** Flink SQL temporal joins against a changelog table.
 
-![3. Temporal joins](../diagrams/d2/card/ch09-2.png)
+<a href="../diagrams/d2/card/ch09-2.png"><img src="../diagrams/d2/card/ch09-2.png" alt="3. Temporal joins" width="333"></a>
 ### Buffer: 4. Join state
 
 **Why.** Rows from one side must wait for their counterpart on the other side.
@@ -281,7 +281,7 @@ A windowed join matches rows whose time attributes are within a window of each o
 
 **In the wild.** Flink holds the buffered side in managed state.
 
-![4. Join state](../diagrams/d2/card/ch09-3.png)
+<a href="../diagrams/d2/card/ch09-3.png"><img src="../diagrams/d2/card/ch09-3.png" alt="4. Join state" width="323"></a>
 ### Signal: 5. Watermarks bound the wait
 
 **Why.** The pipeline needs to know when no more matching rows will arrive for a time range.
@@ -292,7 +292,7 @@ A windowed join matches rows whose time attributes are within a window of each o
 
 **In the wild.** Flink SQL fires interval joins on the watermark.
 
-![5. Watermarks bound the wait](../diagrams/d2/card/ch09-4.png)
+<a href="../diagrams/d2/card/ch09-4.png"><img src="../diagrams/d2/card/ch09-4.png" alt="5. Watermarks bound the wait" width="361"></a>
 ### Correctness: 6. Late data and retractions
 
 **Why.** A late row can arrive after a match was emitted and change it.
@@ -303,7 +303,7 @@ A windowed join matches rows whose time attributes are within a window of each o
 
 **In the wild.** Retract streams in Flink SQL correct emitted joins.
 
-![6. Late data and retractions](../diagrams/d2/card/ch09-5.png)
+<a href="../diagrams/d2/card/ch09-5.png"><img src="../diagrams/d2/card/ch09-5.png" alt="6. Late data and retractions" width="392"></a>
 ### Growth: 7. Garbage-collect join state
 
 **Why.** A join buffer that never shrinks exhausts memory.
@@ -314,7 +314,7 @@ A windowed join matches rows whose time attributes are within a window of each o
 
 **In the wild.** Flink cleans up interval-join state past the window + lateness.
 
-![7. Garbage-collect join state](../diagrams/d2/card/ch09-6.png)
+<a href="../diagrams/d2/card/ch09-6.png"><img src="../diagrams/d2/card/ch09-6.png" alt="7. Garbage-collect join state" width="333"></a>
 ### Mistake: 8. Stream-stream vs stream-table confusion
 
 **Why.** Applying the wrong join type produces unbounded buffers or wrong matches.
@@ -325,7 +325,7 @@ A windowed join matches rows whose time attributes are within a window of each o
 
 **In the wild.** A common bug is a windowed join where a temporal lookup was intended.
 
-![8. Stream-stream vs stream-table confusion](../diagrams/d2/card/ch09-7.png)
+<a href="../diagrams/d2/card/ch09-7.png"><img src="../diagrams/d2/card/ch09-7.png" alt="8. Stream-stream vs stream-table confusion" width="419"></a>
 
 </details>
 

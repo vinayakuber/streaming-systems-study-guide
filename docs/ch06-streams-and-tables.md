@@ -88,7 +88,7 @@ _Also known as: SS Ch06 · Stream-Table Duality · Change Log · Materialized Vi
 
 **The pipeline:** database (table) -> change capture (CDC) -> changelog stream -> stream processor (fold) -> materialized view (table)
 
-![system design pipeline](../diagrams/d2/decomp/ch06-0.png)
+<a href="../diagrams/d2/decomp/ch06-0.png"><img src="../diagrams/d2/decomp/ch06-0.png" alt="system design pipeline" width="222"></a>
 
 ### database (table)
 
@@ -249,7 +249,7 @@ A stream is a sequence of events over time — an append-only change log.
 
 **In the wild.** Kafka (stream) vs a database index (table) are the two projections.
 
-![1. One dataset, two forms](../diagrams/d2/card/ch06-0.png)
+<a href="../diagrams/d2/card/ch06-0.png"><img src="../diagrams/d2/card/ch06-0.png" alt="1. One dataset, two forms" width="330"></a>
 ### View: 2. Streams
 
 **Why.** Order of events and history matter when the question is "what happened".
@@ -260,7 +260,7 @@ A stream is a sequence of events over time — an append-only change log.
 
 **In the wild.** A Kafka topic is a stream.
 
-![2. Streams](../diagrams/d2/card/ch06-1.png)
+<a href="../diagrams/d2/card/ch06-1.png"><img src="../diagrams/d2/card/ch06-1.png" alt="2. Streams" width="386"></a>
 ### View: 3. Tables
 
 **Why.** A point-in-time answer needs a snapshot, not a history.
@@ -271,7 +271,7 @@ A stream is a sequence of events over time — an append-only change log.
 
 **In the wild.** A SQL materialized view or a database index is a table.
 
-![3. Tables](../diagrams/d2/card/ch06-2.png)
+<a href="../diagrams/d2/card/ch06-2.png"><img src="../diagrams/d2/card/ch06-2.png" alt="3. Tables" width="265"></a>
 ### Direction: 4. Stream -> table
 
 **Why.** To answer "what is the current total" from a feed of events, aggregate them.
@@ -282,7 +282,7 @@ A stream is a sequence of events over time — an append-only change log.
 
 **In the wild.** A Flink keyed aggregation produces a stateful table.
 
-![4. Stream -> table](../diagrams/d2/card/ch06-3.png)
+<a href="../diagrams/d2/card/ch06-3.png"><img src="../diagrams/d2/card/ch06-3.png" alt="4. Stream -> table" width="308"></a>
 ### Direction: 5. Table -> stream
 
 **Why.** To react to database changes in real time, capture them as a feed.
@@ -293,7 +293,7 @@ A stream is a sequence of events over time — an append-only change log.
 
 **In the wild.** Debezium CDC turns MySQL/Postgres into Kafka changelogs.
 
-![5. Table -> stream](../diagrams/d2/card/ch06-4.png)
+<a href="../diagrams/d2/card/ch06-4.png"><img src="../diagrams/d2/card/ch06-4.png" alt="5. Table -> stream" width="375"></a>
 ### Duality: 6. The round-trip
 
 **Why.** The two directions should be inverses — that is the formal statement of the duality.
@@ -304,7 +304,7 @@ A stream is a sequence of events over time — an append-only change log.
 
 **In the wild.** This is the theoretical basis for stream-table systems.
 
-![6. The round-trip](../diagrams/d2/card/ch06-5.png)
+<a href="../diagrams/d2/card/ch06-5.png"><img src="../diagrams/d2/card/ch06-5.png" alt="6. The round-trip" width="332"></a>
 ### Choice: 7. Materialize vs recompute
 
 **Why.** Keeping a table has a cost, and recomputing it also has a cost — the duality makes the trade explicit.
@@ -315,7 +315,7 @@ A stream is a sequence of events over time — an append-only change log.
 
 **In the wild.** A cache (eager) vs a query-time fold (lazy) is the production choice.
 
-![7. Materialize vs recompute](../diagrams/d2/card/ch06-6.png)
+<a href="../diagrams/d2/card/ch06-6.png"><img src="../diagrams/d2/card/ch06-6.png" alt="7. Materialize vs recompute" width="356"></a>
 ### Truth: 8. Stream as source of truth
 
 **Why.** A table alone loses history; a stream alone is inconvenient for lookups.
@@ -326,7 +326,7 @@ A stream is a sequence of events over time — an append-only change log.
 
 **In the wild.** Event-sourced systems are the production form.
 
-![8. Stream as source of truth](../diagrams/d2/card/ch06-7.png)
+<a href="../diagrams/d2/card/ch06-7.png"><img src="../diagrams/d2/card/ch06-7.png" alt="8. Stream as source of truth" width="322"></a>
 
 </details>
 

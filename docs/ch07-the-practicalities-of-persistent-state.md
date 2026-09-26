@@ -88,7 +88,7 @@ _Also known as: SS Ch07 · Persistent State · Checkpoint · State Store · Rock
 
 **The pipeline:** stream -> processor (state store) -> checkpoint (state + offset) -> durable storage -> restart recovery
 
-![system design pipeline](../diagrams/d2/decomp/ch07-0.png)
+<a href="../diagrams/d2/decomp/ch07-0.png"><img src="../diagrams/d2/decomp/ch07-0.png" alt="system design pipeline" width="211"></a>
 
 ### stream
 
@@ -249,7 +249,7 @@ A checkpoint captures every stage's state at one logical point in the stream, al
 
 **In the wild.** Flink and Dataflow persist state to survive restarts.
 
-![1. Memory state dies with the process](../diagrams/d2/card/ch07-0.png)
+<a href="../diagrams/d2/card/ch07-0.png"><img src="../diagrams/d2/card/ch07-0.png" alt="1. Memory state dies with the process" width="344"></a>
 ### Snapshot: 2. Checkpoints
 
 **Why.** A consistent point-in-time snapshot is what a restart resumes from.
@@ -260,7 +260,7 @@ A checkpoint captures every stage's state at one logical point in the stream, al
 
 **In the wild.** Flink's aligned checkpoints implement this.
 
-![2. Checkpoints](../diagrams/d2/card/ch07-1.png)
+<a href="../diagrams/d2/card/ch07-1.png"><img src="../diagrams/d2/card/ch07-1.png" alt="2. Checkpoints" width="389"></a>
 ### Store: 3. State stores
 
 **Why.** State can exceed memory, so bytes need a home with hot data in memory and the rest on disk.
@@ -271,7 +271,7 @@ A checkpoint captures every stage's state at one logical point in the stream, al
 
 **In the wild.** Flink's RocksDB state backend is the production form.
 
-![3. State stores](../diagrams/d2/card/ch07-2.png)
+<a href="../diagrams/d2/card/ch07-2.png"><img src="../diagrams/d2/card/ch07-2.png" alt="3. State stores" width="382"></a>
 ### Cost: 4. Incremental checkpoints
 
 **Why.** Snapshotting all state every time is I/O-expensive when state is large.
@@ -282,7 +282,7 @@ A checkpoint captures every stage's state at one logical point in the stream, al
 
 **In the wild.** Flink's incremental checkpointing for RocksDB.
 
-![4. Incremental checkpoints](../diagrams/d2/card/ch07-3.png)
+<a href="../diagrams/d2/card/ch07-3.png"><img src="../diagrams/d2/card/ch07-3.png" alt="4. Incremental checkpoints" width="368"></a>
 ### Alignment: 5. Checkpoint barriers
 
 **Why.** A snapshot must be consistent across stages, or a resume can mix old and new state.
@@ -293,7 +293,7 @@ A checkpoint captures every stage's state at one logical point in the stream, al
 
 **In the wild.** Flink checkpoint barriers are the production form.
 
-![5. Checkpoint barriers](../diagrams/d2/card/ch07-4.png)
+<a href="../diagrams/d2/card/ch07-4.png"><img src="../diagrams/d2/card/ch07-4.png" alt="5. Checkpoint barriers" width="412"></a>
 ### Guarantee: 6. Exactly-once recovery
 
 **Why.** At-least-once recovery can replay some records, double-counting at sinks.
@@ -304,7 +304,7 @@ A checkpoint captures every stage's state at one logical point in the stream, al
 
 **In the wild.** Flink's exactly-once checkpoint mode.
 
-![6. Exactly-once recovery](../diagrams/d2/card/ch07-5.png)
+<a href="../diagrams/d2/card/ch07-5.png"><img src="../diagrams/d2/card/ch07-5.png" alt="6. Exactly-once recovery" width="345"></a>
 ### Frequency: 7. Checkpoint frequency
 
 **Why.** The snapshot interval is the knob between steady-state cost and recovery time.
@@ -315,7 +315,7 @@ A checkpoint captures every stage's state at one logical point in the stream, al
 
 **In the wild.** A 1-minute interval is a common starting point.
 
-![7. Checkpoint frequency](../diagrams/d2/card/ch07-6.png)
+<a href="../diagrams/d2/card/ch07-6.png"><img src="../diagrams/d2/card/ch07-6.png" alt="7. Checkpoint frequency" width="289"></a>
 ### Growth: 8. Bound state growth
 
 **Why.** Windows that never close and keys that never expire grow state without limit.
@@ -326,7 +326,7 @@ A checkpoint captures every stage's state at one logical point in the stream, al
 
 **In the wild.** Dataflow's allowed-lateness is the garbage-collection horizon.
 
-![8. Bound state growth](../diagrams/d2/card/ch07-7.png)
+<a href="../diagrams/d2/card/ch07-7.png"><img src="../diagrams/d2/card/ch07-7.png" alt="8. Bound state growth" width="350"></a>
 
 </details>
 

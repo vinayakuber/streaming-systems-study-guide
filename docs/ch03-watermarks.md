@@ -90,7 +90,7 @@ _Also known as: SS Ch03 · Watermark · Event-time Progress · Heuristic Waterma
 
 **The pipeline:** sources (events with event time) -> watermark generator (max_seen − skew) -> window assigner -> per-window state -> trigger/emitter -> dashboard
 
-![system design pipeline](../diagrams/d2/decomp/ch03-0.png)
+<a href="../diagrams/d2/decomp/ch03-0.png"><img src="../diagrams/d2/decomp/ch03-0.png" alt="system design pipeline" width="249"></a>
 
 ### sources (events with event time)
 
@@ -253,7 +253,7 @@ A perfect watermark is possible for ordered inputs — a single log consumed in 
 
 **In the wild.** Dataflow, Flink, and Beam all expose watermarks as first-class concepts.
 
-![1. Unbounded data has no natural done](../diagrams/d2/card/ch03-0.png)
+<a href="../diagrams/d2/card/ch03-0.png"><img src="../diagrams/d2/card/ch03-0.png" alt="1. Unbounded data has no natural done" width="384"></a>
 ### Perfect: 2. Perfect watermarks
 
 **Why.** If a source is provably ordered, the pipeline can know completeness exactly rather than estimating it.
@@ -264,7 +264,7 @@ A perfect watermark is possible for ordered inputs — a single log consumed in 
 
 **In the wild.** Ingestion-time pipelines over a single Kafka partition are the classic perfect-watermark case.
 
-![2. Perfect watermarks](../diagrams/d2/card/ch03-1.png)
+<a href="../diagrams/d2/card/ch03-1.png"><img src="../diagrams/d2/card/ch03-1.png" alt="2. Perfect watermarks" width="423"></a>
 ### Heuristic: 3. Heuristic watermarks
 
 **Why.** Out-of-order sources (mobile devices, retries, multi-region collectors) make a perfect watermark impossible.
@@ -275,7 +275,7 @@ A perfect watermark is possible for ordered inputs — a single log consumed in 
 
 **In the wild.** Flink's BoundedOutOfOrdernessWatermarkGenerator implements exactly this.
 
-![3. Heuristic watermarks](../diagrams/d2/card/ch03-2.png)
+<a href="../diagrams/d2/card/ch03-2.png"><img src="../diagrams/d2/card/ch03-2.png" alt="3. Heuristic watermarks" width="387"></a>
 ### Parameter: 4. Skew (out-of-orderness bound)
 
 **Why.** A heuristic needs a knob that says how out-of-order the source can be, to trade latency against correctness.
@@ -286,7 +286,7 @@ A perfect watermark is possible for ordered inputs — a single log consumed in 
 
 **In the wild.** The skew parameter in a Dataflow pipeline is the production form.
 
-![4. Skew (out-of-orderness bound)](../diagrams/d2/card/ch03-3.png)
+<a href="../diagrams/d2/card/ch03-3.png"><img src="../diagrams/d2/card/ch03-3.png" alt="4. Skew (out-of-orderness bound)" width="492"></a>
 ### Bound: 5. Per-source watermarks
 
 **Why.** One global watermark is dragged down by the slowest source — a single idle device stalls completeness for everything.
@@ -297,7 +297,7 @@ A perfect watermark is possible for ordered inputs — a single log consumed in 
 
 **In the wild.** Per-partition watermarks in Flink are the production form.
 
-![5. Per-source watermarks](../diagrams/d2/card/ch03-4.png)
+<a href="../diagrams/d2/card/ch03-4.png"><img src="../diagrams/d2/card/ch03-4.png" alt="5. Per-source watermarks" width="413"></a>
 ### Propagation: 6. Watermark propagation
 
 **Why.** A stage with multiple inputs cannot claim more completeness than its least-complete input.
@@ -308,7 +308,7 @@ A perfect watermark is possible for ordered inputs — a single log consumed in 
 
 **In the wild.** Flink's watermark alignment (min across inputs) is the production form.
 
-![6. Watermark propagation](../diagrams/d2/card/ch03-5.png)
+<a href="../diagrams/d2/card/ch03-5.png"><img src="../diagrams/d2/card/ch03-5.png" alt="6. Watermark propagation" width="567"></a>
 ### Tradeoff: 7. Latency vs correctness
 
 **Why.** The watermark's aggressiveness is the single knob that trades result latency against late-data correctness.
@@ -319,7 +319,7 @@ A perfect watermark is possible for ordered inputs — a single log consumed in 
 
 **In the wild.** Tuning the out-of-orderness bound is a routine production decision.
 
-![7. Latency vs correctness](../diagrams/d2/card/ch03-6.png)
+<a href="../diagrams/d2/card/ch03-6.png"><img src="../diagrams/d2/card/ch03-6.png" alt="7. Latency vs correctness" width="661"></a>
 ### Safety net: 8. Watermarks + allowed lateness
 
 **Why.** A heuristic watermark can be wrong, so a pipeline needs a bounded way to accept data that arrives after the watermark.
@@ -330,7 +330,7 @@ A perfect watermark is possible for ordered inputs — a single log consumed in 
 
 **In the wild.** Dataflow's allowed-lateness setting is the production form.
 
-![8. Watermarks + allowed lateness](../diagrams/d2/card/ch03-7.png)
+<a href="../diagrams/d2/card/ch03-7.png"><img src="../diagrams/d2/card/ch03-7.png" alt="8. Watermarks + allowed lateness" width="537"></a>
 
 </details>
 

@@ -89,7 +89,7 @@ _Also known as: SS Ch01 · Event Time · Processing Time · Bounded vs Unbounded
 
 **The pipeline:** writer (event producer) -> transport (unbounded stream) -> collector (processor) -> aggregator/store (window state) -> reader (dashboard)
 
-![system design pipeline](../diagrams/d2/decomp/ch01-0.png)
+<a href="../diagrams/d2/decomp/ch01-0.png"><img src="../diagrams/d2/decomp/ch01-0.png" alt="system design pipeline" width="224"></a>
 
 ### writer (event producer)
 
@@ -252,7 +252,7 @@ Event time is the time at which an event actually occurred, as stamped by the pr
 
 **In the wild.** A Flink job over a Kafka topic is streaming in this precise sense.
 
-![1. Streaming means too many things](../diagrams/d2/card/ch01-0.png)
+<a href="../diagrams/d2/card/ch01-0.png"><img src="../diagrams/d2/card/ch01-0.png" alt="1. Streaming means too many things" width="572"></a>
 ### Definition: 2. Event time
 
 **Why.** Every business question is about when things happened, so the pipeline must record and reason with that instant rather than the instant it looked.
@@ -263,7 +263,7 @@ Event time is the time at which an event actually occurred, as stamped by the pr
 
 **In the wild.** A device timestamp on a mobile click is event time.
 
-![2. Event time](../diagrams/d2/card/ch01-1.png)
+<a href="../diagrams/d2/card/ch01-1.png"><img src="../diagrams/d2/card/ch01-1.png" alt="2. Event time" width="320"></a>
 ### Definition: 3. Processing time
 
 **Why.** The system still needs its own clock to answer questions about itself, even though it is the wrong clock for user behavior.
@@ -274,7 +274,7 @@ Event time is the time at which an event actually occurred, as stamped by the pr
 
 **In the wild.** A Flink operator wall-clock timestamp is processing time.
 
-![3. Processing time](../diagrams/d2/card/ch01-2.png)
+<a href="../diagrams/d2/card/ch01-2.png"><img src="../diagrams/d2/card/ch01-2.png" alt="3. Processing time" width="347"></a>
 ### Distinction: 4. Event vs processing time
 
 **Why.** Bucketing by the wrong clock silently corrupts every aggregate, and the corruption worsens exactly when the system is under load.
@@ -285,7 +285,7 @@ Event time is the time at which an event actually occurred, as stamped by the pr
 
 **In the wild.** Event-time mode in Flink is the production fix for this divergence.
 
-![4. Event vs processing time](../diagrams/d2/card/ch01-3.png)
+<a href="../diagrams/d2/card/ch01-3.png"><img src="../diagrams/d2/card/ch01-3.png" alt="4. Event vs processing time" width="738"></a>
 ### Shape: 5. Bounded data
 
 **Why.** Finite inputs are the one case where a job can run to completion and hand back a final answer, so they are the natural fit for classic batch.
@@ -296,7 +296,7 @@ Event time is the time at which an event actually occurred, as stamped by the pr
 
 **In the wild.** A nightly Hive table scan is bounded data processing.
 
-![5. Bounded data](../diagrams/d2/card/ch01-4.png)
+<a href="../diagrams/d2/card/ch01-4.png"><img src="../diagrams/d2/card/ch01-4.png" alt="5. Bounded data" width="339"></a>
 ### Shape: 6. Unbounded as batch
 
 **Why.** Teams slice never-ending data into chunks because batch tooling is familiar, but the chunk boundary becomes the maximum freshness of every answer.
@@ -307,7 +307,7 @@ Event time is the time at which an event actually occurred, as stamped by the pr
 
 **In the wild.** Daily ETL over a click stream is unbounded-as-batch.
 
-![6. Unbounded as batch](../diagrams/d2/card/ch01-5.png)
+<a href="../diagrams/d2/card/ch01-5.png"><img src="../diagrams/d2/card/ch01-5.png" alt="6. Unbounded as batch" width="441"></a>
 ### Shape: 7. Unbounded as streaming
 
 **Why.** When a change must be visible in seconds, the only option is to process each event as it arrives and give up the idea of a finished answer.
@@ -318,7 +318,7 @@ Event time is the time at which an event actually occurred, as stamped by the pr
 
 **In the wild.** A Kafka-to-Flink pipeline is unbounded streaming.
 
-![7. Unbounded as streaming](../diagrams/d2/card/ch01-6.png)
+<a href="../diagrams/d2/card/ch01-6.png"><img src="../diagrams/d2/card/ch01-6.png" alt="7. Unbounded as streaming" width="482"></a>
 ### Model: 8. Batch is a special case of streaming
 
 **Why.** If one abstraction covers both finite and infinite inputs, you maintain one pipeline instead of two that must agree.
@@ -329,7 +329,7 @@ Event time is the time at which an event actually occurred, as stamped by the pr
 
 **In the wild.** Apache Beam runs the same pipeline on batch and streaming runners.
 
-![8. Batch is a special case of streaming](../diagrams/d2/card/ch01-7.png)
+<a href="../diagrams/d2/card/ch01-7.png"><img src="../diagrams/d2/card/ch01-7.png" alt="8. Batch is a special case of streaming" width="436"></a>
 
 </details>
 

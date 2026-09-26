@@ -94,7 +94,7 @@ _Also known as: SS Ch05 · Exactly-Once · Idempotency · Deduplication · Side 
 
 **The pipeline:** replayable source (offset) -> dedup shuffle -> idempotent sink (idempotency key) -> external system
 
-![system design pipeline](../diagrams/d2/decomp/ch05-0.png)
+<a href="../diagrams/d2/decomp/ch05-0.png"><img src="../diagrams/d2/decomp/ch05-0.png" alt="system design pipeline" width="222"></a>
 
 ### replayable source (offset)
 
@@ -255,7 +255,7 @@ An idempotent operation has the same effect whether run once or many times — S
 
 **In the wild.** Kafka's exactly-once semantics and Flink's two-phase commit both target this.
 
-![1. Retries are unavoidable](../diagrams/d2/card/ch05-0.png)
+<a href="../diagrams/d2/card/ch05-0.png"><img src="../diagrams/d2/card/ch05-0.png" alt="1. Retries are unavoidable" width="388"></a>
 ### Property: 2. Idempotency
 
 **Why.** If an operation can be replayed without changing the result, retries are harmless.
@@ -266,7 +266,7 @@ An idempotent operation has the same effect whether run once or many times — S
 
 **In the wild.** HTTP PUT and upserts are idempotent; a naive POST increment is not.
 
-![2. Idempotency](../diagrams/d2/card/ch05-1.png)
+<a href="../diagrams/d2/card/ch05-1.png"><img src="../diagrams/d2/card/ch05-1.png" alt="2. Idempotency" width="511"></a>
 ### Mechanism: 3. Shuffle deduplication
 
 **Why.** Records moving between stages can be delivered more than once after a crash.
@@ -277,7 +277,7 @@ An idempotent operation has the same effect whether run once or many times — S
 
 **In the wild.** Beam's exactly-once shuffle and Flink's checkpoint barrier do this.
 
-![3. Shuffle deduplication](../diagrams/d2/card/ch05-2.png)
+<a href="../diagrams/d2/card/ch05-2.png"><img src="../diagrams/d2/card/ch05-2.png" alt="3. Shuffle deduplication" width="395"></a>
 ### Source: 4. Replayable sources
 
 **Why.** A source must be able to recover from a crash without losing or duplicating records.
@@ -288,7 +288,7 @@ An idempotent operation has the same effect whether run once or many times — S
 
 **In the wild.** Kafka consumer offsets and file offsets are the canonical checkpoints.
 
-![4. Replayable sources](../diagrams/d2/card/ch05-3.png)
+<a href="../diagrams/d2/card/ch05-3.png"><img src="../diagrams/d2/card/ch05-3.png" alt="4. Replayable sources" width="373"></a>
 ### Composition: 5. End-to-end exactly-once
 
 **Why.** Each stage has its own failure mode, so a single dedup is not enough.
@@ -299,7 +299,7 @@ An idempotent operation has the same effect whether run once or many times — S
 
 **In the wild.** Kafka -> Flink -> idempotent sink is the reference architecture.
 
-![5. End-to-end exactly-once](../diagrams/d2/card/ch05-4.png)
+<a href="../diagrams/d2/card/ch05-4.png"><img src="../diagrams/d2/card/ch05-4.png" alt="5. End-to-end exactly-once" width="367"></a>
 ### Hard part: 6. Side effects
 
 **Why.** An external effect — an email, a charge, an API call — cannot be undone by recomputing state.
@@ -310,7 +310,7 @@ An idempotent operation has the same effect whether run once or many times — S
 
 **In the wild.** Stripe's Idempotency-Key header is the production form.
 
-![6. Side effects](../diagrams/d2/card/ch05-5.png)
+<a href="../diagrams/d2/card/ch05-5.png"><img src="../diagrams/d2/card/ch05-5.png" alt="6. Side effects" width="467"></a>
 ### Pattern: 7. Idempotency key vs two-phase commit
 
 **Why.** Making an external side effect exactly-once has two options, and they differ sharply in cost.
@@ -321,7 +321,7 @@ An idempotent operation has the same effect whether run once or many times — S
 
 **In the wild.** Payment APIs accept idempotency keys; XA two-phase commit is avoided in stream processing.
 
-![7. Idempotency key vs two-phase commit](../diagrams/d2/card/ch05-6.png)
+<a href="../diagrams/d2/card/ch05-6.png"><img src="../diagrams/d2/card/ch05-6.png" alt="7. Idempotency key vs two-phase commit" width="399"></a>
 ### Boundary: 8. Isolate side effects
 
 **Why.** Retries are most controllable when the effect is one idempotent write at the edge.
@@ -332,7 +332,7 @@ An idempotent operation has the same effect whether run once or many times — S
 
 **In the wild.** Enrich -> compute -> idempotent upsert is the standard Dataflow shape.
 
-![8. Isolate side effects](../diagrams/d2/card/ch05-7.png)
+<a href="../diagrams/d2/card/ch05-7.png"><img src="../diagrams/d2/card/ch05-7.png" alt="8. Isolate side effects" width="384"></a>
 
 </details>
 
