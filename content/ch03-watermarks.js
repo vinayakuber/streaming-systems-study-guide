@@ -18,14 +18,21 @@ registerChapter({
         { num: 4, title: 'Watermarks drive on-time triggers', detail: 'The on-time trigger for a window fires when the watermark passes the window\'s end. <strong>Everything else — early, late, allowed lateness — is defined relative to the watermark.</strong>' }
       ],
       program: `// STREAM SIDE — a perfect watermark advances as a single ordered log is consumed
-// DEF: watermark — the pipeline's event-time completeness signal, currently 12:05:00
-// DEF: window — the fixed event-time slice [12:00, 12:05)
-// -> input : the reader consumes log record {event_time: "12:05:01"}
-//    step 1 · the record is in order -> watermark : 12:05:00 -> 12:05:01   BECAUSE a single ordered log has no out-of-order arrivals
-//    step 2 · the new watermark passes 12:05:00 -> the window [12:00, 12:05) is now complete
-//    step 3 · the on-time trigger fires -> emitted : {window: "12:00-12:05", sum: 7, pane: "on-time"}
-// <- outcome : the watermark at 12:05:01 closed the window   BECAUSE 12:05:01 > 12:05:00
-//    derivation : this is a perfect watermark because the source is one ordered log, not a set of out-of-order devices`
+// DEF: watermark — the pipeline's event-time completeness signal = "12:05:00"
+// DEF: window — the fixed event-time slice = [12:00, 12:05)
+// DEF: log — an ordered single-partition source = { offset: 7, event_time: "12:05:01" }
+// STATE (before):
+//    watermark : "12:05:00"
+// ======================================================================
+// offset 7: {event_time: "12:05:01"}
+// offset 8: {event_time: "12:05:02"}
+// ======================================================================
+// step 1 · the reader consumes offset 7 in order -> watermark : "12:05:00" -> "12:05:01"   BECAUSE a single ordered log has no out-of-order arrivals
+// step 2 · the new watermark passes 12:05:00 -> window_status : "open" -> "complete"   BECAUSE 12:05:01 > 12:05:00
+// step 3 · the on-time trigger fires -> emitted : {} -> {window: "12:00-12:05", sum: 7, pane: "on-time"}   BECAUSE the window end is crossed
+// ======================================================================
+// downstream : record 12:05:01 -> watermark 12:05:01 -> window "12:00-12:05" -> emitted sum 7   BECAUSE a perfect watermark needs no skew
+//    derivation : perfect = 1 - 0 = 1 skew-free source   BECAUSE one ordered log has zero out-of-orderness`
     },
     {
       section: 'Heuristic watermarks and skew',
@@ -38,15 +45,21 @@ registerChapter({
         { num: 4, title: 'Per-source tracking is more accurate', detail: 'When each source has its own idleness pattern, tracking a watermark <strong>per source and taking the minimum</strong> is safer than one global watermark — a single idle source stops dragging the whole pipeline\'s watermark forward.' }
       ],
       program: `// AGGREGATOR SIDE — a heuristic watermark from the max seen event time minus a skew
-// DEF: skew — the pipeline's bound on out-of-orderness = 2 min
-// DEF: watermark — max_seen_event_time - skew = 12:05:00 (12:07:00 - 2:00), recomputed on every record
-// DEF: max_seen — the largest event_time observed so far = 12:07:00
-// -> input : the pipeline ingests record {event_time: "12:08:30"}
-//    step 1 · the record is newer -> max_seen : 12:07:00 -> 12:08:30   BECAUSE 12:08:30 > 12:07:00
-//    step 2 · recompute the watermark -> watermark : 12:05:00 -> 12:06:30   BECAUSE 12:08:30 - 2 min skew = 12:06:30
-//    step 3 · a delayed record {event_time: "12:05:10"} arrives -> it is 80 s older than the watermark -> marked late
-// <- outcome : the watermark at 12:06:30 closed windows up to 12:06:30, and the 12:05:10 record arrived as a late straggler
-//    derivation : watermark = max_seen - skew = 12:08:30 - 2:00 = 12:06:30   BECAUSE the heuristic assumes no record is more than 2 min late`
+// DEF: skew — the pipeline's bound on out-of-orderness = 120 s
+// DEF: watermark — max_seen_event_time - skew = "12:06:30"
+// DEF: max_seen — the largest event_time observed so far = "12:07:00"
+// STATE (before):
+//    watermark : "12:05:00"
+// ======================================================================
+// offset 0: {event_time: "12:08:30"}
+// offset 1: {event_time: "12:05:10"}
+// ======================================================================
+// step 1 · the record at offset 0 is newer -> max_seen : "12:07:00" -> "12:08:30"   BECAUSE 12:08:30 > 12:07:00
+// step 2 · recompute the watermark -> watermark : "12:05:00" -> "12:06:30"   BECAUSE 12:08:30 - 120 s skew = 12:06:30
+// step 3 · a delayed record at offset 1 arrives -> status : "on-time" -> "late"   BECAUSE 12:05:10 is older than the 12:06:30 watermark
+// ======================================================================
+// downstream : record 12:08:30 -> max_seen 12:08:30 -> watermark 12:06:30 -> window "12:00-12:05" closed   BECAUSE the heuristic assumes no record is more than 120 s late
+//    derivation : watermark = 510 - 120 = 390 s into the hour = 12:06:30   BECAUSE 12:08:30 is 510 s and skew is 120 s`
     },
     {
       section: 'Propagation and correctness',
@@ -59,18 +72,22 @@ registerChapter({
         { num: 4, title: 'Watermarks are what make event-time pipelines tractable', detail: 'Without watermarks, a pipeline can never emit a result that a user can trust as "done for now". <strong>Watermarks convert an unbounded stream into a stream with a notion of progress.</strong>' }
       ],
       program: `// JOIN STAGE — two inputs, the stage watermark is the minimum of the two
-// DEF: watermark — the stage's completeness signal = min of upstream watermarks = 12:04:30
-// DEF: input_a — watermark from the click source = 12:06:00
-// DEF: input_b — watermark from the purchase source = 12:04:30
-// DEF: stage — the join operator that combines input_a and input_b = the pipeline operator
+// DEF: input_a — watermark from the click source = "12:06:00"
+// DEF: input_b — watermark from the purchase source = "12:04:30"
+// DEF: stage — the join operator that combines input_a and input_b = "join"
+// DEF: watermark — the stage's completeness signal = "12:06:00"
 // STATE (before):
-//    stage_watermark : { value: 12:06:00 }
-// -> input : the join stage polls input_a at 12:06:00 and input_b at 12:04:30
-//    step 1 · read input_a watermark -> stage_watermark : 12:06:00 -> 12:06:00   BECAUSE it is the min of the two so far
-//    step 2 · read input_b watermark -> stage_watermark : 12:06:00 -> 12:04:30   BECAUSE 12:04:30 < 12:06:00
-//    step 3 · the stage cannot emit a join result keyed at 12:05:00 -> it waits   BECAUSE input_b may still deliver 12:05:00 records
-// <- outcome : the stage watermark sits at 12:04:30 until input_b catches up   BECAUSE completeness is bounded by the slowest input
-//    derivation : stage_watermark = min(12:06:00, 12:04:30) = 12:04:30`
+//    watermark : "12:06:00"
+// ======================================================================
+// offset 0: {source: "input_a", watermark: "12:06:00"}
+// offset 1: {source: "input_b", watermark: "12:04:30"}
+// ======================================================================
+// step 1 · read input_a watermark -> watermark : "12:06:00" -> "12:06:00"   BECAUSE it is the only input seen so far
+// step 2 · read input_b watermark -> watermark : "12:06:00" -> "12:04:30"   BECAUSE 12:04:30 < 12:06:00
+// step 3 · the stage cannot emit a join result keyed at 12:05:00 -> emit : "ready" -> "waiting"   BECAUSE input_b may still deliver 12:05:00 records
+// ======================================================================
+// downstream : input_a "12:06:00" -> input_b "12:04:30" -> stage watermark "12:04:30" -> join "12:05:00" waits   BECAUSE completeness is bounded by the slowest input
+//    derivation : stage_watermark = 390 - 120 = 270 s into the hour = 12:04:30   BECAUSE input_b lags input_a by 120 s, and completeness is bounded by the slower source`
     }
   ],
 
@@ -129,18 +146,23 @@ registerChapter({
     ],
     
     program: `// SYSTEM DESIGN — a watermark closes a window on time and allowed lateness catches one straggler
-// DEF: watermark — the pipeline's completeness signal = max_seen - skew = 12:06:30
-// DEF: skew — the out-of-orderness bound = 2 min
-// DEF: allowed lateness — the horizon after the watermark = 1 min
+// DEF: watermark — the pipeline's completeness signal = "12:06:30"
+// DEF: skew — the out-of-orderness bound = 120 s
+// DEF: allowed lateness — the horizon after the watermark = 60 s
 // DEF: window — the fixed event-time slice = [12:00, 12:05)
 // STATE (before):
 //    window_state : { "12:00-12:05": 7 }
-// -> input : the source emits record {event_time: "12:08:30"}
-//    step 1 · max_seen updates -> max_seen : 12:07:00 -> 12:08:30   BECAUSE the record is newer than anything seen
-//    step 2 · the watermark recomputes -> watermark : 12:05:00 -> 12:06:30   BECAUSE 12:08:30 - 2:00 skew = 12:06:30
-//    step 3 · the on-time trigger fires -> emitted : {window: "12:00-12:05", sum: 7}   BECAUSE 12:06:30 > 12:05:00
-// <- outcome : a late record {event_time: "12:05:10"} still updates the window   BECAUSE it is inside allowed lateness
-//    derivation : watermark = max_seen - skew = 12:08:30 - 2:00 = 12:06:30`
+// ======================================================================
+// offset 0: {event_time: "12:08:30"}
+// offset 1: {event_time: "12:05:10"}
+// ======================================================================
+// step 1 · max_seen updates -> max_seen : "12:07:00" -> "12:08:30"   BECAUSE the record at offset 0 is newer than anything seen
+// step 2 · the watermark recomputes -> watermark : "12:05:00" -> "12:06:30"   BECAUSE 12:08:30 - 120 s skew = 12:06:30
+// step 3 · the on-time trigger fires -> emitted : {} -> {window: "12:00-12:05", sum: 7}   BECAUSE 12:06:30 > 12:05:00
+// step 4 · a late record at offset 1 still updates -> window_state["12:00-12:05"] : 7 -> 8   BECAUSE 12:05:10 is inside allowed lateness
+// ======================================================================
+// downstream : record 12:08:30 -> watermark 12:06:30 -> window "12:00-12:05" -> sum 7 -> 8   BECAUSE the straggler arrived within the 60 s lateness horizon
+//    derivation : watermark = 510 - 120 = 390 s into the hour = 12:06:30   BECAUSE 12:08:30 is 510 s and skew is 120 s`
   },
   quiz: [
     { question: "What is a watermark?", options: ["A. The wall-clock time", "B. A monotonically increasing timestamp declaring event-time completeness", "C. The number of events in a window", "D. A type of window"], answer: 2, explanation: "A watermark is the pipeline's estimate of how complete the event-time axis is.", conceptRef: "1. Unbounded data has no natural done" },
@@ -148,6 +170,13 @@ registerChapter({
     { question: "What is the canonical heuristic watermark formula?", options: ["A. watermark = wall clock + skew", "B. watermark = min event time + skew", "C. watermark = max seen event time − skew", "D. watermark = event count / skew"], answer: 3, explanation: "The heuristic subtracts a skew (out-of-orderness bound) from the max seen event time.", conceptRef: "3. Heuristic watermarks" },
     { question: "A stage's watermark with multiple inputs is the ___ of its inputs' watermarks.", options: ["A. maximum", "B. minimum", "C. sum", "D. average"], answer: 2, explanation: "Completeness is bounded by the least-complete input, so the stage watermark is the minimum.", conceptRef: "6. Watermark propagation" },
     { question: "What is the downside of an over-eager (too-fast) watermark?", options: ["A. Higher latency", "B. Delayed data is mislabeled as late", "C. Windows never close", "D. Memory exhaustion"], answer: 2, explanation: "An over-eager watermark gains latency but loses correctness by treating delayed data as late.", conceptRef: "7. Latency vs correctness" }
+  ],
+  seeAlso: [
+    { to: 1, section: 'Event time vs processing time', depth: 'why a watermark is needed at all — the two clocks diverge, so the pipeline must state its belief about event-time completeness rather than trust the wall clock.', example: 'ch03\'s watermark 12:06:30 marks a 12:05:10 record late; ch01 explains the root cause: a click at 12:00:59 processed at 12:04:11 is late by 192 s of queueing delay.' },
+    { to: 2, section: 'When — triggers and watermarks', depth: 'where the watermark sits in the four-question model — it is the mechanism behind the "when" axis, driving early/on-time/late triggers.', example: 'ch03\'s on-time trigger fires when the watermark passes 12:05:00; ch02 shows the same window emitting early (12:02), on-time (12:05), and late (12:06) panes as the watermark moves.' },
+    { to: 4, section: 'Session semantics and pitfalls', depth: 'the watermark is what lets a pipeline garbage-collect window state — sessions and other windows die when the watermark passes their end plus allowed lateness.', example: 'ch03\'s allowed-lateness horizon (60 s) is the garbage collector; ch04 shows a late event at 12:20:00 reviving two already-emitted sessions and forcing a retraction because the watermark had not yet passed their end + lateness.' },
+    { to: 8, section: 'Windows in SQL', depth: 'streaming SQL hides the watermark mechanics but not its semantics — the same completeness signal is what makes a TUMBLE/HOP/SESSION result emit.', example: 'ch03\'s watermark 12:06:30 closing window [12:00,12:05) is exactly what ch08\'s TUMBLE(event_time, 5 min) query waits for before emitting its COUNT row.' },
+    { to: 9, section: 'Why joins are hard on streams', depth: 'a multi-input watermark propagates as the minimum of its inputs — and that single rule is what bounds a windowed join.', example: 'ch03\'s join stage takes min(12:06:00, 12:04:30) = 12:04:30 and waits; ch09 shows that same minimum gating when a click 12:03 matches an impression 12:02 but holds until both sides pass 12:05:00.' }
   ],
   sources: [
     { name: 'Slava Chernyak — "Watermarks: Time and Progress in Apache Beam and Beyond" (talk)', url: 'https://www.youtube.com/watch?v=TWxSLmkWPm4', note: 'A conference talk on how watermarks track event-time progress in Beam and beyond' },

@@ -18,14 +18,22 @@ registerChapter({
         { num: 4, title: 'Databases and event systems picked a side', detail: 'A relational database is table-centric (it materializes state); an event log like Kafka is stream-centric (it records motion). <strong>Each is a projection of the same duality.</strong>' }
       ],
       program: `// ACCOUNT SIDE — the same three balance changes seen as a stream and as a table
-// DEF: stream — the append-only sequence of balance changes = [ +10, -3, +5 ]
-// DEF: table — the materialized balance = 12
-// -> input : the change event {op: +5, account: 42}
-//    step 1 · append to the stream -> stream : [ +10, -3 ] -> [ +10, -3, +5 ]
-//    step 2 · apply to the table -> table : 7 -> 12   BECAUSE 7 + 5 = 12
-//    step 3 · the two views stay consistent -> stream tail +5 and table 12 describe the same account
-// <- outcome : the stream gained one event and the table gained 5   BECAUSE the table is the running sum of the stream
-//    derivation : table = +10 - 3 + 5 = 12, exactly the last value of the folded stream`
+// DEF: stream — the append-only sequence of balance changes = [ "+10", "-3", "+5" ]
+// DEF: table — the materialized balance = { 42: 12 }
+// DEF: account — the key of the balance record = 42
+// STATE (before):
+//    table : { 42: 7 }
+// ======================================================================
+// offset 0: {op: "+10", account: 42}
+// offset 1: {op: "-3", account: 42}
+// offset 2: {op: "+5", account: 42}
+// ======================================================================
+// step 1 · append the change to the stream -> stream : [ "+10", "-3" ] -> [ "+10", "-3", "+5" ]   BECAUSE the stream is append-only history
+// step 2 · apply to the table -> table[42] : 7 -> 12   BECAUSE 7 + 5 = 12
+// step 3 · the two views stay consistent -> stream tail "+5" and table 12 describe the same account   BECAUSE the table is the running sum
+// ======================================================================
+// downstream : change "+5" -> stream [ "+10", "-3", "+5" ] -> table 7 -> 12   BECAUSE the table is the fold of the stream
+//    derivation : table = 10 - 3 + 5 = 12, exactly the last value of the folded stream`
     },
     {
       section: 'The duality',
@@ -38,15 +46,21 @@ registerChapter({
         { num: 4, title: 'A changelog stream carries old and new values', detail: 'For an update to be reversible, the change record must carry <strong>both the old value (retraction) and the new value</strong> — a changelog stream, not just a list of new values.' }
       ],
       program: `// CHANGE-CAPTURE SIDE — a table update becomes a changelog record that can rebuild the table
-// DEF: changelog — the stream of (old, new) pairs for a key = [ (0,10), (10,7), (7,12) ]
-// DEF: table — the materialized balance = 12
-// DEF: cdc — change-data-capture, which turns table writes into changelog records
-// -> input : the database updates account 42 from 7 to 12
-//    step 1 · capture the change -> changelog : [ (0,10), (10,7) ] -> [ (0,10), (10,7), (7,12) ]
-//    step 2 · the downstream consumer folds the changelog -> table : 7 -> 12   BECAUSE the last pair (7,12) sets the new value
-//    step 3 · a retraction of the old value is implicit in the pair -> the old 7 is replaced by the new 12
-// <- outcome : the changelog gained (7,12) and the consumer table matches the source table at 12   BECAUSE change capture + fold = the same state
-//    derivation : folding (0,10) then (10,7) then (7,12) = 12, the table value`
+// DEF: changelog — the stream of (old, new) pairs for a key = [ "(0,10)", "(10,7)", "(7,12)" ]
+// DEF: table — the materialized balance = { 42: 12 }
+// DEF: cdc — change-data-capture, which turns table writes into changelog records = "(7,12)"
+// STATE (before):
+//    table : { 42: 7 }
+// ======================================================================
+// offset 0: {account: 42, old: 10, new: 7}
+// offset 1: {account: 42, old: 7, new: 12}
+// ======================================================================
+// step 1 · capture the change -> changelog : [ "(0,10)", "(10,7)" ] -> [ "(0,10)", "(10,7)", "(7,12)" ]   BECAUSE the database update 7 -> 12 is captured
+// step 2 · the downstream consumer folds the changelog -> table[42] : 7 -> 12   BECAUSE the last pair (7,12) sets the new value
+// step 3 · a retraction of the old value is implicit in the pair -> table[42] : 7 -> 12   BECAUSE the old 7 is replaced by the new 12
+// ======================================================================
+// downstream : database 7 -> changelog (7,12) -> fold -> table 12   BECAUSE change capture + fold = the same state
+//    derivation : fold = 10 - 10 + 7 - 7 + 12 = 12, the table value   BECAUSE each (old,new) pair retracts old then sets new`
     },
     {
       section: 'Why the duality matters in practice',
@@ -59,16 +73,22 @@ registerChapter({
         { num: 4, title: 'Pick the right view for the question', detail: 'For "what is the balance now" use the table; for "what happened in order" use the stream. <strong>A good architecture keeps the stream as truth and derives tables as views.</strong>' }
       ],
       program: `// REPLAY SIDE — the stream rebuilds a past table, proving it is the source of truth
-// DEF: stream — the full changelog = [ +10, -3, +5 ]
-// DEF: table — a snapshot of balance, recoverable at any point
+// DEF: stream — the full changelog = [ "+10", "-3", "+5" ]
+// DEF: table — a snapshot of balance, recoverable at any point = { 42: 12 }
+// DEF: balance — the keyed fold of the stream = { 42: 0 }
 // STATE (before):
-//    balance : { value: 0 }
-// -> input : a request for the balance as of event 2
-//    step 1 · fold events up to index 2 -> balance : 0 -> 10 -> 7
-//    step 2 · the past table is materialized -> table : 7   BECAUSE +10 - 3 = 7
-//    step 3 · fold one more event -> table : 7 -> 12   BECAUSE +5 brings it to the present
-// <- outcome : the past table at event 2 is 7 and the present table is 12   BECAUSE both are folds of the same stream
-//    derivation : table(t) = fold of stream[0..t], so table(2) = +10 - 3 = 7`
+//    balance : { 42: 0 }
+// ======================================================================
+// offset 0: {op: "+10", account: 42}
+// offset 1: {op: "-3", account: 42}
+// offset 2: {op: "+5", account: 42}
+// ======================================================================
+// step 1 · fold events up to index 2 -> balance[42] : 0 -> 10 -> 7   BECAUSE +10 then -3
+// step 2 · the past table is materialized -> table : {} -> { 42: 7 }   BECAUSE +10 - 3 = 7
+// step 3 · fold one more event -> table[42] : 7 -> 12   BECAUSE +5 brings it to the present
+// ======================================================================
+// downstream : stream [ "+10", "-3", "+5" ] -> fold to 7 -> fold to 12   BECAUSE both are folds of the same stream
+//    derivation : table(2) = 10 - 3 = 7, and table(3) = 10 - 3 + 5 = 12`
     }
   ],
 
@@ -127,18 +147,22 @@ registerChapter({
     ],
     
     program: `// SYSTEM DESIGN — a balance update flows from table to changelog and back to a matching table
-// DEF: changelog — the stream of (old, new) pairs = [ (0,10), (10,7) ]
-// DEF: table — the materialized balance = 7
-// DEF: cdc — change-data-capture, which turns table writes into changelog records = (7,12)
+// DEF: changelog — the stream of (old, new) pairs = [ "(0,10)", "(10,7)" ]
+// DEF: table — the materialized balance = { 42: 7 }
+// DEF: cdc — change-data-capture, which turns table writes into changelog records = "(7,12)"
 // DEF: account — the balance record keyed by user = 42
 // STATE (before):
 //    account_state : { 42: 7 }
-// -> input : the database updates account 42 from 7 to 12
-//    step 1 · CDC captures the change -> changelog : [ (0,10), (10,7) ] -> [ (0,10), (10,7), (7,12) ]
-//    step 2 · the processor folds the new pair -> account_state : { 42: 7 } -> { 42: 12 }   BECAUSE 7 + (12 - 7) = 12
-//    step 3 · the derived view matches the source -> table : 7 -> 12   BECAUSE the fold reproduces the database state
-// <- outcome : the changelog gained (7,12) and the materialized view matches the database at 12   BECAUSE table and stream are dual
-//    derivation : fold (0,10) then (10,7) then (7,12) = 12, the same as the source table`
+// ======================================================================
+// offset 0: {account: 42, old: 7, new: 12}
+// offset 1: {account: 42, old: 7, new: 12, role: "consumer fold"}
+// ======================================================================
+// step 1 · CDC captures the change -> changelog : [ "(0,10)", "(10,7)" ] -> [ "(0,10)", "(10,7)", "(7,12)" ]   BECAUSE the database update 7 -> 12 is captured
+// step 2 · the processor folds the new pair -> account_state : { 42: 7 } -> { 42: 12 }   BECAUSE 7 + (12 - 7) = 12
+// step 3 · the derived view matches the source -> table : { 42: 7 } -> { 42: 12 }   BECAUSE the fold reproduces the database state
+// ======================================================================
+// downstream : database 7 -> changelog (7,12) -> fold -> view 12   BECAUSE table and stream are dual, the two views cannot drift
+//    derivation : fold = 10 - 10 + 7 - 7 + 12 = 12, the same as the source table`
   },
   quiz: [
     { question: "What is a stream in the stream-table duality?", options: ["A. A snapshot of state", "B. A sequence of events over time", "C. A database index", "D. A materialized view"], answer: 2, explanation: "A stream is the moving, append-only change log.", conceptRef: "2. Streams" },
@@ -146,6 +170,13 @@ registerChapter({
     { question: "Aggregating a stream produces a ___ .", options: ["A. stream", "B. table", "C. changelog", "D. watermark"], answer: 2, explanation: "Aggregation folds the stream into a materialized table.", conceptRef: "4. Stream -> table" },
     { question: "What does change-data-capture (CDC) produce?", options: ["A. A table", "B. A changelog stream of a table's changes", "C. A watermark", "D. A window"], answer: 2, explanation: "CDC turns table writes into a changelog stream of (old, new) pairs.", conceptRef: "5. Table -> stream" },
     { question: "Why keep the stream as the source of truth?", options: ["A. It is faster to query", "B. Any past table is recoverable by folding the stream", "C. It uses less storage", "D. It never needs retractions"], answer: 2, explanation: "The stream is the full history, so any past table is a fold up to that point.", conceptRef: "8. Stream as source of truth" }
+  ],
+  seeAlso: [
+    { to: 1, section: 'Three shapes of data', depth: 'the bounded/unbounded distinction is the raw material of the duality — a bounded dataset is a table, an unbounded feed is a stream.', example: 'ch06\'s "table is the fold of the stream" is ch01\'s "bounded dataset processed to completion"; ch06\'s changelog [ +10, -3, +5 ] folds to a table of 12, the same shape ch01 names as streaming.' },
+    { to: 2, section: 'How — accumulation', depth: 'accumulation mode is the "how" that relates successive stream panes — i.e. how a stream becomes a table over time.', example: 'ch06\'s changelog fold 10 − 3 + 5 = 12 is ch02\'s accumulating mode; ch06\'s (old, new) retraction pair is ch02\'s accumulating-and-retracting (3 − 3 + 4 = 4).' },
+    { to: 5, section: 'Side effects — the hard part', depth: 'a changelog that carries retractions is what lets a downstream sink apply an effect exactly once — ch05 connects the duality to the exactly-once guarantee.', example: 'ch06\'s changelog record (7,12) retracts 7 before setting 12; ch05\'s idempotent sink SET 42 -> 10 uses that same retract-then-set so a retry leaves one value.' },
+    { to: 8, section: 'SQL as a stream language', depth: 'append-only vs updating results is the SQL vocabulary for the duality — an updating query emits retractions, an append-only one emits new facts.', example: 'ch06\'s table update (7,12) is ch08\'s "updating result" that retracts (C1, 3) before adding (C1, 4); ch06\'s append-only changelog is ch08\'s append-only query mode.' },
+    { to: 10, section: 'Lambda and Kappa', depth: 'the stream as source of truth is the premise of the Kappa architecture — keep the log, derive tables, replay to reprocess.', example: 'ch06\'s "any past table is a fold of the stream" is ch10\'s Kappa replay: rewind the log to offset 0 and fold r1, r2, r3 through the new pipeline to rebuild the corrected table.' }
   ],
   sources: [
     { name: 'Michael Noll — "Of Streams and Tables in Kafka and Stream Processing, Part 1"', url: 'https://www.confluent.io/blog/kafka-streams-tables-part-1-event-streaming/', note: 'The stream-table duality as implemented in Kafka Streams' },

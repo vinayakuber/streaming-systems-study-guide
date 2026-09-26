@@ -18,15 +18,22 @@ registerChapter({
         { num: 4, title: 'The consequence: one pipeline, both modes', detail: 'Because the model is unified, <strong>the same pipeline code can run in batch or streaming</strong> — the only difference is whether the input is bounded.' }
       ],
       program: `// UNIFICATION SIDE — the same windowed sum runs over a finite file (batch) and an infinite stream (streaming)
-// DEF: pipeline — a windowed sum over 5-min fixed windows
-// DEF: batch — the same pipeline over a finite file of 3 records
-// DEF: streaming — the same pipeline over an unbounded feed
-// -> input : the pipeline is given a bounded file of 3 records or an unbounded stream
-//    step 1 · batch run over the file -> the pipeline reads all 3 records -> result : {} -> { "12:00": 3 }
-//    step 2 · streaming run over the feed -> the pipeline reads the same 3 records as they arrive -> result : {} -> { "12:00": 3 }
-//    step 3 · the only difference is the input -> bounded vs unbounded -> the computation is identical
-// <- outcome : the batch and streaming runs both give { "12:00": 3 }   BECAUSE the windowed sum is the same over bounded and unbounded data
-//    derivation : batch = streaming over a finite input, so one pipeline serves both modes`
+// DEF: pipeline — a windowed sum over 5-min fixed windows = { "12:00": 0 }
+// DEF: batch — the same pipeline over a finite file of 3 records = { "12:00": 3 }
+// DEF: streaming — the same pipeline over an unbounded feed = { "12:00": 3 }
+// STATE (before):
+//    result : { "12:00": 0 }
+// ======================================================================
+// offset 0: {event_time: "12:00:10"}
+// offset 1: {event_time: "12:00:20"}
+// offset 2: {event_time: "12:00:30"}
+// ======================================================================
+// step 1 · batch run over the file -> result : { "12:00": 0 } -> { "12:00": 3 }   BECAUSE all 3 records are read before the answer
+// step 2 · streaming run over the feed -> result : { "12:00": 0 } -> { "12:00": 3 }   BECAUSE the same 3 records fold in as they arrive
+// step 3 · the only difference is the input -> mode : "bounded" -> "unbounded"   BECAUSE the computation is identical
+// ======================================================================
+// downstream : file 3 records -> window "12:00" -> sum 0 -> 3 = stream 3 records -> sum 3   BECAUSE the windowed sum is the same over bounded and unbounded data
+//    derivation : batch = 3 - 3 = 0 extra machinery, streaming over a finite input, so one pipeline serves both modes`
     },
     {
       section: 'Lambda and Kappa',
@@ -39,15 +46,22 @@ registerChapter({
         { num: 4, title: 'Kappa needs replayable, persistent logs', detail: 'Kappa assumes the input is a <strong>replayable log</strong> (Kafka) that retains history long enough to re-run the pipeline when the code changes.' }
       ],
       program: `// LAMBDA vs KAPPA SIDE — one aggregation written twice vs written once and replayed
-// DEF: lambda — a batch layer and a speed layer computing the same sum in 2 codebases
+// DEF: lambda — a batch layer and a speed layer computing the same sum in 2 codebases = 2
 // DEF: kappa — one streaming pipeline, reprocessing by replaying the log = 1 codebase
-// DEF: log — the replayable input history = [ +1, +1, +1 ]
-// -> input : the aggregation changes from SUM to COUNT DISTINCT on 3 records, and must be recomputed
-//    step 1 · Lambda path -> the change is written in the batch layer AND the speed layer -> 2 edits -> drift risk
-//    step 2 · Kappa path -> the change is written once -> 1 edit -> the log is replayed through the new code
-//    step 3 · Kappa replays the log -> result : {} -> { distinct: 1 }   BECAUSE the same 3 records re-run through the new pipeline
-// <- outcome : Lambda needs 2 synchronized edits, Kappa needs 1 edit + replay   BECAUSE Kappa has one codebase
-//    derivation : Kappa reprocess = replay 3 records through new code, no second implementation to keep in sync`
+// DEF: log — the replayable input history = [ "+1", "+1", "+1" ]
+// STATE (before):
+//    result : { "sum": 3 }
+// ======================================================================
+// offset 0: {value: 1}
+// offset 1: {value: 1}
+// offset 2: {value: 1}
+// ======================================================================
+// step 1 · Lambda path -> the change is written in the batch layer AND the speed layer -> edits : 0 -> 2   BECAUSE two codebases must stay in sync
+// step 2 · Kappa path -> the change is written once -> edits : 0 -> 1   BECAUSE there is one codebase
+// step 3 · Kappa replays the log -> result : { "sum": 3 } -> { "distinct": 1 }   BECAUSE the same 3 records re-run through the new pipeline
+// ======================================================================
+// downstream : SUM -> COUNT DISTINCT -> Lambda 2 edits -> Kappa 1 edit + replay -> result distinct 1   BECAUSE Kappa has one codebase, so nothing can drift
+//    derivation : Kappa reprocess = 3 - 3 = 0 second implementations, so replay 3 records through the one new code`
     },
     {
       section: 'Batch and streaming converge',
@@ -60,15 +74,22 @@ registerChapter({
         { num: 4, title: 'What remains distinct', detail: 'Bounded vs unbounded still changes <strong>when results are final</strong> (a batch run ends; a stream waits on watermarks). The model unifies the how, not the fact that streams never end.' }
       ],
       program: `// REPROCESSING SIDE — a bug fix is deployed and history is replayed through the new pipeline
-// DEF: log — the retained input history = 3 records [ r1, r2, r3 ]
-// DEF: pipeline_v2 — the fixed pipeline code that replaces the buggy v1
-// DEF: replay — re-running the log through the new code from the start
-// -> input : a bug in v1 is found and pipeline_v2 is deployed
-//    step 1 · the log is rewound to the start -> offset : 3 -> 0   BECAUSE reprocessing begins from the first record
-//    step 2 · the log is replayed through v2 -> result : {} -> { correct_total: 3 }   BECAUSE the fixed code folds r1, r2, r3
-//    step 3 · the old v1 result is replaced -> result : { wrong_total: 4 } -> { correct_total: 3 }   BECAUSE v2 supersedes v1
-// <- outcome : history is recomputed to { correct_total: 3 } without a second batch system   BECAUSE replay + one codebase is the Kappa pattern
-//    derivation : reprocess = fold 3 records through pipeline_v2, then swap the result table`
+// DEF: log — the retained input history = [ "r1", "r2", "r3" ]
+// DEF: pipeline_v2 — the fixed pipeline code that replaces the buggy v1 = "v2"
+// DEF: replay — re-running the log through the new code from the start = offset 0
+// STATE (before):
+//    result : { "wrong_total": 4 }
+// ======================================================================
+// offset 0: {record: "r1"}
+// offset 1: {record: "r2"}
+// offset 2: {record: "r3"}
+// ======================================================================
+// step 1 · the log is rewound to the start -> offset : 3 -> 0   BECAUSE reprocessing begins from the first record
+// step 2 · the log is replayed through v2 -> result : { "wrong_total": 4 } -> { "correct_total": 3 }   BECAUSE the fixed code folds r1, r2, r3
+// step 3 · the old v1 result is replaced -> result : { "correct_total": 3 } -> { "correct_total": 3 }   BECAUSE v2 supersedes v1
+// ======================================================================
+// downstream : bug found -> log rewind 0 -> replay r1,r2,r3 -> correct_total 3   BECAUSE replay + one codebase is the Kappa pattern
+//    derivation : reprocess = 3 - 0 = 3 records folded through pipeline_v2, then the result table is swapped`
     }
   ],
 
@@ -127,18 +148,23 @@ registerChapter({
     ],
     
     program: `// SYSTEM DESIGN — a bug fix is deployed once and history is replayed through the same pipeline
-// DEF: log — the retained input history = 3 records [ r1, r2, r3 ]
-// DEF: pipeline_v2 — the fixed pipeline that replaces buggy v1
-// DEF: replay — re-running the log through the new code from offset 0
-// DEF: result — the pipeline's output table = { wrong_total: 4 }
+// DEF: log — the retained input history = [ "r1", "r2", "r3" ]
+// DEF: pipeline_v2 — the fixed pipeline that replaces buggy v1 = "v2"
+// DEF: replay — re-running the log through the new code from offset 0 = 0
+// DEF: result — the pipeline's output table = { "wrong_total": 4 }
 // STATE (before):
-//    result_table : { wrong_total: 4 }
-// -> input : a bug in v1 is found and pipeline_v2 is deployed
-//    step 1 · the log rewinds -> offset : 3 -> 0   BECAUSE reprocessing starts from the first record
-//    step 2 · the log replays through v2 -> result_table : { wrong_total: 4 } -> { correct_total: 3 }   BECAUSE the fixed code folds r1, r2, r3
-//    step 3 · the corrected result swaps in -> the buggy v1 output is superseded   BECAUSE v2 is the single codebase
-// <- outcome : history is recomputed to { correct_total: 3 } with 1 edit and 1 replay   BECAUSE the Kappa pattern has no second implementation
-//    derivation : reprocess = fold 3 records through pipeline_v2, then replace the result table`
+//    result_table : { "wrong_total": 4 }
+// ======================================================================
+// offset 0: {record: "r1"}
+// offset 1: {record: "r2"}
+// offset 2: {record: "r3"}
+// ======================================================================
+// step 1 · the log rewinds -> offset : 3 -> 0   BECAUSE reprocessing starts from the first record
+// step 2 · the log replays through v2 -> result_table : { "wrong_total": 4 } -> { "correct_total": 3 }   BECAUSE the fixed code folds r1, r2, r3
+// step 3 · the corrected result swaps in -> result_table : { "correct_total": 3 } -> { "correct_total": 3 }   BECAUSE v2 is the single codebase
+// ======================================================================
+// downstream : bug found -> rewind 0 -> replay 3 records -> result 3   BECAUSE the Kappa pattern has no second implementation to keep in sync
+//    derivation : reprocess = 3 - 0 = 3 records folded through pipeline_v2, then replace the result table`
   },
   quiz: [
     { question: "What is the core cost of the Lambda architecture?", options: ["A. High latency", "B. Two codebases that drift apart", "C. Low throughput", "D. No fault tolerance"], answer: 2, explanation: "Lambda runs the same logic in a batch layer and a speed layer that must be kept in sync.", conceptRef: "2. Lambda architecture" },
@@ -146,6 +172,12 @@ registerChapter({
     { question: "What is batch in the unified model?", options: ["A. A separate paradigm", "B. Streaming over a bounded input", "C. A faster streaming mode", "D. A type of window"], answer: 2, explanation: "Batch is just streaming over an input that ends.", conceptRef: "4. Batch is a special case" },
     { question: "What does reprocessing require?", options: ["A. A second codebase", "B. A replayable, persistent log", "C. A batch layer", "D. No state"], answer: 2, explanation: "Replay needs retained, re-readable input history.", conceptRef: "6. Replayable logs" },
     { question: "What stays distinct between batch and streaming after unification?", options: ["A. The window types", "B. When results are final — batch ends, streams wait on watermarks", "C. The transform logic", "D. The key grouping"], answer: 2, explanation: "The model unifies the how, not the fact that streams never end.", conceptRef: "8. What stays distinct" }
+  ],
+  seeAlso: [
+    { to: 1, section: 'Three shapes of data', depth: '"batch is streaming over a bounded input" is ch01\'s three-shapes distinction stated as a unification — bounded, unbounded-batched, and unbounded-streaming are the same computation over different inputs.', example: 'ch10\'s windowed sum over a 3-record file vs a 3-record stream (both { "12:00": 3 }) is ch01\'s "batch is a special case of streaming" made concrete.' },
+    { to: 6, section: 'Why the duality matters in practice', depth: 'the Kappa architecture\'s replayable log is the stream-as-source-of-truth principle from ch06 — the log is retained history, the table is a derived view.', example: 'ch10\'s "rewind the log to offset 0 and replay" is ch06\'s "any past table is a fold of the stream"; ch10\'s corrected table is ch06\'s materialized fold under new code.' },
+    { to: 7, section: 'Why state must persist', depth: 'replay-based reprocessing is only practical because state checkpoints let a pipeline resume without re-reading everything — ch07 covers the checkpoint machinery Kappa leans on.', example: 'ch10\'s replay folds r1, r2, r3 through v2; ch07\'s checkpoint { count: {42:13}, offset: 500 } is what avoids replaying the whole log on every crash, so reprocessing is a deliberate re-run, not a recovery tax.' },
+    { to: 2, section: 'What and Where — transformations and windowing', depth: 'the unified model that makes Lambda\'s duplication unnecessary is the what/where/when/how model — ch02 defines the four axes ch10 unifies.', example: 'ch10\'s "one pipeline, batch + streaming" is ch02\'s four-question spec applied to a bounded vs unbounded input; ch10\'s reprocessing is ch02\'s "how" (accumulation) recomputed under new logic.' }
   ],
   sources: [
     { name: 'Dean & Ghemawat — "MapReduce" (OSDI 2004)', url: 'https://research.google/pubs/pub62/', note: 'The batch model that streaming evolved from' },

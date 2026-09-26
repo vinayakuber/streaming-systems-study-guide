@@ -21,14 +21,20 @@ _Also known as: SS Ch08 · Streaming SQL · Continuous Query · TUMBLE · HOP ·
 ```java
 // QUERY SIDE — a continuous GROUP BY updates a total as clicks arrive
 // DEF: continuous query — a query that runs forever and emits updated results = "SELECT campaign, COUNT(*) FROM clicks GROUP BY campaign"
-// DEF: result — the updating output table = { C1: 3 }
-// DEF: retraction — the engine signals the old row is replaced by the new row
-// -> input : a new click {campaign: "C1"} arrives
-//    step 1 · the WHERE keeps the row -> filtered : 1 row passes
-//    step 2 · the GROUP BY updates the key -> result : { C1: 3 } -> { C1: 4 }   BECAUSE COUNT folds the new row in
-//    step 3 · the engine emits a retraction of the old row -> sink sees (C1, 3) removed then (C1, 4) added
-// <- outcome : the sink ends with C1 = 4, not 3 or 7   BECAUSE the retraction replaced the old value
-//    derivation : new count = old count + 1 = 3 + 1 = 4
+// DEF: result — the updating output table = { "C1": 3 }
+// DEF: retraction — the engine signals the old row is replaced by the new row = { "C1": 3 }
+// STATE (before):
+//    result : { "C1": 3 }
+// ======================================================================
+// offset 0: {campaign: "C1", click: true}
+// offset 1: {campaign: "C1", click: true}
+// ======================================================================
+// step 1 · the WHERE keeps the row -> filtered : 1 -> 1 row passes   BECAUSE the row matches the predicate
+// step 2 · the GROUP BY updates the key -> result["C1"] : 3 -> 4   BECAUSE COUNT folds the new row in
+// step 3 · the engine emits a retraction of the old row -> sink : { "C1": 3 } -> { "C1": 4 }   BECAUSE the old row is removed then the new row is added
+// ======================================================================
+// downstream : click -> WHERE pass -> GROUP BY 3 -> 4 -> sink stores 4   BECAUSE the retraction replaced the old value, not added to it
+//    derivation : new count = 3 + 1 = 4
 ```
 
 ### Windows in SQL
@@ -45,15 +51,21 @@ _Also known as: SS Ch08 · Streaming SQL · Continuous Query · TUMBLE · HOP ·
 
 ```java
 // WINDOWED SQL SIDE — the same clicks bucketed by TUMBLE vs HOP give different row counts
-// DEF: TUMBLE — a 5-min fixed window over event time
-// DEF: HOP — a 10-min window sliding every 2 min
-// DEF: click — {event_time: "12:04:00", campaign: "C1"}
-// -> input : the query "SELECT window, COUNT(*) FROM clicks GROUP BY window"
-//    step 1 · TUMBLE assigns the click -> one window [12:00, 12:05) -> tumble_rows : 0 -> 1
-//    step 2 · HOP assigns the click -> windows [12:00,12:10), [12:02,12:12), [12:04,12:14) -> hop_rows : 0 -> 3
-//    step 3 · the watermark at 12:06:30 closes the TUMBLE window -> the [12:00, 12:05) row is emitted
-// <- outcome : TUMBLE produced 1 row for the click, HOP produced 3   BECAUSE HOP windows overlap
-//    derivation : HOP rows per event = up to size / slide = 10 min / 2 min = 5, but only 3 overlap 12:04:00
+// DEF: TUMBLE — a 5-min fixed window over event time = [12:00, 12:05)
+// DEF: HOP — a 10-min window sliding every 2 min = [12:00, 12:10)
+// DEF: click — the event = { event_time: "12:04:00", campaign: "C1" }
+// STATE (before):
+//    tumble_rows : 0
+// ======================================================================
+// offset 0: {event_time: "12:04:00", campaign: "C1"}
+// offset 1: {event_time: "12:04:00", campaign: "C1", shape: "same click"}
+// ======================================================================
+// step 1 · TUMBLE assigns the click -> tumble_rows : 0 -> 1   BECAUSE 12:04:00 falls only in [12:00, 12:05)
+// step 2 · HOP assigns the click -> hop_rows : 0 -> 3   BECAUSE it overlaps [12:00,12:10), [12:02,12:12), and [12:04,12:14)
+// step 3 · the watermark at 12:06:30 closes the TUMBLE window -> emitted : {} -> { "[12:00,12:05)": 1 }   BECAUSE the window end is crossed
+// ======================================================================
+// downstream : click 12:04:00 -> TUMBLE 1 row -> HOP 3 rows -> watermark emits 1   BECAUSE HOP windows overlap
+//    derivation : HOP rows per event = 5 - 2 = 3   BECAUSE 5 possible 10-min windows minus the 2 that end before 12:04
 ```
 
 ### Joins and time in SQL
@@ -70,17 +82,38 @@ _Also known as: SS Ch08 · Streaming SQL · Continuous Query · TUMBLE · HOP ·
 
 ```java
 // JOIN SQL SIDE — a windowed join waits for both watermarks before emitting a match
-// DEF: windowed join — match clicks and impressions whose event times are within 5 min
-// DEF: watermark — clicks = 12:06:00, impressions = 12:04:30
-// DEF: match — a (click, impression) pair in the join window [12:00, 12:05)
-// -> input : a click {campaign: "C1", event_time: "12:03:00"} and an impression {campaign: "C1", event_time: "12:02:00"}
-//    step 1 · both rows fall in the join window -> match : {} -> { (click 12:03, impression 12:02) }
-//    step 2 · the join checks completeness -> clicks watermark 12:06:00 passes, impressions watermark 12:04:30 does not
-//    step 3 · the match waits -> not emitted until impressions watermark passes 12:05:00   BECAUSE a late impression could still arrive
-// <- outcome : the match is held at 0 emitted rows until both watermarks pass 12:05:00   BECAUSE the join is bounded by the slower stream
-//    derivation : the join window closes when min(12:06:00, 12:04:30 -> 12:05:00+) > 12:05:00
+// DEF: windowed join — match clicks and impressions whose event times are within 5 min = [12:00, 12:05)
+// DEF: watermark — clicks = "12:06:00", impressions = "12:04:30"
+// DEF: match — a (click, impression) pair in the join window = { "click 12:03", "impression 12:02" }
+// STATE (before):
+//    emitted_rows : 0
+// ======================================================================
+// offset 0: {campaign: "C1", kind: "click", event_time: "12:03:00"}
+// offset 1: {campaign: "C1", kind: "impression", event_time: "12:02:00"}
+// ======================================================================
+// step 1 · both rows fall in the join window -> match : {} -> { "click 12:03", "impression 12:02" }   BECAUSE both event times are inside [12:00, 12:05)
+// step 2 · the join checks completeness -> clicks_ready : false -> true, impressions_ready : false -> false   BECAUSE clicks watermark 12:06:00 passes but impressions 12:04:30 does not
+// step 3 · the match waits -> emitted_rows : 0 -> 0   BECAUSE a late impression could still arrive
+// ======================================================================
+// downstream : click 12:03 -> impression 12:02 -> match held -> wait for both watermarks -> emit 1   BECAUSE the join is bounded by the slower stream
+//    derivation : min watermark = 390 - 120 = 270 s, still short of 300 s, so the join waits for impressions to reach 12:05:00
 ```
 
+
+## Links & The Bigger Picture
+
+Concepts this chapter mentions but does not fully unpack are linked below — each pointer names the chapter where the concept is covered in depth and gives a concrete example that ties the two chapters together.
+
+- **[Chapter 2: The What, Where, When, and How of Data Processing → What and Where — transformations and windowing](ch02-the-what-where-when-and-how-of-data-processing.md#what-and-where--transformations-and-windowing)** — streaming SQL is a declarative spelling of the what/where/when/how model — SELECT/WHERE/GROUP BY (what), TUMBLE/HOP/SESSION (where), watermark + trigger (when), retraction (how).
+  - _Example:_ ch08's GROUP BY TUMBLE is ch02's "what + where"; ch08's retraction of (C1, 3) before (C1, 4) is ch02's accumulating-and-retracting mode.
+- **[Chapter 3: Watermarks → Propagation and correctness](ch03-watermarks.md#propagation-and-correctness)** — the watermark that drives SQL emission is the same completeness signal ch03 defines — and it propagates as the minimum across a query's inputs.
+  - _Example:_ ch08's TUMBLE window emits when the watermark passes 12:05:00; ch03 shows that watermark = max_seen 12:08:30 − skew 120 s = 12:06:30, or min(12:06:00, 12:04:30) = 12:04:30 for a join.
+- **[Chapter 4: Advanced Windowing → Window shapes — fixed, sliding, session](ch04-advanced-windowing.md#window-shapes--fixed-sliding-session)** — TUMBLE/HOP/SESSION are the SQL spellings of ch04's fixed/sliding/session windows, including session merging.
+  - _Example:_ ch08's HOP(10 min, 2 min) putting one click into 3 rows is ch04's sliding window [12:00,12:10) + [12:02,12:12) + [12:04,12:14); ch08's SESSION is ch04's gap-based merge.
+- **[Chapter 6: Streams and Tables → The duality](ch06-streams-and-tables.md#the-duality)** — append-only vs updating results is the stream/table duality in SQL — an updating query emits a changelog, an append-only query emits a stream of facts.
+  - _Example:_ ch08's "updating result retracts (C1, 3) then adds (C1, 4)" is ch06's changelog (old, new) pair; ch08's append-only mode is ch06's plain stream.
+- **[Chapter 9: Streaming Joins → Windowed and temporal joins](ch09-streaming-joins.md#windowed-and-temporal-joins)** — SQL joins are where windowing, watermarks, and the stream/table duality meet — ch09 covers windowed (interval) and temporal joins in depth.
+  - _Example:_ ch08's "match clicks and impressions within 5 min" is ch09's windowed join; ch08's "join emits when both watermarks pass" is ch09's hold-until-both-sides-pass rule.
 
 ## System Design Interview
 
@@ -124,17 +157,21 @@ _Role: sink — applies the updating result_
 
 ```java
 // SYSTEM DESIGN — a continuous SQL query updates a campaign count as the watermark closes a TUMBLE window
-// DEF: continuous query — "SELECT campaign, COUNT(*) FROM clicks GROUP BY TUMBLE(event_time, 5 min), campaign"
-// DEF: watermark — the completeness signal = 12:06:30
-// DEF: result — the updating output table = { C1: 3 }
+// DEF: continuous query — a query that runs forever = "SELECT campaign, COUNT(*) FROM clicks GROUP BY TUMBLE(event_time, 5 min), campaign"
+// DEF: watermark — the completeness signal = "12:06:30"
+// DEF: result — the updating output table = { "C1": 3 }
 // STATE (before):
-//    result_table : { C1: 3 }
-// -> input : a new click {campaign: "C1", event_time: "12:04:00"} arrives
-//    step 1 · the engine folds the row -> result_table : { C1: 3 } -> { C1: 4 }   BECAUSE COUNT adds the new row
-//    step 2 · the engine retracts the old row -> the sink removes (C1, 3)   BECAUSE the value changed
-//    step 3 · the watermark passes 12:05:00 -> the [12:00, 12:05) window emits (C1, 4)   BECAUSE the window is complete
-// <- outcome : the sink shows C1 = 4 after the retraction and the emit   BECAUSE the updating query replaced the old row
-//    derivation : new count = old count + 1 = 3 + 1 = 4
+//    result_table : { "C1": 3 }
+// ======================================================================
+// offset 0: {campaign: "C1", event_time: "12:04:00"}
+// offset 1: {campaign: "C1", event_time: "12:04:00", role: "late click"}
+// ======================================================================
+// step 1 · the engine folds the row -> result_table["C1"] : 3 -> 4   BECAUSE COUNT adds the new row
+// step 2 · the engine retracts the old row -> sink : { "C1": 3 } -> { "C1": 4 }   BECAUSE the value changed
+// step 3 · the watermark passes 12:05:00 -> emitted : {} -> { "[12:00,12:05)": 4 }   BECAUSE the window is complete
+// ======================================================================
+// downstream : click 12:04:00 -> COUNT 3 -> 4 -> retract 3 -> emit 4   BECAUSE the updating query replaced the old row
+//    derivation : new count = 3 + 1 = 4
 ```
 
 ## Interview Questions

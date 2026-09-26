@@ -18,15 +18,21 @@ registerChapter({
         { num: 4, title: 'Exactly-once state vs exactly-once effects', detail: 'Making per-key state exactly-once is easy (recompute a deterministic value); making an <strong>external side effect</strong> exactly-once (send one email, charge one card) is the hard part.' }
       ],
       program: `// SHUFFLE SIDE — a retried record is deduplicated so it does not double-count
-// DEF: record — a keyed element {id: "r7", key: 42, value: 10}
-// DEF: dedup — a store of record ids already delivered, holding seen = { r1, r2, r3 }
-// DEF: seen — the set of delivered ids = { r1, r2, r3 }
-// -> input : the shuffle delivers record {id: "r7", key: 42, value: 10}
-//    step 1 · check the id -> seen has no r7 -> delivered : false -> true
-//    step 2 · record the id -> seen : { r1, r2, r3 } -> { r1, r2, r3, r7 }
-//    step 3 · the retry delivers the same record again -> seen has r7 -> dropped   BECAUSE the id was already recorded
-// <- outcome : the downstream stage reads r7 exactly once   BECAUSE the second delivery was a duplicate
-//    derivation : dedup makes 2 deliveries -> 1 effect, so the record contributes value 10 once, not 20`
+// DEF: record — a keyed element = { id: "r7", key: 42, value: 10 }
+// DEF: seen — the set of delivered ids = { "r1", "r2", "r3" }
+// DEF: dedup — the store of already-delivered ids = { "r1", "r2", "r3" }
+// STATE (before):
+//    seen : { "r1", "r2", "r3" }
+// ======================================================================
+// offset 0: {id: "r7", key: 42, value: 10}
+// offset 1: {id: "r7", key: 42, value: 10, delivery: "retry"}
+// ======================================================================
+// step 1 · check the id -> delivered : false -> true   BECAUSE "r7" is not in seen
+// step 2 · record the id -> seen : { "r1", "r2", "r3" } -> { "r1", "r2", "r3", "r7" }   BECAUSE the first delivery succeeded
+// step 3 · the retry delivers the same record -> delivered : true -> true, action "pass" -> "drop"   BECAUSE "r7" is already in seen
+// ======================================================================
+// downstream : the stage reads delivery 1 -> seen r7 -> delivery 2 -> dropped -> effect 10   BECAUSE the second delivery was a duplicate
+//    derivation : dedup = 2 - 1 = 1 effect, so the record contributes value 10 once, not 20`
     },
     {
       section: 'Idempotency and deduplication',
@@ -41,15 +47,19 @@ registerChapter({
       program: `// SINK SIDE — an idempotent write absorbs a retry, a non-idempotent one double-counts
 // DEF: idempotent write — writing the same (key, value) twice leaves one value = SET 42 -> 10
 // DEF: non-idempotent write — a counter that increments = ADD 10
-// DEF: balance — the downstream account state = 30
+// DEF: balance — the downstream account state = { 42: 30 }
 // STATE (before):
 //    balance : { 42: 30 }
-// -> input : the sink receives record {key: 42, value: 10} and then a retry of the same record
-//    step 1 · first delivery, idempotent path -> balance : 30 -> 10   BECAUSE SET replaces the old value
-//    step 2 · retry, idempotent path -> the key is already seen -> skip -> balance : 10 -> 10   BECAUSE SET 10 again is the same effect
-//    step 3 · counter path comparison -> balance : 30 -> 40 -> 50   BECAUSE ADD 10 runs twice
-// <- outcome : the idempotent sink ends at 10, the counter ends at 50 for the same two deliveries   BECAUSE only the idempotent write tolerates the retry
-//    derivation : 2 deliveries x ADD 10 = +20, but exactly-once requires +10 -> the sink must be idempotent`
+// ======================================================================
+// offset 0: {key: 42, value: 10}
+// offset 1: {key: 42, value: 10, delivery: "retry"}
+// ======================================================================
+// step 1 · first delivery, idempotent path -> balance[42] : 30 -> 10   BECAUSE SET replaces the old value
+// step 2 · retry, idempotent path -> balance[42] : 10 -> 10   BECAUSE the key is already seen, so the write is skipped and SET 10 again is the same effect
+// step 3 · counter path comparison -> balance[42] : 30 -> 40 -> 50   BECAUSE ADD 10 runs twice
+// ======================================================================
+// downstream : delivery 1 -> balance 10 -> retry -> balance 10   BECAUSE only the idempotent write tolerates the retry
+//    derivation : 2 * 10 = 20 added by ADD, but exactly-once requires 1 * 10 = 10 -> the sink must be idempotent`
     },
     {
       section: 'Side effects — the hard part',
@@ -64,17 +74,20 @@ registerChapter({
       program: `// PAYMENT SIDE — an idempotency key makes a charge retry-safe, a plain charge double-bills
 // DEF: idempotency key — a unique id the external system uses to deduplicate = "order-99"
 // DEF: charge — a side effect on the card = charge $10 for order-99
-// DEF: card_ledger — the external ledger = 0
 // DEF: card — the customer payment instrument charged = card ending 4242
 // DEF: ledger — the external balance record the charge writes = 0
 // STATE (before):
 //    card_ledger : { "order-99": 0 }
-// -> input : the pipeline attempts the charge for order-99, then retries after a timeout
-//    step 1 · first attempt with the key -> card_ledger : 0 -> 10   BECAUSE the charge succeeds and records the key
-//    step 2 · retry with the same key -> card_ledger : 10 -> 10   BECAUSE the external system sees order-99 already charged
-//    step 3 · plain charge comparison -> card_ledger : 0 -> 10 -> 20   BECAUSE the retry has no key to deduplicate on
-// <- outcome : the idempotent charge bills $10, the plain charge bills $20 for the same two attempts   BECAUSE only the key deduplicates the side effect
-//    derivation : exactly-once side effect = one charge of $10, not two, thanks to idempotency key order-99`
+// ======================================================================
+// offset 0: {order: "order-99", amount: 10, attempt: 1}
+// offset 1: {order: "order-99", amount: 10, attempt: 2}
+// ======================================================================
+// step 1 · first attempt with the key -> card_ledger["order-99"] : 0 -> 10   BECAUSE the charge succeeds and records the key
+// step 2 · retry with the same key -> card_ledger["order-99"] : 10 -> 10   BECAUSE the external system sees order-99 already charged
+// step 3 · plain charge comparison -> card_ledger["order-99"] : 0 -> 10 -> 20   BECAUSE the retry has no key to deduplicate on
+// ======================================================================
+// downstream : attempt 1 -> charge 10 -> attempt 2 -> no-op -> balance 10   BECAUSE only the key deduplicates the side effect
+//    derivation : exactly-once = 1 * 10 = $10 charged, not 2 * 10 = $20, thanks to idempotency key order-99`
     }
   ],
 
@@ -134,16 +147,20 @@ registerChapter({
     
     program: `// SYSTEM DESIGN — a crash and retry still charge the card exactly once via the idempotency key
 // DEF: idempotency key — a unique id the external system deduplicates on = "order-99"
-// DEF: dedup — a set of record ids already delivered = { r1, r2, r3 }
+// DEF: dedup — a set of record ids already delivered = { "r1", "r2", "r3" }
 // DEF: charge — the side effect = charge $10 for order-99
 // STATE (before):
 //    card_ledger : 0
-// -> input : the pipeline attempts the charge for order-99, then retries after a timeout
-//    step 1 · first delivery of r7 -> dedup : { r1, r2, r3 } -> { r1, r2, r3, r7 }   BECAUSE r7 is new
-//    step 2 · the charge succeeds -> card_ledger : 0 -> 10   BECAUSE the API sees the key order-99 as new
-//    step 3 · the retry delivers r7 again -> dropped by dedup -> card_ledger : 10 -> 10   BECAUSE the key is now seen
-// <- outcome : the card is charged exactly $10   BECAUSE dedup blocked the retry and the key made the effect idempotent
-//    derivation : 2 deliveries of r7 -> 1 charge of $10, so exactly-once holds end to end`
+// ======================================================================
+// offset 0: {id: "r7", order: "order-99", amount: 10}
+// offset 1: {id: "r7", order: "order-99", amount: 10, delivery: "retry"}
+// ======================================================================
+// step 1 · first delivery of r7 -> dedup : { "r1", "r2", "r3" } -> { "r1", "r2", "r3", "r7" }   BECAUSE r7 is new
+// step 2 · the charge succeeds -> card_ledger : 0 -> 10   BECAUSE the API sees the key order-99 as new
+// step 3 · the retry delivers r7 again -> dedup : { "r1", "r2", "r3", "r7" } -> { "r1", "r2", "r3", "r7" } -> card_ledger : 10 -> 10   BECAUSE the key is now seen
+// ======================================================================
+// downstream : r7 -> dedup seen -> charge 10 -> retry dropped -> balance 10   BECAUSE dedup blocked the retry and the key made the effect idempotent
+//    derivation : exactly-once = 2 - 1 = 1 charge of $10, so the retry adds nothing`
   },
   quiz: [
     { question: "What does exactly-once mean in this book?", options: ["A. No operation is ever retried", "B. Each record affects the output exactly once", "C. The pipeline never crashes", "D. Every window emits exactly one pane"], answer: 2, explanation: "Exactly-once is the property that a retried record does not affect the output twice.", conceptRef: "1. Retries are unavoidable" },
@@ -151,6 +168,12 @@ registerChapter({
     { question: "What are the three parts of end-to-end exactly-once?", options: ["A. Source, cache, queue", "B. Replayable source, deduplicating shuffle, idempotent sink", "C. Producer, broker, consumer", "D. Trigger, watermark, window"], answer: 2, explanation: "End-to-end exactly-once composes a replayable source, a deduplicating shuffle, and an idempotent sink.", conceptRef: "5. End-to-end exactly-once" },
     { question: "Why are side effects the hard part of exactly-once?", options: ["A. They are slow", "B. They touch the outside world and cannot be recomputed", "C. They use too much memory", "D. They require watermarks"], answer: 2, explanation: "An email or charge cannot be undone by recomputation, so it needs idempotency or a two-phase commit.", conceptRef: "6. Side effects" },
     { question: "Which is preferred for making a charge exactly-once?", options: ["A. Two-phase commit", "B. Idempotency key", "C. Retry without a key", "D. Ignoring failures"], answer: 2, explanation: "An idempotency key is cheap and robust; two-phase commit is expensive and fragile.", conceptRef: "7. Idempotency key vs two-phase commit" }
+  ],
+  seeAlso: [
+    { to: 7, section: 'Consistency and recovery', depth: 'exactly-once state recovery needs a checkpoint that pairs state with the source offset — ch07 covers that machinery (barriers, state stores, aligned snapshots).', example: 'ch05\'s "replayable source + dedup shuffle + idempotent sink" is ch07\'s checkpoint { count: {42:13}, offset: 500 } resumed at 501: the state and offset align so no record is lost or double-counted.' },
+    { to: 6, section: 'The duality', depth: 'retractions — the correction mechanism ch05 uses for idempotent effects — are the changelog view of a table update.', example: 'ch05\'s "SET 42 -> 10 instead of ADD 10" is ch06\'s (old, new) changelog pair: retract the old value, set the new one, so two deliveries still leave one effect.' },
+    { to: 4, section: 'Session semantics and pitfalls', depth: 'accumulating-and-retracting is the windowing-side twin of exactly-once — a late event that changes an emitted result must retract the old pane before emitting the new one.', example: 'ch05\'s dedup makes 2 deliveries → 1 effect; ch04\'s late session merge retracts s1 (3) and s2 (2) before emitting sMerged (6) so the sink shows 6, not 11.' },
+    { to: 2, section: 'How — accumulation', depth: 'the "how" axis (accumulation modes) is where retraction semantics are defined for panes, which ch05 then applies to side effects.', example: 'ch05\'s idempotent sink is ch02\'s accumulating-and-retracting mode (3 − 3 + 4 = 4): the retraction undoes the old value exactly once before the new one lands.' }
   ],
   sources: [
     { name: 'Akidau et al. — "MillWheel" (VLDB 2013)', url: 'https://research.google/pubs/pub41378/', note: 'Exactly-once stream processing and the side-effect problem in production' },

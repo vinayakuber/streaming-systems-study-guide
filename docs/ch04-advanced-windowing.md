@@ -21,14 +21,20 @@ _Also known as: SS Ch04 · Session Windows · Fixed Window · Sliding Window · 
 ```java
 // STREAM SIDE — one click stream cut three ways gives three different groupings
 // DEF: fixed window — a 5-min non-overlapping span = [12:00, 12:05)
-// DEF: sliding window — a 10-min span that advances every 2 min = [12:00, 12:10) at slide 12:00
-// DEF: session window — a burst that closes after a 30-min gap of inactivity
-// -> input : click {event_time: "12:04:00"}
-//    step 1 · fixed assignment -> the click belongs to [12:00, 12:05) only -> fixed_count : 0 -> 1
-//    step 2 · sliding assignment -> the click belongs to [12:00, 12:10), [12:02, 12:12), [12:04, 12:14) -> slide_count : 0 -> 3
-//    step 3 · session assignment -> the click opens session s1 -> sessions : [] -> [s1]
-// <- outcome : the dashboard reads the same click as 1 fixed, 3 sliding, 1 session   BECAUSE the shapes define different boundaries
-//    derivation : sliding windows per event = window size / slide = 10 min / 2 min = 5, but only 3 overlap this event time
+// DEF: sliding window — a 10-min span that advances every 2 min = [12:00, 12:10)
+// DEF: session window — a burst that closes after a 30-min gap of inactivity = { s1 }
+// STATE (before):
+//    fixed_count : 0
+// ======================================================================
+// offset 0: {event_time: "12:04:00"}
+// offset 1: {event_time: "12:04:00", shape: "same click"}
+// ======================================================================
+// step 1 · fixed assignment -> fixed_count : 0 -> 1   BECAUSE 12:04:00 falls only in [12:00, 12:05)
+// step 2 · sliding assignment -> slide_count : 0 -> 3   BECAUSE 12:04:00 overlaps [12:00,12:10), [12:02,12:12), and [12:04,12:14)
+// step 3 · session assignment -> sessions : [] -> ["s1"]   BECAUSE the click opens a new burst
+// ======================================================================
+// downstream : dashboard reads click 12:04:00 -> fixed 1 -> sliding 3 -> session 1   BECAUSE the shapes define different boundaries for the same event
+//    derivation : sliding overlap = 3 windows = 5 - 2   BECAUSE 5 possible 10-min windows minus the 2 that end before 12:04
 ```
 
 ### The window lifecycle
@@ -46,14 +52,20 @@ _Also known as: SS Ch04 · Session Windows · Fixed Window · Sliding Window · 
 ```java
 // SESSION SIDE — two sessions merge when a bridging event lands inside the gap
 // DEF: session gap — the inactivity threshold that splits sessions = 30 min
-// DEF: session — a window [start, end) that closes after a 30-min gap = s1 [12:00, 12:10)
-// DEF: sessions — the current set = { s1: [12:00, 12:10), s2: [12:40, 12:50) }
-// -> input : event {event_time: "12:20:00"}
-//    step 1 · the event is 20 min from s1 and 20 min from s2 -> both within the 30-min gap -> they merge
-//    step 2 · the merged session spans s1 and s2 -> sessions : { s1, s2 } -> { sMerged: [12:00, 12:50) }
-//    step 3 · the event folds into the merged session -> sMerged_count : 0 -> 3   BECAUSE s1 + s2 + the bridging event = 3 events
-// <- outcome : one session [12:00, 12:50) replaces two   BECAUSE the 12:20 event was inside the gap of both
-//    derivation : gap check = 12:20:00 - 12:10:00 = 10 min <= 30 min, and 12:40:00 - 12:20:00 = 20 min <= 30 min -> merge
+// DEF: s1 — a session window = [12:00, 12:10)
+// DEF: s2 — a session window = [12:40, 12:50)
+// STATE (before):
+//    sessions : { "s1": [12:00, 12:10), "s2": [12:40, 12:50) }
+// ======================================================================
+// offset 0: {event_time: "12:20:00"}
+// offset 1: {event_time: "12:20:00", role: "bridge"}
+// ======================================================================
+// step 1 · the event is 10 min from s1's end and 20 min from s2's start -> gap_check : "apart" -> "bridging"   BECAUSE both distances are within the 30-min gap
+// step 2 · the merged session spans s1 and s2 -> sessions : { "s1", "s2" } -> { "sMerged": [12:00, 12:50) }   BECAUSE the bridge joins the two ends
+// step 3 · the event folds into the merged session -> sMerged_count : 0 -> 3   BECAUSE s1 + s2 + the bridging event = 3 events
+// ======================================================================
+// downstream : s1 [12:00,12:10) -> s2 [12:40,12:50) -> bridge 12:20:00 -> sMerged [12:00,12:50) count 3   BECAUSE the 12:20 event was inside the gap of both
+//    derivation : gap to s1 = 10 - 0 = 10 min <= 30, gap to s2 = 20 - 0 = 20 min <= 30 -> merge
 ```
 
 ### Session semantics and pitfalls
@@ -70,16 +82,36 @@ _Also known as: SS Ch04 · Session Windows · Fixed Window · Sliding Window · 
 
 ```java
 // RETRACTION SIDE — a late event merges two already-emitted sessions, forcing a retraction
-// DEF: session gap — 30 min; the two sessions s1 [12:00,12:10) and s2 [12:40,12:50) are already emitted
-// DEF: retraction — a downstream signal that cancels a previously emitted pane = { s1, s2 }
-// -> input : late event {event_time: "12:20:00", arrival: "13:01:00"}
-//    step 1 · the late event bridges the gap -> sessions : { s1, s2 } -> { sMerged: [12:00, 12:50) }
-//    step 2 · the pipeline emits a retraction for s1 and s2 -> downstream : {s1:3, s2:2} -> cancelled
-//    step 3 · the pipeline emits the merged session -> downstream : {} -> {sMerged: 6}   BECAUSE 3 + 2 + 1 = 6
-// <- outcome : downstream ends with one session of 6, not three sessions totaling 11   BECAUSE the retractions undid s1 and s2
-//    derivation : merged count = s1_count + s2_count + bridging = 3 + 2 + 1 = 6
+// DEF: session gap — the inactivity threshold = 30 min
+// DEF: retraction — a downstream signal that cancels a previously emitted pane = { "s1", "s2" }
+// DEF: s1, s2 — already-emitted sessions = { "s1": 3, "s2": 2 }
+// STATE (before):
+//    downstream : { "s1": 3, "s2": 2 }
+// ======================================================================
+// offset 0: {event_time: "12:20:00", arrival: "13:01:00"}
+// offset 1: {event_time: "12:20:00", role: "late bridge"}
+// ======================================================================
+// step 1 · the late event bridges the gap -> sessions : { "s1", "s2" } -> { "sMerged": [12:00, 12:50) }   BECAUSE both gaps are within 30 min
+// step 2 · the pipeline emits a retraction for s1 and s2 -> downstream : { "s1": 3, "s2": 2 } -> {}   BECAUSE the earlier panes are now stale
+// step 3 · the pipeline emits the merged session -> downstream : {} -> { "sMerged": 6 }   BECAUSE 3 + 2 + 1 = 6
+// ======================================================================
+// downstream : s1 3 -> s2 2 -> retraction -> sMerged 6   BECAUSE the retractions undid s1 and s2, so the total is 6 not 11
+//    derivation : merged count = 3 + 2 + 1 = 6   BECAUSE s1_count + s2_count + the bridging event
 ```
 
+
+## Links & The Bigger Picture
+
+Concepts this chapter mentions but does not fully unpack are linked below — each pointer names the chapter where the concept is covered in depth and gives a concrete example that ties the two chapters together.
+
+- **[Chapter 2: The What, Where, When, and How of Data Processing → What and Where — transformations and windowing](ch02-the-what-where-when-and-how-of-data-processing.md#what-and-where--transformations-and-windowing)** — the window is the "where" axis of the four-question model; ch02 fixes that axis against the other three (what/when/how).
+  - _Example:_ ch04's fixed vs sliding vs session shapes are the "where" choice; ch02 shows the same click 12:04:00 answering 1 fixed, 3 sliding, or 1 session result, with the trigger deciding when each emits.
+- **[Chapter 3: Watermarks → Propagation and correctness](ch03-watermarks.md#propagation-and-correctness)** — a window's lifecycle ends with garbage collection, and the watermark is what decides when a window is done — ch03 defines the signal that drives it.
+  - _Example:_ ch04's "session done when watermark passes end + lateness" is ch03's watermark 12:06:30 closing [12:00,12:05); the skew formula (max_seen 12:08:30 − 120 s) is what produced that watermark.
+- **[Chapter 8: Streaming SQL → Windows in SQL](ch08-streaming-sql.md#windows-in-sql)** — TUMBLE/HOP/SESSION are the SQL spellings of this chapter's fixed/sliding/session shapes, with the watermark driving emission.
+  - _Example:_ ch04's session [12:00,12:50) after a 12:20:00 bridge event is what Flink SQL's SESSION(gap) computes; ch04's sliding 10-min/2-min is ch08's HOP(10 min, 2 min).
+- **[Chapter 7: The Practicalities of Persistent State → Checkpoints and state stores](ch07-the-practicalities-of-persistent-state.md#checkpoints-and-state-stores)** — window state is exactly the state that a stateful processor must persist; ch07 covers how that per-window state is snapshotted and recovered.
+  - _Example:_ ch04's per-window counts and session sets live in keyed state; ch07 shows that same state as { 42: 13 } being checkpointed with its offset so a restart resumes without recomputing the windows.
 
 ## System Design Interview
 
@@ -124,16 +156,20 @@ _Role: trigger/retraction emitter — emits and corrects panes_
 ```java
 // SYSTEM DESIGN — a late event merges two sessions and the pipeline retracts the stale panes
 // DEF: session gap — the inactivity threshold = 30 min
-// DEF: retraction — a downstream signal that cancels a previously emitted pane = { s1, s2 }
-// DEF: sessions — the current set for user 42 = { s1: [12:00, 12:10), s2: [12:40, 12:50) }
+// DEF: retraction — a downstream signal that cancels a previously emitted pane = { "s1", "s2" }
+// DEF: sessions — the current set for user 42 = { "s1": [12:00, 12:10), "s2": [12:40, 12:50) }
 // STATE (before):
-//    session_state : { s1: 3, s2: 2 }
-// -> input : a late event {user: 42, event_time: "12:20:00"} arrives
-//    step 1 · the event bridges s1 and s2 -> sessions : { s1, s2 } -> { sMerged: [12:00, 12:50) }   BECAUSE both gaps are within 30 min
-//    step 2 · the pipeline retracts the stale panes -> session_state : { s1: 3, s2: 2 } -> cancelled
-//    step 3 · the merged pane is emitted -> session_state : {} -> { sMerged: 6 }   BECAUSE 3 + 2 + 1 = 6
-// <- outcome : the store shows one session of 6, not three sessions totaling 11   BECAUSE the retractions undid s1 and s2
-//    derivation : merged count = s1_count + s2_count + bridging = 3 + 2 + 1 = 6
+//    session_state : { "s1": 3, "s2": 2 }
+// ======================================================================
+// offset 0: {user: 42, event_time: "12:20:00"}
+// offset 1: {user: 42, event_time: "12:20:00", arrival: "13:01:00"}
+// ======================================================================
+// step 1 · the event bridges s1 and s2 -> sessions : { "s1", "s2" } -> { "sMerged": [12:00, 12:50) }   BECAUSE both gaps are within 30 min
+// step 2 · the pipeline retracts the stale panes -> session_state : { "s1": 3, "s2": 2 } -> {}   BECAUSE the earlier panes are now wrong
+// step 3 · the merged pane is emitted -> session_state : {} -> { "sMerged": 6 }   BECAUSE 3 + 2 + 1 = 6
+// ======================================================================
+// downstream : s1 3 -> s2 2 -> retraction -> sMerged 6   BECAUSE the store must show one session, not three totaling 11
+//    derivation : merged count = 3 + 2 + 1 = 6   BECAUSE s1_count + s2_count + the bridging event
 ```
 
 ## Interview Questions

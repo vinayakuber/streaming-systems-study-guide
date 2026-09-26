@@ -21,14 +21,21 @@ _Also known as: SS Ch07 · Persistent State · Checkpoint · State Store · Rock
 ```java
 // COUNT SIDE — a restart loses in-memory state but a checkpoint preserves it
 // DEF: state — the running per-key count = { 42: 10 }
-// DEF: checkpoint — a durable snapshot of state taken periodically = every 1 min
-// DEF: restart — the job restarts and resumes from the checkpoint
-// -> input : three more events for key 42 arrive, then the job restarts
-//    step 1 · fold the three events -> state : { 42: 10 } -> { 42: 13 }   BECAUSE 10 + 3 = 13
-//    step 2 · the checkpoint saves -> durable : {} -> { 42: 13 }   BECAUSE the periodic snapshot fired
-//    step 3 · the restart restores -> state : {} -> { 42: 13 }   BECAUSE the checkpoint holds the last count
-// <- outcome : after restart the count is still 13, not 0 or a full replay   BECAUSE the checkpoint persisted the fold
-//    derivation : without the checkpoint, recovery = re-read 13 events; with it, recovery = load { 42: 13 }
+// DEF: checkpoint — a durable snapshot of state taken periodically = every 60 s
+// DEF: restart — the job restarts and resumes from the checkpoint = at offset 13
+// STATE (before):
+//    count_state : { 42: 10 }
+// ======================================================================
+// offset 10: {key: 42, value: 1}
+// offset 11: {key: 42, value: 1}
+// offset 12: {key: 42, value: 1}
+// ======================================================================
+// step 1 · fold the three events -> count_state[42] : 10 -> 13   BECAUSE 10 + 3 = 13
+// step 2 · the checkpoint saves -> durable : {} -> { 42: 13 }   BECAUSE the periodic snapshot fired
+// step 3 · the restart restores -> count_state[42] : 0 -> 13   BECAUSE the checkpoint holds the last count
+// ======================================================================
+// downstream : count 10 -> fold 13 -> checkpoint 13 -> restart 13   BECAUSE the checkpoint persisted the fold, so recovery is a load not a replay
+//    derivation : replayed events saved = 13 - 3 = 10   BECAUSE only the 3 post-checkpoint events would need re-reading
 ```
 
 ### Checkpoints and state stores
@@ -46,14 +53,21 @@ _Also known as: SS Ch07 · Persistent State · Checkpoint · State Store · Rock
 ```java
 // CHECKPOINT SIDE — incremental snapshots upload only the delta, not the whole state
 // DEF: state — the full keyed store = 1000 keys
-// DEF: incremental checkpoint — uploads only keys changed since the last snapshot = 12 keys
-// DEF: delta — the set of changed keys = { key_7, key_88, key_501 }
-// -> input : 3 keys change, then the incremental checkpoint fires
-//    step 1 · the changed keys are recorded -> delta : {} -> { key_7, key_88, key_501 }
-//    step 2 · the checkpoint uploads the delta -> uploaded : 0 -> 3 keys   BECAUSE only changed keys are sent
-//    step 3 · a full snapshot comparison -> uploaded : 0 -> 1000 keys   BECAUSE it sends every key
-// <- outcome : the incremental checkpoint uploads 3 keys, the full one 1000   BECAUSE incremental uploads only the delta
-//    derivation : upload ratio = 3 / 1000, so the incremental checkpoint costs 0.3% of a full snapshot
+// DEF: incremental checkpoint — uploads only keys changed since the last snapshot = { "key_7", "key_88", "key_501" }
+// DEF: delta — the set of changed keys = { "key_7", "key_88", "key_501" }
+// STATE (before):
+//    uploaded_keys : 0
+// ======================================================================
+// offset 0: {key: "key_7", changed: true}
+// offset 1: {key: "key_88", changed: true}
+// offset 2: {key: "key_501", changed: true}
+// ======================================================================
+// step 1 · the changed keys are recorded -> delta : {} -> { "key_7", "key_88", "key_501" }   BECAUSE only three keys changed since the last snapshot
+// step 2 · the incremental checkpoint uploads the delta -> uploaded_keys : 0 -> 3   BECAUSE only changed keys are sent
+// step 3 · a full snapshot comparison -> uploaded_keys : 0 -> 1000   BECAUSE it sends every key
+// ======================================================================
+// downstream : 3 changed keys -> delta set 3 -> upload 3 -> not 1000   BECAUSE incremental uploads only the delta
+//    derivation : upload ratio = 3 / 1000 = 0.003, so the incremental checkpoint costs 0.3% of a full snapshot
 ```
 
 ### Consistency and recovery
@@ -73,14 +87,35 @@ _Also known as: SS Ch07 · Persistent State · Checkpoint · State Store · Rock
 // DEF: barrier — a marker in the stream that tells each stage to snapshot = at offset 500
 // DEF: state — the running count = { 42: 13 }
 // DEF: offset — the source position = 500
-// -> input : the barrier reaches the counting stage at offset 500
-//    step 1 · the stage snapshots its state -> snapshot : {} -> { count: { 42: 13 } }
-//    step 2 · the stage records the offset -> snapshot : { count: { 42: 13 } } -> { count: { 42: 13 }, offset: 500 }
-//    step 3 · recovery restores both -> state : {} -> { 42: 13 }, source resumes at 501   BECAUSE offset 500 was already folded
-// <- outcome : restart continues from offset 501 with count 13   BECAUSE the checkpoint paired state with its source position
-//    derivation : no double-count because offset 500 is the last folded position, so resume is 501
+// STATE (before):
+//    count_state : { 42: 13 }
+// ======================================================================
+// offset 499: {key: 42, value: 1}
+// offset 500: {key: 42, value: 1, barrier: true}
+// ======================================================================
+// step 1 · the stage snapshots its state -> snapshot : {} -> { count: { 42: 13 } }   BECAUSE the barrier says "snapshot now"
+// step 2 · the stage records the offset -> snapshot : { count: { 42: 13 } } -> { count: { 42: 13 }, offset: 500 }   BECAUSE state and position must be paired
+// step 3 · recovery restores both -> count_state : { 42: 0 } -> { 42: 13 }, source resumes at 501   BECAUSE offset 500 was already folded
+// ======================================================================
+// downstream : barrier 500 -> snapshot count 13 -> snapshot offset 500 -> resume 501   BECAUSE the checkpoint paired state with its source position
+//    derivation : resume = 500 + 1 = 501, so no record is replayed or skipped
 ```
 
+
+## Links & The Bigger Picture
+
+Concepts this chapter mentions but does not fully unpack are linked below — each pointer names the chapter where the concept is covered in depth and gives a concrete example that ties the two chapters together.
+
+- **[Chapter 4: Advanced Windowing → The window lifecycle](ch04-advanced-windowing.md#the-window-lifecycle)** — the state this chapter persists is, in a windowed pipeline, per-window state — ch04 shows where that state is born, merged, and garbage-collected.
+  - _Example:_ ch07's persisted count { 42: 13 } is the same keyed state ch04 accumulates per window; ch04's session set { s1, s2 } is exactly what a checkpoint must snapshot for recovery.
+- **[Chapter 5: Exactly-Once and Side Effects → What exactly-once means](ch05-exactly-once-and-side-effects.md#what-exactly-once-means)** — exactly-once recovery is the payoff of checkpointing — pairing state with the source offset so no record is lost or double-counted.
+  - _Example:_ ch07's checkpoint { count: {42:13}, offset: 500 } resumed at 501 is ch05's "replayable source + dedup": the offset says what was already folded, so a replay does not double-count.
+- **[Chapter 6: Streams and Tables → The duality](ch06-streams-and-tables.md#the-duality)** — a state store is the materialized table of the stream — ch06 formalizes why the running count is a table and the incoming events are the changelog.
+  - _Example:_ ch07's count state { 42: 13 } is ch06's table; the events folded into it are ch06's changelog [ +10, -3, +5 ], and the checkpoint is the materialization that survives a restart.
+- **[Chapter 8: Streaming SQL → SQL as a stream language](ch08-streaming-sql.md#sql-as-a-stream-language)** — streaming SQL state is the same state-store discipline under the hood — a GROUP BY count lives in keyed state that the engine checkpoints.
+  - _Example:_ ch07's checkpointed { 42: 13 } is ch08's result table { C1: 4 } persisted between emissions; both rely on the state store to survive a failure.
+- **[Chapter 9: Streaming Joins → Correctness and state](ch09-streaming-joins.md#correctness-and-state)** — join state is bounded and garbage-collected by the same watermark + lateness discipline that governs checkpointing — ch09 shows the buffer side.
+  - _Example:_ ch07's "bound state growth" is ch09's join buffer: rows are dropped once both watermarks pass the join window + allowed lateness, so the persisted buffer never grows without limit.
 
 ## System Design Interview
 
@@ -129,12 +164,16 @@ _Role: durable storage — holds the checkpoint bytes_
 // DEF: state — the running per-key count = { 42: 13 }
 // STATE (before):
 //    count_state : { 42: 13 }
-// -> input : the barrier reaches the processor at offset 500
-//    step 1 · the processor snapshots state -> checkpoint : {} -> { count: { 42: 13 } }
-//    step 2 · the processor records the offset -> checkpoint : { count: { 42: 13 } } -> { count: { 42: 13 }, offset: 500 }
-//    step 3 · a restart restores both -> count_state : {} -> { 42: 13 }, resume at 501   BECAUSE offset 500 was already folded
-// <- outcome : the count resumes at 13 from offset 501   BECAUSE the checkpoint paired state with its source position
-//    derivation : resume offset = checkpoint offset + 1 = 500 + 1 = 501, so no record is replayed or skipped
+// ======================================================================
+// offset 499: {key: 42, value: 1}
+// offset 500: {key: 42, value: 1, barrier: true}
+// ======================================================================
+// step 1 · the processor snapshots state -> checkpoint : {} -> { count: { 42: 13 } }   BECAUSE the barrier triggers the snapshot
+// step 2 · the processor records the offset -> checkpoint : { count: { 42: 13 } } -> { count: { 42: 13 }, offset: 500 }   BECAUSE state and offset must be paired
+// step 3 · a restart restores both -> count_state : { 42: 0 } -> { 42: 13 }, resume at 501   BECAUSE offset 500 was already folded
+// ======================================================================
+// downstream : barrier 500 -> checkpoint count 13 -> checkpoint offset 500 -> resume 501   BECAUSE the checkpoint paired state with its source position
+//    derivation : resume offset = 500 + 1 = 501, so no record is replayed or skipped
 ```
 
 ## Interview Questions
@@ -220,6 +259,7 @@ A checkpoint captures every stage's state at one logical point in the stream, al
 | 4. Incremental checkpoints | Incremental checkpoints upload only the keys that changed since the last snapshot. | Flink's incremental checkpointing for RocksDB. |
 | 5. Checkpoint barriers | A barrier flows through the stream; each stage snapshots on seeing it, producing a coherent multi-stage snapshot (Chandy-Lamport). | Flink checkpoint barriers are the production form. |
 | 6. Exactly-once recovery | Exactly-once checkpointing aligns state with source offsets so no record is lost or double-counted. | Flink's exactly-once checkpoint mode. |
+| 9. Stateless vs stateful operators | Stateless operators (map, filter) transform each record on its own and hold no state; stateful operators (group-by, window, join, dedup) hold per-key state in a state store. | A Flink map is stateless; a keyed COUNT is stateful and uses the state backend. |
 | 7. Checkpoint frequency | Frequent checkpoints shorten recovery but raise I/O; infrequent ones are cheap but replay more on restart. | A 1-minute interval is a common starting point. |
 | 8. Bound state growth | Watermarks plus allowed lateness let the pipeline garbage-collect finished window state. | Dataflow's allowed-lateness is the garbage-collection horizon. |
 
@@ -327,6 +367,15 @@ A checkpoint captures every stage's state at one logical point in the stream, al
 **In the wild.** Dataflow's allowed-lateness is the garbage-collection horizon.
 
 <a href="../diagrams/d2/card/ch07-7.png"><img src="../diagrams/d2/card/ch07-7.png" alt="8. Bound state growth" width="350"></a>
+### Scope: 9. Stateless vs stateful operators
+
+**Why.** Not every operator needs to remember anything between events, and confusing the two is how people end up assuming every streaming job stores state.
+
+**Claim.** Stateless operators (map, filter) transform each record on its own and hold no state; stateful operators (group-by, window, join, dedup) hold per-key state in a state store.
+
+**Grounding.** State exists only where the answer depends on what came before the current record.
+
+**In the wild.** A Flink map is stateless; a keyed COUNT is stateful and uses the state backend.
 
 </details>
 

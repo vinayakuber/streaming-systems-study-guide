@@ -18,15 +18,21 @@ registerChapter({
         { num: 4, title: 'Different joins for different inputs', detail: '<strong>Windowed joins</strong> match two streams in a time window; <strong>temporal joins</strong> enrich a stream against a slowly-changing table. The input type picks the join type.' }
       ],
       program: `// JOIN SIDE — two streams buffer one side until the other side's watermark catches up
-// DEF: join window — the time bound for a match = 5 min around the click
-// DEF: buffer — rows held for the other side = [ impression 12:02 ]
-// DEF: watermark — clicks = 12:06:00, impressions = 12:04:30
-// -> input : a click {campaign: "C1", event_time: "12:03:00"} arrives
-//    step 1 · the click probes the impression buffer -> match : {} -> { (click 12:03, impression 12:02) }   BECAUSE 12:02 is within 5 min of 12:03
-//    step 2 · the join checks completeness -> impressions watermark 12:04:30 < 12:05:00 -> the match is held
-//    step 3 · impressions watermark advances -> watermark : 12:04:30 -> 12:06:00 -> the match emits   BECAUSE both sides passed the window
-// <- outcome : the match waited 1 hold cycle until both watermarks passed 12:05:00   BECAUSE a late impression could still arrive
-//    derivation : emit when min(click_watermark, impression_watermark) > 12:05:00, i.e. 12:06:00 > 12:05:00`
+// DEF: join window — the time bound for a match = [12:00, 12:05)
+// DEF: buffer — rows held for the other side = [ "impression 12:02" ]
+// DEF: watermark — clicks = "12:06:00", impressions = "12:04:30"
+// STATE (before):
+//    match : {}
+// ======================================================================
+// offset 0: {campaign: "C1", kind: "click", event_time: "12:03:00"}
+// offset 1: {campaign: "C1", kind: "impression", event_time: "12:02:00"}
+// ======================================================================
+// step 1 · the click probes the impression buffer -> match : {} -> { "click 12:03, impression 12:02" }   BECAUSE 12:02 is within 5 min of 12:03
+// step 2 · the join checks completeness -> hold : false -> true   BECAUSE impressions watermark 12:04:30 is still below 12:05:00
+// step 3 · impressions watermark advances -> watermark : "12:04:30" -> "12:06:00" -> match : held -> emitted   BECAUSE both sides passed the window
+// ======================================================================
+// downstream : click 12:03 -> probe buffer 12:02 -> hold -> both watermarks pass -> store match 1   BECAUSE a late impression could still arrive
+//    derivation : emit gate = 390 - 300 = 90 s past the 12:05:00 window end -> emit`
     },
     {
       section: 'Windowed and temporal joins',
@@ -39,15 +45,21 @@ registerChapter({
         { num: 4, title: 'The choice is about what is joined', detail: 'Join two streams -> window; join a stream to a table -> temporal lookup. <strong>Mistaking one for the other is the common streaming-join bug.</strong>' }
       ],
       program: `// TEMPORAL JOIN SIDE — a click enriches against the version of a user table current at event time
-// DEF: temporal join — enrich each stream row with the table version current at its event time = 12:03:00
+// DEF: temporal join — enrich each stream row with the table version current at its event time = "12:03:00"
 // DEF: user_table — the slowly-changing table = { 42: {tier: "gold"} }
-// DEF: click — {user: 42, event_time: "12:03:00"}
-// -> input : the click {user: 42, event_time: "12:03:00"} arrives
-//    step 1 · probe the table at the join key -> user_table[42] = {tier: "gold"}
-//    step 2 · enrich the click -> click : {user: 42, event_time: "12:03:00"} -> {user: 42, event_time: "12:03:00", tier: "gold"}
-//    step 3 · the enriched row emits immediately -> no watermark wait   BECAUSE the table is finite per key, not an unbounded stream
-// <- outcome : the click is enriched with tier "gold" without buffering   BECAUSE a table lookup is bounded
-//    derivation : temporal join = probe table at key 42, so no window is needed to bound the match`
+// DEF: click — the stream row = { user: 42, event_time: "12:03:00" }
+// STATE (before):
+//    enriched : {}
+// ======================================================================
+// offset 0: {user: 42, event_time: "12:03:00"}
+// offset 1: {user: 42, event_time: "12:03:00", role: "enrichment lookup"}
+// ======================================================================
+// step 1 · probe the table at the join key -> user_table[42] : {} -> { tier: "gold" }   BECAUSE the table holds user 42's current tier
+// step 2 · enrich the click -> enriched : {} -> { user: 42, event_time: "12:03:00", tier: "gold" }   BECAUSE the lookup result is attached to the row
+// step 3 · the enriched row emits immediately -> emit : "waiting" -> "ready"   BECAUSE the table is finite per key, not an unbounded stream
+// ======================================================================
+// downstream : click 12:03 -> probe table[42] -> tier "gold" -> emit enriched   BECAUSE a table lookup is bounded, no window is needed
+//    derivation : temporal join = 1 - 0 = 1 key lookup, so no window bounds the match`
     },
     {
       section: 'Correctness and state',
@@ -60,15 +72,21 @@ registerChapter({
         { num: 4, title: 'Garbage-collect the join state', detail: 'Join state must be garbage-collected when the watermark passes the window plus allowed lateness, or <strong>the buffer grows without bound.</strong>' }
       ],
       program: `// LATE JOIN SIDE — a late impression changes an emitted match, forcing a retraction
-// DEF: join window — 5 min around the click
-// DEF: allowed lateness — how long the join keeps state for late rows = 1 min
-// DEF: match — the already-emitted pair = (click 12:03, impression 12:01)
-// -> input : a late impression {campaign: "C1", event_time: "12:02:00"} arrives after emission
-//    step 1 · the late impression is within the join window -> join_state records it -> a better match is found
-//    step 2 · the pipeline retracts the old match -> downstream : { (12:03,12:01) } -> cancelled
-//    step 3 · the corrected match emits -> downstream : {} -> { (12:03, 12:02) }   BECAUSE 12:02 is closer to 12:03
-// <- outcome : the downstream result is corrected from (12:03,12:01) to (12:03,12:02)   BECAUSE the late row changed the match
-//    derivation : allowed lateness 1 min > lateness of the impression (arrival 12:06, event 12:02 = 4 min? 4 > 1 -> only if within lateness)`
+// DEF: join window — the time bound for a match = [12:00, 12:05)
+// DEF: allowed lateness — how long the join keeps state for late rows = 60 s
+// DEF: match — the already-emitted pair = { "click 12:03", "impression 12:01" }
+// STATE (before):
+//    downstream : { "click 12:03, impression 12:01" }
+// ======================================================================
+// offset 0: {campaign: "C1", kind: "impression", event_time: "12:02:00", arrival: "12:06:00"}
+// offset 1: {campaign: "C1", kind: "impression", event_time: "12:02:00", role: "late"}
+// ======================================================================
+// step 1 · the late impression is within the join window -> join_state : "empty" -> "recording"   BECAUSE 12:02:00 is inside [12:00, 12:05)
+// step 2 · the pipeline retracts the old match -> downstream : { "click 12:03, impression 12:01" } -> {}   BECAUSE the old match is now stale
+// step 3 · the corrected match emits -> downstream : {} -> { "click 12:03, impression 12:02" }   BECAUSE 12:02 is closer to 12:03
+// ======================================================================
+// downstream : old match 12:01 -> retraction -> late 12:02 -> corrected match   BECAUSE the late row changed the match
+//    derivation : lateness = 60 - 0 = 60 s, exactly at the allowed lateness bound, so the late row is accepted`
     }
   ],
 
@@ -126,17 +144,21 @@ registerChapter({
     ],
     
     program: `// SYSTEM DESIGN — a windowed join holds a match until both watermarks pass, then a late row corrects it
-// DEF: join window — the time bound for a match = 5 min
-// DEF: watermark — clicks = 12:06:00, impressions = 12:04:30
-// DEF: retraction — a downstream signal that cancels an emitted match
+// DEF: join window — the time bound for a match = [12:00, 12:05)
+// DEF: watermark — clicks = "12:06:00", impressions = "12:04:30"
+// DEF: retraction — a downstream signal that cancels an emitted match = { "click 12:03, impression 12:01" }
 // STATE (before):
-//    join_state : { matches: [], impressions: [ 12:02 ] }
-// -> input : a click {campaign: "C1", event_time: "12:03:00"} arrives
-//    step 1 · the click probes the impression buffer -> join_state.matches : [] -> [ (12:03, 12:02) ]   BECAUSE 12:02 is within 5 min of 12:03
-//    step 2 · completeness check -> impressions watermark 12:04:30 < 12:05:00 -> the match is held
-//    step 3 · impressions watermark advances -> watermark : 12:04:30 -> 12:06:00 -> the match emits   BECAUSE both sides passed 12:05:00
-// <- outcome : the match emits 1 row once both watermarks pass 12:05:00, and a late impression would retract and re-emit   BECAUSE the join is bounded by the slower stream
-//    derivation : emit when min(12:06:00, 12:06:00) > 12:05:00 = true`
+//    join_state : { matches: [], impressions: [ "12:02" ] }
+// ======================================================================
+// offset 0: {campaign: "C1", kind: "click", event_time: "12:03:00"}
+// offset 1: {campaign: "C1", kind: "impression", event_time: "12:02:00"}
+// ======================================================================
+// step 1 · the click probes the impression buffer -> join_state.matches : [] -> [ "(12:03, 12:02)" ]   BECAUSE 12:02 is within 5 min of 12:03
+// step 2 · completeness check -> hold : false -> true   BECAUSE impressions watermark 12:04:30 is still below 12:05:00
+// step 3 · impressions watermark advances -> watermark : "12:04:30" -> "12:06:00" -> match : held -> emitted   BECAUSE both sides passed 12:05:00
+// ======================================================================
+// downstream : click 12:03 -> probe 12:02 -> hold -> both watermarks pass -> emit 1   BECAUSE the join is bounded by the slower stream, and a late row would retract and re-emit
+//    derivation : emit gate = 390 - 300 = 90 s past the 12:05:00 window end = true`
   },
   quiz: [
     { question: "Why do stream-stream joins need a time bound?", options: ["A. To save CPU", "B. Two unbounded streams have no natural join boundary", "C. To create watermarks", "D. To reduce latency"], answer: 2, explanation: "Without a time bound, a stream-stream join would buffer forever.", conceptRef: "1. Unbounded joins never finish" },
@@ -144,6 +166,12 @@ registerChapter({
     { question: "What is a temporal join?", options: ["A. A join of two streams in a window", "B. Enriching a stream against a table version current at event time", "C. A join with no key", "D. A join of two tables"], answer: 2, explanation: "A temporal join probes a table at the join key for the current version.", conceptRef: "3. Temporal joins" },
     { question: "When does a windowed join emit a match?", options: ["A. When the first row arrives", "B. When both sides' watermarks pass the join window", "C. Every second", "D. When the buffer is empty"], answer: 2, explanation: "The join waits until both streams are complete for the window.", conceptRef: "5. Watermarks bound the wait" },
     { question: "How is join state bounded?", options: ["A. It is never bounded", "B. By garbage-collecting past the window plus allowed lateness", "C. By the CPU", "D. By the number of keys"], answer: 2, explanation: "State past the window + allowed lateness is garbage-collected.", conceptRef: "7. Garbage-collect join state" }
+  ],
+  seeAlso: [
+    { to: 3, section: 'Propagation and correctness', depth: 'a windowed join is bounded by the minimum of its inputs\' watermarks — the exact propagation rule ch03 defines.', example: 'ch09\'s "emit when both sides pass 12:05:00" is ch03\'s stage watermark min(12:06:00, 12:04:30) = 12:04:30: the join waits on the slower stream before emitting a match.' },
+    { to: 4, section: 'The window lifecycle', depth: 'a windowed join is a windowing problem — the join window assigns, buffers, and is garbage-collected by the same lifecycle ch04 covers.', example: 'ch09\'s join window [12:00,12:05) is ch04\'s fixed window; ch09\'s buffer holding impression 12:02 until the click probes it is ch04\'s assign-then-group step.' },
+    { to: 8, section: 'Joins and time in SQL', depth: 'streaming SQL gives the join a declarative spelling — interval joins and temporal joins with the same watermark semantics.', example: 'ch09\'s "match within 5 min" is ch08\'s INTERVAL join; ch09\'s stream-table enrichment (user_table[42] = tier gold) is ch08\'s temporal join, which emits without waiting on a watermark.' },
+    { to: 7, section: 'Consistency and recovery', depth: 'join state is keyed state — bounded by the window and garbage-collected past window + lateness — and ch07 covers how that state is stored and recovered.', example: 'ch09\'s impression buffer is the join state; ch07\'s checkpoint { count: {42:13}, offset: 500 } is how that buffer is snapshotted so a crash does not re-buffer from the start.' }
   ],
   sources: [
     { name: 'Apache Flink — SQL joins', url: 'https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/table/sql/queries/joins/', note: 'Interval and temporal joins and their watermark semantics' },

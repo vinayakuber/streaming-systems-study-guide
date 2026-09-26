@@ -19,15 +19,22 @@ _Also known as: SS Ch02 · Beam Model · Transformations · Windowing · Trigger
 4. **Batch already answers what and where** — A classic MapReduce job also has transformations and (implicitly) windowing — the input file is one big fixed window. **The streaming model makes the window explicit and unbounded.**
 
 ```java
-// DATA SERVER SIDE — one keyed sum computed over two different window shapes gives two different answers
-// DEF: transform — the "what": sum the value of each click, keyed by user
-// DEF: window — the "where": the event-time slice the sum is computed over
-// -> click : {user: 42, amount: 10, event_time: "12:04:00"}
-//    step 1 · fixed 5-min window : the click falls in [12:00, 12:05) -> sum42 : 0 -> 10
-//    step 2 · session window (30-min gap) : the click opens a new session -> sessions42 : [] -> [s1]
-//    step 3 · all-time window : the click is added to the single global sum -> total : 0 -> 10
-// <- answer : sum(42) = 10 in every window shape, but the boundary that will later trigger output differs
-//    derivation : fixed window = 5 min = 300 s   BECAUSE fixed windows are equal, non-overlapping spans
+// DATA SERVER SIDE — one keyed sum computed over three different window shapes gives three different boundaries for the same value
+// DEF: transform — the "what": sum the amount of each click, keyed by user = { user: 42, amount: 10 }
+// DEF: fixed window — a 5-minute event-time slice = [12:00, 12:05)
+// DEF: session window — a burst of clicks separated by a 30-minute gap = [s1]
+// STATE (before):
+//    sum42 : 0
+// ======================================================================
+// offset 0: {user: 42, amount: 10, event_time: "12:04:00"}
+// offset 1: {user: 42, amount: 15, event_time: "12:09:00"}
+// ======================================================================
+// step 1 · fixed 5-min window : the first click falls in [12:00, 12:05) -> sum42 : 0 -> 10   BECAUSE 12:04:00 is inside that slice
+// step 2 · session window (30-min gap) : the second click joins the same session -> sessions42 : [] -> ["s1"]   BECAUSE 12:09:00 is only 5 minutes after 12:04:00, under the 30-minute gap
+// step 3 · all-time window : both clicks fold into the single global sum -> total : 0 -> 25   BECAUSE the window is the whole stream
+// ======================================================================
+// downstream : click 12:04:00 -> window [12:00, 12:05) -> sum 0 -> 10 -> 25   BECAUSE the transform is the same, only the window boundary changes
+//    derivation : fixed window span = 300 s = 5 * 60   BECAUSE fixed windows are equal, non-overlapping spans
 ```
 
 ### When — triggers and watermarks
@@ -44,15 +51,21 @@ _Also known as: SS Ch02 · Beam Model · Transformations · Windowing · Trigger
 
 ```java
 // STREAM SIDE — one window emits three times as time advances; the watermark drives on-time, allowed lateness bounds the rest
-// DEF: watermark — "no events with event_time < t will arrive"; current value = 12:05:00
-// DEF: allowed lateness — how long after the watermark a window still accepts stragglers = 1 min
-// DEF: trigger — the rule that emits the window result = on-time at the watermark
-// -> window : fixed [12:00, 12:05), sum so far = 3 clicks
-//    step 1 · early trigger fires at 12:02 -> emitted : {window: "12:00-12:05", sum: 3, pane: "early"}
-//    step 2 · watermark passes 12:05:00 -> on-time trigger fires -> emitted : {window: "12:00-12:05", sum: 3, pane: "on-time"}
-//    step 3 · a straggler {event_time: "12:04:59"} arrives at 12:06:00 -> inside allowed lateness -> sum : 3 -> 4, late pane emitted
-// <- answer : sum = 4 after the late pane, but 3 until it   BECAUSE allowed lateness kept the window alive for 1 min past the watermark
-//    derivation : late arrival age = 12:06:00 - 12:04:59 = 1m01s, still <= allowed lateness 1 min? 61s > 60s -> it would be dropped instead
+// DEF: watermark — "no events with event_time < t will arrive" = "12:05:00"
+// DEF: allowed lateness — how long after the watermark a window still accepts stragglers = 60 s
+// DEF: trigger — the rule that emits the window result = "on-time"
+// STATE (before):
+//    totals : { "12:00-12:05": 3 }
+// ======================================================================
+// offset 0: {event_time: "12:02:00", sum: 3, pane: "early"}
+// offset 1: {event_time: "12:04:59", pane: "late"}
+// ======================================================================
+// step 1 · early trigger fires at 12:02 -> emitted : {pane: "early"} -> {pane: "on-time", sum: 3}   BECAUSE the watermark passed 12:05:00
+// step 2 · watermark passes 12:05:00 -> on-time trigger fires -> totals["12:00-12:05"] : 3 -> 3   BECAUSE no new event changed the sum yet
+// step 3 · a straggler {event_time: "12:04:59"} arrives at 12:06:00 -> totals["12:00-12:05"] : 3 -> 4   BECAUSE 12:06:00 is inside the 60 s allowed lateness
+// ======================================================================
+// downstream : window "12:00-12:05" -> early sum 3 -> on-time sum 3 -> late sum 4   BECAUSE allowed lateness kept the window alive for 60 s past the watermark
+//    derivation : straggler delay = 60 - 0 = 60 s   BECAUSE the window ended at 12:05:00 and the straggler arrived at 12:06:00, exactly at the allowed lateness bound
 ```
 
 ### How — accumulation
@@ -61,25 +74,42 @@ _Also known as: SS Ch02 · Beam Model · Transformations · Windowing · Trigger
 
 1. **Accumulation relates panes** — The answer to "how" is the relationship between a window's successive results. **Accumulating mode adds to the previous pane; discarding mode replaces it; accumulating-and-retracting also emits a retraction so downstream can undo the old value.**
 
-2. **Why retractions exist** — If a downstream system stores the first result, a later refined result would double-count unless the old value is retracted. **Accumulating-and-retracting emits the delta and a retraction of the previous pane, so a sink can stay correct.**
+2. **Why retractions exist** — If a downstream system stores the first result, a later refined result would double-count unless the old value is retracted. **Accumulating-and-retracting emits the delta and a retraction of the previous pane, so a sink can stay correct.** The previous value is read from the operator's **keyed state** — the running fold for that key — never by re-scanning the stream, which is immutable history.
 
 3. **The four questions are a checklist** — Ask all four — what, where, when, how — of any pipeline and its behavior is fully specified. **Omit "when" and you cannot reason about latency; omit "how" and you cannot reason about correctness under refinement.**
 
 ```java
 // DATA SERVER SIDE — one window emits twice; the accumulation mode decides whether the sink's total is 3, 4, or 7
-// DEF: pane — one emitted result for the window; pane1 = {sum: 3}, pane2 = {sum: 4}
-// DEF: sink — the downstream store that persists the window result; here keyed by window id "12:00-12:05"
-// DEF: retraction — a signal that undoes pane1 so a sink can subtract it
+// DEF: pane — one emitted result for the window = { pane1: {sum: 3}, pane2: {sum: 4} }
+// DEF: sink — the downstream store that persists the window result = { "12:00-12:05": 0 }
+// DEF: retraction — a signal that undoes pane1 so a sink can subtract it = { -3 }
 // STATE (before):
 //    sink_total : { "12:00-12:05": 0 }
-// -> input : window [12:00, 12:05) emits pane1 {sum: 3}, then a late event raises it to pane2 {sum: 4}
-//    step 1 · accumulating mode -> sink_total["12:00-12:05"] : 0 -> 3, then 3 -> 7   BECAUSE each pane adds to the previous
-//    step 2 · discarding mode -> sink_total["12:00-12:05"] : 0 -> 3, then 3 -> 4   BECAUSE pane2 replaces pane1
-//    step 3 · accumulating-and-retracting mode -> sink_total["12:00-12:05"] : 0 -> 3, then 3 -> 4 via -3 +4   BECAUSE the retraction undoes pane1 before pane2 lands
-// <- correct total : 4 in discarding and retracting modes, 7 in accumulating   BECAUSE 7 double-counts the same window's two panes
+// ======================================================================
+// offset 0: {window: "12:00-12:05", pane: 1, sum: 3}
+// offset 1: {window: "12:00-12:05", pane: 2, sum: 4}
+// ======================================================================
+// step 1 · accumulating mode -> sink_total["12:00-12:05"] : 0 -> 3 -> 7   BECAUSE pane2 adds to pane1 instead of replacing it
+// step 2 · discarding mode -> sink_total["12:00-12:05"] : 0 -> 3 -> 4   BECAUSE pane2 replaces pane1
+// step 3 · accumulating-and-retracting mode -> sink_total["12:00-12:05"] : 0 -> 3 -> 4   BECAUSE the retraction undoes pane1 before pane2 lands
+// ======================================================================
+// downstream : pane1 sum 3 -> retraction -3 -> pane2 sum 4 -> total 0 -> 4   BECAUSE 7 double-counts the same window's two panes
 //    derivation : retracting total = 3 - 3 + 4 = 4   BECAUSE the retraction subtracts the old pane exactly once
 ```
 
+
+## Links & The Bigger Picture
+
+Concepts this chapter mentions but does not fully unpack are linked below — each pointer names the chapter where the concept is covered in depth and gives a concrete example that ties the two chapters together.
+
+- **[Chapter 1: Streaming 101 → Event time vs processing time](ch01-streaming-101.md#event-time-vs-processing-time)** — the "when" axis only matters because the two clocks disagree; ch01 pins down event time vs processing time and the lag between them.
+  - _Example:_ ch02's on-time trigger fires when the watermark passes the window end; ch01 explains why the watermark is needed at all — the same click at 12:00:59 processed at 12:04:11 lands in different windows under the two clocks.
+- **[Chapter 3: Watermarks → Propagation and correctness](ch03-watermarks.md#propagation-and-correctness)** — the watermark that drives this chapter's on-time trigger is defined in full in ch03 — perfect vs heuristic, the skew formula, and how it propagates as the minimum across inputs.
+  - _Example:_ ch02 says "the watermark passes 12:05:00"; ch03 shows where that number comes from — max_seen 12:08:30 − skew 120 s = 12:06:30 — and that a multi-input stage takes min(12:06:00, 12:04:30) = 12:04:30.
+- **[Chapter 4: Advanced Windowing → The window lifecycle](ch04-advanced-windowing.md#the-window-lifecycle)** — the "where" axis (windows) is named here but its full lifecycle — assign, merge, group, trigger, accumulate, garbage-collect — lives in ch04, with session merging as the canonical dynamic case.
+  - _Example:_ ch02's session window (30-min gap) opens s1; ch04 shows two sessions [12:00,12:10) and [12:40,12:50) merging into [12:00,12:50) when a bridge event lands at 12:20:00.
+- **[Chapter 6: Streams and Tables → The duality](ch06-streams-and-tables.md#the-duality)** — the "how" axis (accumulation, retractions) is the stream-table duality in motion — each pane is a changelog record, and the table is the accumulated view.
+  - _Example:_ ch02's accumulating-and-retracting mode (3 − 3 + 4 = 4) is ch06's changelog fold: retract the old value, set the new one, so a sink never double-counts.
 
 ## System Design Interview
 
@@ -123,17 +153,21 @@ _Role: aggregator/store — holds the running sum per window_
 
 ```java
 // SYSTEM DESIGN — a purchase flows through a fixed window; the watermark closes it on time, allowed lateness catches a straggler
-// DEF: purchase — the event {user: 42, amount: 10, event_time: "12:04:00"}
-// DEF: window — the fixed event-time slice [12:00, 12:05)
-// DEF: watermark — completeness signal = 12:05:00
+// DEF: purchase — the event = {user: 42, amount: 10, event_time: "12:04:00"}
+// DEF: window — the fixed event-time slice = [12:00, 12:05)
+// DEF: watermark — completeness signal = "12:05:00"
 // STATE (before):
 //    window_state : { "12:00-12:05": 0 }
-// -> input : the source emits purchase {user: 42, amount: 10, event_time: "12:04:00"}
-//    step 1 · the window assigner places it -> window_state["12:00-12:05"] : 0 -> 10   BECAUSE event time 12:04:00 is inside the window
-//    step 2 · the watermark reaches 12:05:00 -> the on-time trigger fires -> emitted {sum: 10}
-//    step 3 · a straggler {event_time: "12:04:59"} arrives -> window_state["12:00-12:05"] : 10 -> 20   BECAUSE allowed lateness still accepts it
-// <- outcome : the dashboard shows 10 on-time, then 20 after the late pane   BECAUSE accumulation refines the earlier result
-//    derivation : the window spans 12:05:00 - 12:00:00 = 5 min   BECAUSE fixed windows are equal spans
+// ======================================================================
+// offset 0: {user: 42, amount: 10, event_time: "12:04:00"}
+// offset 1: {user: 42, amount: 10, event_time: "12:04:59"}
+// ======================================================================
+// step 1 · the window assigner places the first purchase -> window_state["12:00-12:05"] : 0 -> 10   BECAUSE event time 12:04:00 is inside the window
+// step 2 · the watermark reaches 12:05:00 -> the on-time trigger fires -> emitted : {} -> {sum: 10}   BECAUSE the watermark crossed the window end
+// step 3 · a straggler {event_time: "12:04:59"} arrives -> window_state["12:00-12:05"] : 10 -> 20   BECAUSE allowed lateness still accepts it
+// ======================================================================
+// downstream : purchase 12:04:00 -> window "12:00-12:05" -> sum 0 -> 10 -> 20   BECAUSE accumulation refines the earlier result, it does not replace it
+//    derivation : window span = 60 * 5 = 300 s   BECAUSE fixed windows are equal, non-overlapping spans
 ```
 
 ## Interview Questions
@@ -311,7 +345,7 @@ Transformations are the computations — sum, filter, join, keyed aggregation �
 
 **Claim.** Accumulation modes — accumulating, discarding, accumulating-and-retracting — define how later panes relate to earlier ones.
 
-**Grounding.** Retracting mode undoes the previous pane so sinks do not double-count.
+**Grounding.** Retracting mode undoes the previous pane so sinks do not double-count; the old value is read from the operator's keyed state, not re-scanned from the stream.
 
 **In the wild.** Beam's accumulation modes are the production expression of "how".
 
