@@ -66,11 +66,16 @@ function mdEsc(s) {
 }
 
 // Split an HTML mermaid label "<b>1. Title</b><br/>description" into parts.
+// Some sources have a stray/unclosed <b>; strip any residual tag so it can't
+// leak into the |md label (D2's CommonMark rejects unclosed inline HTML).
+function stripTags(s) { return String(s).replace(/<[^>]+>/g, ''); }
 function splitHtmlLabel(raw) {
   const s = ent(raw || '').replace(/#quot;/g, '"').replace(/<br\s*\/?>/gi, '\n');
   const m = s.match(/<b>(.*?)<\/b>([\s\S]*)/i);
-  if (m) return { title: m[1].trim(), desc: m[2].replace(/^\n+/, '').trim() };
-  return { title: '', desc: s.trim() };
+  if (m) return { title: stripTags(m[1]).trim(), desc: stripTags(m[2]).replace(/^\n+/, '').trim() };
+  const mu = s.match(/<b>([\s\S]*)$/i); // leading <b> with no closing tag
+  if (mu) return { title: stripTags(mu[1]).trim(), desc: '' };
+  return { title: '', desc: stripTags(s).trim() };
 }
 
 function shapeFromPrefix(prefix) {
