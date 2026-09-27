@@ -30,9 +30,15 @@ _Also known as: SS Ch10 · Lambda Architecture · Kappa Architecture · Batch-St
 // offset 1: {event_time: "12:00:20"}
 // offset 2: {event_time: "12:00:30"}
 // ======================================================================
-// step 1 · batch run over the file -> result : { "12:00": 0 } -> { "12:00": 3 }   BECAUSE all 3 records are read before the answer
-// step 2 · streaming run over the feed -> result : { "12:00": 0 } -> { "12:00": 3 }   BECAUSE the same 3 records fold in as they arrive
-// step 3 · the only difference is the input -> mode : "bounded" -> "unbounded"   BECAUSE the computation is identical
+// step 1 · batch run over the file -> result : { "12:00": 0 } -> { "12:00": 3 }
+//    -> input  : file = [ "12:00:10", "12:00:20", "12:00:30" ], result = { "12:00": 0 }
+//    <- output : result = { "12:00": 3 }   BECAUSE all 3 records are read before the answer
+// step 2 · streaming run over the feed -> result : { "12:00": 0 } -> { "12:00": 3 }
+//    -> input  : feed = [ "12:00:10", "12:00:20", "12:00:30" ], result = { "12:00": 0 }
+//    <- output : result = { "12:00": 3 }   BECAUSE the same 3 records fold in as they arrive
+// step 3 · the only difference is the input -> mode : "bounded" -> "unbounded"
+//    -> input  : batch source = finite file, streaming source = unbounded feed
+//    <- output : mode = "unbounded"   BECAUSE the computation is identical
 // ======================================================================
 // downstream : file 3 records -> window "12:00" -> sum 0 -> 3 = stream 3 records -> sum 3   BECAUSE the windowed sum is the same over bounded and unbounded data
 //    derivation : batch = 3 - 3 = 0 extra machinery, streaming over a finite input, so one pipeline serves both modes
@@ -62,9 +68,15 @@ _Also known as: SS Ch10 · Lambda Architecture · Kappa Architecture · Batch-St
 // offset 1: {value: 1}
 // offset 2: {value: 1}
 // ======================================================================
-// step 1 · Lambda path -> the change is written in the batch layer AND the speed layer -> edits : 0 -> 2   BECAUSE two codebases must stay in sync
-// step 2 · Kappa path -> the change is written once -> edits : 0 -> 1   BECAUSE there is one codebase
-// step 3 · Kappa replays the log -> result : { "sum": 3 } -> { "distinct": 1 }   BECAUSE the same 3 records re-run through the new pipeline
+// step 1 · Lambda path -> the change is written in the batch layer AND the speed layer -> edits : 0 -> 2
+//    -> input  : change = 1, layers = [batch, speed]
+//    <- output : edits = 2   BECAUSE two codebases must stay in sync
+// step 2 · Kappa path -> the change is written once -> edits : 0 -> 1
+//    -> input  : change = 1, codebases = 1
+//    <- output : edits = 1   BECAUSE there is one codebase
+// step 3 · Kappa replays the log -> result : { "sum": 3 } -> { "distinct": 1 }
+//    -> input  : log = [ "+1", "+1", "+1" ], new pipeline = COUNT DISTINCT
+//    <- output : result = { "distinct": 1 }   BECAUSE the same 3 records re-run through the new pipeline
 // ======================================================================
 // downstream : SUM -> COUNT DISTINCT -> Lambda 2 edits -> Kappa 1 edit + replay -> result distinct 1   BECAUSE Kappa has one codebase, so nothing can drift
 //    derivation : Kappa reprocess = 3 - 3 = 0 second implementations, so replay 3 records through the one new code
@@ -94,9 +106,15 @@ _Also known as: SS Ch10 · Lambda Architecture · Kappa Architecture · Batch-St
 // offset 1: {record: "r2"}
 // offset 2: {record: "r3"}
 // ======================================================================
-// step 1 · the log is rewound to the start -> offset : 3 -> 0   BECAUSE reprocessing begins from the first record
-// step 2 · the log is replayed through v2 -> result : { "wrong_total": 4 } -> { "correct_total": 3 }   BECAUSE the fixed code folds r1, r2, r3
-// step 3 · the old v1 result is replaced -> result : { "correct_total": 3 } -> { "correct_total": 3 }   BECAUSE v2 supersedes v1
+// step 1 · the log is rewound to the start -> offset : 3 -> 0
+//    -> input  : log = [ "r1", "r2", "r3" ], current offset = 3
+//    <- output : offset = 0   BECAUSE reprocessing begins from the first record
+// step 2 · the log is replayed through v2 -> result : { "wrong_total": 4 } -> { "correct_total": 3 }
+//    -> input  : log = [ "r1", "r2", "r3" ], pipeline = "v2"
+//    <- output : result = { "correct_total": 3 }   BECAUSE the fixed code folds r1, r2, r3
+// step 3 · the old v1 result is replaced -> result : { "correct_total": 3 } -> { "correct_total": 3 }
+//    -> input  : result = { "correct_total": 3 }, active pipeline = "v2"
+//    <- output : result = { "correct_total": 3 }   BECAUSE v2 supersedes v1
 // ======================================================================
 // downstream : bug found -> log rewind 0 -> replay r1,r2,r3 -> correct_total 3   BECAUSE replay + one codebase is the Kappa pattern
 //    derivation : reprocess = 3 - 0 = 3 records folded through pipeline_v2, then the result table is swapped
@@ -169,9 +187,15 @@ _Role: replay path — recomputes history after a code change_
 // offset 1: {record: "r2"}
 // offset 2: {record: "r3"}
 // ======================================================================
-// step 1 · the log rewinds -> offset : 3 -> 0   BECAUSE reprocessing starts from the first record
-// step 2 · the log replays through v2 -> result_table : { "wrong_total": 4 } -> { "correct_total": 3 }   BECAUSE the fixed code folds r1, r2, r3
-// step 3 · the corrected result swaps in -> result_table : { "correct_total": 3 } -> { "correct_total": 3 }   BECAUSE v2 is the single codebase
+// step 1 · the log rewinds -> offset : 3 -> 0
+//    -> input  : log = [ "r1", "r2", "r3" ], current offset = 3
+//    <- output : offset = 0   BECAUSE reprocessing starts from the first record
+// step 2 · the log replays through v2 -> result_table : { "wrong_total": 4 } -> { "correct_total": 3 }
+//    -> input  : log = [ "r1", "r2", "r3" ], pipeline = "v2"
+//    <- output : result_table = { "correct_total": 3 }   BECAUSE the fixed code folds r1, r2, r3
+// step 3 · the corrected result swaps in -> result_table : { "correct_total": 3 } -> { "correct_total": 3 }
+//    -> input  : result_table = { "correct_total": 3 }, active pipeline = "v2"
+//    <- output : result_table = { "correct_total": 3 }   BECAUSE v2 is the single codebase
 // ======================================================================
 // downstream : bug found -> rewind 0 -> replay 3 records -> result 3   BECAUSE the Kappa pattern has no second implementation to keep in sync
 //    derivation : reprocess = 3 - 0 = 3 records folded through pipeline_v2, then replace the result table

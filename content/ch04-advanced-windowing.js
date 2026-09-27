@@ -27,9 +27,15 @@ registerChapter({
 // offset 0: {event_time: "12:04:00"}
 // offset 1: {event_time: "12:04:00", shape: "same click"}
 // ======================================================================
-// step 1 · fixed assignment -> fixed_count : 0 -> 1   BECAUSE 12:04:00 falls only in [12:00, 12:05)
-// step 2 · sliding assignment -> slide_count : 0 -> 3   BECAUSE 12:04:00 overlaps [12:00,12:10), [12:02,12:12), and [12:04,12:14)
-// step 3 · session assignment -> sessions : [] -> ["s1"]   BECAUSE the click opens a new burst
+// step 1 · fixed assignment -> fixed_count : 0 -> 1
+//    -> input  : click.event_time = "12:04:00", fixed span = [12:00, 12:05)
+//    <- output : fixed_count = 1   BECAUSE 12:04:00 falls only in [12:00, 12:05)
+// step 2 · sliding assignment -> slide_count : 0 -> 3
+//    -> input  : click.event_time = "12:04:00", windows = [12:00,12:10), [12:02,12:12), [12:04,12:14)
+//    <- output : slide_count = 3   BECAUSE 12:04:00 overlaps [12:00,12:10), [12:02,12:12), and [12:04,12:14)
+// step 3 · session assignment -> sessions : [] -> ["s1"]
+//    -> input  : click.event_time = "12:04:00", session gap = 30 min
+//    <- output : sessions = ["s1"]   BECAUSE the click opens a new burst
 // ======================================================================
 // downstream : dashboard reads click 12:04:00 -> fixed 1 -> sliding 3 -> session 1   BECAUSE the shapes define different boundaries for the same event
 //    derivation : sliding overlap = 3 windows = 5 - 2   BECAUSE 5 possible 10-min windows minus the 2 that end before 12:04`
@@ -54,9 +60,18 @@ registerChapter({
 // offset 0: {event_time: "12:20:00"}
 // offset 1: {event_time: "12:20:00", role: "bridge"}
 // ======================================================================
-// step 1 · the event is 10 min from s1's end and 20 min from s2's start -> gap_check : "apart" -> "bridging"   BECAUSE both distances are within the 30-min gap
-// step 2 · the merged session spans s1 and s2 -> sessions : { "s1", "s2" } -> { "sMerged": [12:00, 12:50) }   BECAUSE the bridge joins the two ends
-// step 3 · the event folds into the merged session -> sMerged_count : 0 -> 3   BECAUSE s1 + s2 + the bridging event = 3 events
+// step 1 · the event is 10 min from s1's end and 20 min from s2's start -> gap_check : "apart" -> "bridging"
+//    -> input  : event.event_time = "12:20:00", s1 = [12:00, 12:10), s2 = [12:40, 12:50), gap = 30 min
+//    decode 1a · measure the gap from the event to s1's end -> gap_to_s1 : none -> 10 min
+//    decode 1b · measure the gap from the event to s2's start -> gap_to_s2 : none -> 20 min
+//    decode 1c · compare both gaps against the 30-min threshold -> gap_check : "apart" -> "bridging"
+//    <- output : gap_check = "bridging"   BECAUSE both distances are within the 30-min gap
+// step 2 · the merged session spans s1 and s2 -> sessions : { "s1", "s2" } -> { "sMerged": [12:00, 12:50) }
+//    -> input  : s1 = [12:00, 12:10), s2 = [12:40, 12:50), gap_check = "bridging"
+//    <- output : sessions = { "sMerged": [12:00, 12:50) }   BECAUSE the bridge joins the two ends
+// step 3 · the event folds into the merged session -> sMerged_count : 0 -> 3
+//    -> input  : s1_count = 1, s2_count = 1, bridge = 1 event
+//    <- output : sMerged_count = 3   BECAUSE s1 + s2 + the bridging event = 3 events
 // ======================================================================
 // downstream : s1 [12:00,12:10) -> s2 [12:40,12:50) -> bridge 12:20:00 -> sMerged [12:00,12:50) count 3   BECAUSE the 12:20 event was inside the gap of both
 //    derivation : gap to s1 = 10 - 0 = 10 min <= 30, gap to s2 = 20 - 0 = 20 min <= 30 -> merge`
@@ -81,9 +96,15 @@ registerChapter({
 // offset 0: {event_time: "12:20:00", arrival: "13:01:00"}
 // offset 1: {event_time: "12:20:00", role: "late bridge"}
 // ======================================================================
-// step 1 · the late event bridges the gap -> sessions : { "s1", "s2" } -> { "sMerged": [12:00, 12:50) }   BECAUSE both gaps are within 30 min
-// step 2 · the pipeline emits a retraction for s1 and s2 -> downstream : { "s1": 3, "s2": 2 } -> {}   BECAUSE the earlier panes are now stale
-// step 3 · the pipeline emits the merged session -> downstream : {} -> { "sMerged": 6 }   BECAUSE 3 + 2 + 1 = 6
+// step 1 · the late event bridges the gap -> sessions : { "s1", "s2" } -> { "sMerged": [12:00, 12:50) }
+//    -> input  : event.event_time = "12:20:00", s1 = [12:00, 12:10), s2 = [12:40, 12:50)
+//    <- output : sessions = { "sMerged": [12:00, 12:50) }   BECAUSE both gaps are within 30 min
+// step 2 · the pipeline emits a retraction for s1 and s2 -> downstream : { "s1": 3, "s2": 2 } -> {}
+//    -> input  : downstream = { "s1": 3, "s2": 2 }, retraction = { "s1", "s2" }
+//    <- output : downstream = {}   BECAUSE the earlier panes are now stale
+// step 3 · the pipeline emits the merged session -> downstream : {} -> { "sMerged": 6 }
+//    -> input  : downstream = {}, merged count = 3 + 2 + 1
+//    <- output : downstream = { "sMerged": 6 }   BECAUSE 3 + 2 + 1 = 6
 // ======================================================================
 // downstream : s1 3 -> s2 2 -> retraction -> sMerged 6   BECAUSE the retractions undid s1 and s2, so the total is 6 not 11
 //    derivation : merged count = 3 + 2 + 1 = 6   BECAUSE s1_count + s2_count + the bridging event`
@@ -154,9 +175,15 @@ registerChapter({
 // offset 0: {user: 42, event_time: "12:20:00"}
 // offset 1: {user: 42, event_time: "12:20:00", arrival: "13:01:00"}
 // ======================================================================
-// step 1 · the event bridges s1 and s2 -> sessions : { "s1", "s2" } -> { "sMerged": [12:00, 12:50) }   BECAUSE both gaps are within 30 min
-// step 2 · the pipeline retracts the stale panes -> session_state : { "s1": 3, "s2": 2 } -> {}   BECAUSE the earlier panes are now wrong
-// step 3 · the merged pane is emitted -> session_state : {} -> { "sMerged": 6 }   BECAUSE 3 + 2 + 1 = 6
+// step 1 · the event bridges s1 and s2 -> sessions : { "s1", "s2" } -> { "sMerged": [12:00, 12:50) }
+//    -> input  : event.event_time = "12:20:00", s1 = [12:00, 12:10), s2 = [12:40, 12:50)
+//    <- output : sessions = { "sMerged": [12:00, 12:50) }   BECAUSE both gaps are within 30 min
+// step 2 · the pipeline retracts the stale panes -> session_state : { "s1": 3, "s2": 2 } -> {}
+//    -> input  : session_state = { "s1": 3, "s2": 2 }, retraction = { "s1", "s2" }
+//    <- output : session_state = {}   BECAUSE the earlier panes are now wrong
+// step 3 · the merged pane is emitted -> session_state : {} -> { "sMerged": 6 }
+//    -> input  : session_state = {}, merged count = 3 + 2 + 1
+//    <- output : session_state = { "sMerged": 6 }   BECAUSE 3 + 2 + 1 = 6
 // ======================================================================
 // downstream : s1 3 -> s2 2 -> retraction -> sMerged 6   BECAUSE the store must show one session, not three totaling 11
 //    derivation : merged count = 3 + 2 + 1 = 6   BECAUSE s1_count + s2_count + the bridging event`

@@ -29,9 +29,17 @@ _Also known as: SS Ch05 · Exactly-Once · Idempotency · Deduplication · Side 
 // offset 0: {id: "r7", key: 42, value: 10}
 // offset 1: {id: "r7", key: 42, value: 10, delivery: "retry"}
 // ======================================================================
-// step 1 · check the id -> delivered : false -> true   BECAUSE "r7" is not in seen
-// step 2 · record the id -> seen : { "r1", "r2", "r3" } -> { "r1", "r2", "r3", "r7" }   BECAUSE the first delivery succeeded
-// step 3 · the retry delivers the same record -> delivered : true -> true, action "pass" -> "drop"   BECAUSE "r7" is already in seen
+// step 1 · check the id -> delivered : false -> true
+//    -> input  : record.id = "r7", seen = { "r1", "r2", "r3" }
+//    decode 1a · look up record.id in seen -> found : none -> false
+//    decode 1b · set delivered from the lookup -> delivered : false -> true
+//    <- output : delivered = true   BECAUSE "r7" is not in seen
+// step 2 · record the id -> seen : { "r1", "r2", "r3" } -> { "r1", "r2", "r3", "r7" }
+//    -> input  : record.id = "r7", seen = { "r1", "r2", "r3" }
+//    <- output : seen = { "r1", "r2", "r3", "r7" }   BECAUSE the first delivery succeeded
+// step 3 · the retry delivers the same record -> delivered : true -> true, action "pass" -> "drop"
+//    -> input  : record.id = "r7", seen = { "r1", "r2", "r3", "r7" }
+//    <- output : delivered = true, action = "drop"   BECAUSE "r7" is already in seen
 // ======================================================================
 // downstream : the stage reads delivery 1 -> seen r7 -> delivery 2 -> dropped -> effect 10   BECAUSE the second delivery was a duplicate
 //    derivation : dedup = 2 - 1 = 1 effect, so the record contributes value 10 once, not 20
@@ -60,9 +68,15 @@ _Also known as: SS Ch05 · Exactly-Once · Idempotency · Deduplication · Side 
 // offset 0: {key: 42, value: 10}
 // offset 1: {key: 42, value: 10, delivery: "retry"}
 // ======================================================================
-// step 1 · first delivery, idempotent path -> balance[42] : 30 -> 10   BECAUSE SET replaces the old value
-// step 2 · retry, idempotent path -> balance[42] : 10 -> 10   BECAUSE the key is already seen, so the write is skipped and SET 10 again is the same effect
-// step 3 · counter path comparison -> balance[42] : 30 -> 40 -> 50   BECAUSE ADD 10 runs twice
+// step 1 · first delivery, idempotent path -> balance[42] : 30 -> 10
+//    -> input  : write = SET 42 -> 10, balance = { 42: 30 }
+//    <- output : balance[42] = 10   BECAUSE SET replaces the old value
+// step 2 · retry, idempotent path -> balance[42] : 10 -> 10
+//    -> input  : write = SET 42 -> 10, balance = { 42: 10 }, key = 42 already seen
+//    <- output : balance[42] = 10   BECAUSE the key is already seen, so the write is skipped and SET 10 again is the same effect
+// step 3 · counter path comparison -> balance[42] : 30 -> 40 -> 50
+//    -> input  : write = ADD 10, balance = { 42: 30 }, deliveries = 2
+//    <- output : balance[42] = 50   BECAUSE ADD 10 runs twice
 // ======================================================================
 // downstream : delivery 1 -> balance 10 -> retry -> balance 10   BECAUSE only the idempotent write tolerates the retry
 //    derivation : 2 * 10 = 20 added by ADD, but exactly-once requires 1 * 10 = 10 -> the sink must be idempotent
@@ -92,9 +106,15 @@ _Also known as: SS Ch05 · Exactly-Once · Idempotency · Deduplication · Side 
 // offset 0: {order: "order-99", amount: 10, attempt: 1}
 // offset 1: {order: "order-99", amount: 10, attempt: 2}
 // ======================================================================
-// step 1 · first attempt with the key -> card_ledger["order-99"] : 0 -> 10   BECAUSE the charge succeeds and records the key
-// step 2 · retry with the same key -> card_ledger["order-99"] : 10 -> 10   BECAUSE the external system sees order-99 already charged
-// step 3 · plain charge comparison -> card_ledger["order-99"] : 0 -> 10 -> 20   BECAUSE the retry has no key to deduplicate on
+// step 1 · first attempt with the key -> card_ledger["order-99"] : 0 -> 10
+//    -> input  : order = "order-99", amount = 10, idempotency key = "order-99"
+//    <- output : card_ledger["order-99"] = 10   BECAUSE the charge succeeds and records the key
+// step 2 · retry with the same key -> card_ledger["order-99"] : 10 -> 10
+//    -> input  : order = "order-99", amount = 10, idempotency key = "order-99"
+//    <- output : card_ledger["order-99"] = 10   BECAUSE the external system sees order-99 already charged
+// step 3 · plain charge comparison -> card_ledger["order-99"] : 0 -> 10 -> 20
+//    -> input  : order = "order-99", amount = 10, no key, attempts = 2
+//    <- output : card_ledger["order-99"] = 20   BECAUSE the retry has no key to deduplicate on
 // ======================================================================
 // downstream : attempt 1 -> charge 10 -> attempt 2 -> no-op -> balance 10   BECAUSE only the key deduplicates the side effect
 //    derivation : exactly-once = 1 * 10 = $10 charged, not 2 * 10 = $20, thanks to idempotency key order-99
@@ -165,9 +185,15 @@ _Role: external system — the outside-world effect_
 // offset 0: {id: "r7", order: "order-99", amount: 10}
 // offset 1: {id: "r7", order: "order-99", amount: 10, delivery: "retry"}
 // ======================================================================
-// step 1 · first delivery of r7 -> dedup : { "r1", "r2", "r3" } -> { "r1", "r2", "r3", "r7" }   BECAUSE r7 is new
-// step 2 · the charge succeeds -> card_ledger : 0 -> 10   BECAUSE the API sees the key order-99 as new
-// step 3 · the retry delivers r7 again -> dedup : { "r1", "r2", "r3", "r7" } -> { "r1", "r2", "r3", "r7" } -> card_ledger : 10 -> 10   BECAUSE the key is now seen
+// step 1 · first delivery of r7 -> dedup : { "r1", "r2", "r3" } -> { "r1", "r2", "r3", "r7" }
+//    -> input  : record.id = "r7", dedup = { "r1", "r2", "r3" }
+//    <- output : dedup = { "r1", "r2", "r3", "r7" }   BECAUSE r7 is new
+// step 2 · the charge succeeds -> card_ledger : 0 -> 10
+//    -> input  : order = "order-99", amount = 10, key = "order-99" new
+//    <- output : card_ledger = 10   BECAUSE the API sees the key order-99 as new
+// step 3 · the retry delivers r7 again -> dedup : { "r1", "r2", "r3", "r7" } -> { "r1", "r2", "r3", "r7" } -> card_ledger : 10 -> 10
+//    -> input  : record.id = "r7", dedup = { "r1", "r2", "r3", "r7" }, key = "order-99" seen
+//    <- output : dedup = { "r1", "r2", "r3", "r7" }, card_ledger = 10   BECAUSE the key is now seen
 // ======================================================================
 // downstream : r7 -> dedup seen -> charge 10 -> retry dropped -> balance 10   BECAUSE dedup blocked the retry and the key made the effect idempotent
 //    derivation : exactly-once = 2 - 1 = 1 charge of $10, so the retry adds nothing

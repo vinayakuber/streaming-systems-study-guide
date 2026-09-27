@@ -27,9 +27,15 @@ registerChapter({
 // offset 0: {user: 42, amount: 10, event_time: "12:04:00"}
 // offset 1: {user: 42, amount: 15, event_time: "12:09:00"}
 // ======================================================================
-// step 1 · fixed 5-min window : the first click falls in [12:00, 12:05) -> sum42 : 0 -> 10   BECAUSE 12:04:00 is inside that slice
-// step 2 · session window (30-min gap) : the second click joins the same session -> sessions42 : [] -> ["s1"]   BECAUSE 12:09:00 is only 5 minutes after 12:04:00, under the 30-minute gap
-// step 3 · all-time window : both clicks fold into the single global sum -> total : 0 -> 25   BECAUSE the window is the whole stream
+// step 1 · fixed 5-min window : the first click falls in [12:00, 12:05) -> sum42 : 0 -> 10
+//    -> input  : click.event_time = "12:04:00", window span = [12:00, 12:05)
+//    <- output : sum42 = 10   BECAUSE 12:04:00 is inside that slice
+// step 2 · session window (30-min gap) : the second click joins the same session -> sessions42 : [] -> ["s1"]
+//    -> input  : click.event_time = "12:09:00", prior click = "12:04:00", gap = 30 min
+//    <- output : sessions42 = ["s1"]   BECAUSE 12:09:00 is only 5 minutes after 12:04:00, under the 30-minute gap
+// step 3 · all-time window : both clicks fold into the single global sum -> total : 0 -> 25
+//    -> input  : amounts = [10, 15], window = all time
+//    <- output : total = 25   BECAUSE the window is the whole stream
 // ======================================================================
 // downstream : click 12:04:00 -> window [12:00, 12:05) -> sum 0 -> 10 -> 25   BECAUSE the transform is the same, only the window boundary changes
 //    derivation : fixed window span = 300 s = 5 * 60   BECAUSE fixed windows are equal, non-overlapping spans`
@@ -54,9 +60,15 @@ registerChapter({
 // offset 0: {event_time: "12:02:00", sum: 3, pane: "early"}
 // offset 1: {event_time: "12:04:59", pane: "late"}
 // ======================================================================
-// step 1 · early trigger fires at 12:02 -> emitted : {pane: "early"} -> {pane: "on-time", sum: 3}   BECAUSE the watermark passed 12:05:00
-// step 2 · watermark passes 12:05:00 -> on-time trigger fires -> totals["12:00-12:05"] : 3 -> 3   BECAUSE no new event changed the sum yet
-// step 3 · a straggler {event_time: "12:04:59"} arrives at 12:06:00 -> totals["12:00-12:05"] : 3 -> 4   BECAUSE 12:06:00 is inside the 60 s allowed lateness
+// step 1 · early trigger fires at 12:02 -> emitted : {pane: "early"} -> {pane: "on-time", sum: 3}
+//    -> input  : trigger = "early", watermark = "12:05:00", pane = {sum: 3}
+//    <- output : emitted = {pane: "on-time", sum: 3}   BECAUSE the watermark passed 12:05:00
+// step 2 · watermark passes 12:05:00 -> on-time trigger fires -> totals["12:00-12:05"] : 3 -> 3
+//    -> input  : watermark = "12:05:00", window = "12:00-12:05", totals = { "12:00-12:05": 3 }
+//    <- output : totals["12:00-12:05"] = 3   BECAUSE no new event changed the sum yet
+// step 3 · a straggler {event_time: "12:04:59"} arrives at 12:06:00 -> totals["12:00-12:05"] : 3 -> 4
+//    -> input  : straggler.event_time = "12:04:59", arrival = "12:06:00", allowed lateness = 60 s
+//    <- output : totals["12:00-12:05"] = 4   BECAUSE 12:06:00 is inside the 60 s allowed lateness
 // ======================================================================
 // downstream : window "12:00-12:05" -> early sum 3 -> on-time sum 3 -> late sum 4   BECAUSE allowed lateness kept the window alive for 60 s past the watermark
 //    derivation : straggler delay = 60 - 0 = 60 s   BECAUSE the window ended at 12:05:00 and the straggler arrived at 12:06:00, exactly at the allowed lateness bound`
@@ -80,9 +92,15 @@ registerChapter({
 // offset 0: {window: "12:00-12:05", pane: 1, sum: 3}
 // offset 1: {window: "12:00-12:05", pane: 2, sum: 4}
 // ======================================================================
-// step 1 · accumulating mode -> sink_total["12:00-12:05"] : 0 -> 3 -> 7   BECAUSE pane2 adds to pane1 instead of replacing it
-// step 2 · discarding mode -> sink_total["12:00-12:05"] : 0 -> 3 -> 4   BECAUSE pane2 replaces pane1
-// step 3 · accumulating-and-retracting mode -> sink_total["12:00-12:05"] : 0 -> 3 -> 4   BECAUSE the retraction undoes pane1 before pane2 lands
+// step 1 · accumulating mode -> sink_total["12:00-12:05"] : 0 -> 3 -> 7
+//    -> input  : pane1 = {sum: 3}, pane2 = {sum: 4}, sink_total = { "12:00-12:05": 0 }
+//    <- output : sink_total["12:00-12:05"] = 7   BECAUSE pane2 adds to pane1 instead of replacing it
+// step 2 · discarding mode -> sink_total["12:00-12:05"] : 0 -> 3 -> 4
+//    -> input  : pane1 = {sum: 3}, pane2 = {sum: 4}, sink_total = { "12:00-12:05": 0 }
+//    <- output : sink_total["12:00-12:05"] = 4   BECAUSE pane2 replaces pane1
+// step 3 · accumulating-and-retracting mode -> sink_total["12:00-12:05"] : 0 -> 3 -> 4
+//    -> input  : pane1 = {sum: 3}, pane2 = {sum: 4}, retraction = -3, sink_total = { "12:00-12:05": 0 }
+//    <- output : sink_total["12:00-12:05"] = 4   BECAUSE the retraction undoes pane1 before pane2 lands
 // ======================================================================
 // downstream : pane1 sum 3 -> retraction -3 -> pane2 sum 4 -> total 0 -> 4   BECAUSE 7 double-counts the same window's two panes
 //    derivation : retracting total = 3 - 3 + 4 = 4   BECAUSE the retraction subtracts the old pane exactly once`,
@@ -153,9 +171,15 @@ registerChapter({
 // offset 0: {user: 42, amount: 10, event_time: "12:04:00"}
 // offset 1: {user: 42, amount: 10, event_time: "12:04:59"}
 // ======================================================================
-// step 1 · the window assigner places the first purchase -> window_state["12:00-12:05"] : 0 -> 10   BECAUSE event time 12:04:00 is inside the window
-// step 2 · the watermark reaches 12:05:00 -> the on-time trigger fires -> emitted : {} -> {sum: 10}   BECAUSE the watermark crossed the window end
-// step 3 · a straggler {event_time: "12:04:59"} arrives -> window_state["12:00-12:05"] : 10 -> 20   BECAUSE allowed lateness still accepts it
+// step 1 · the window assigner places the first purchase -> window_state["12:00-12:05"] : 0 -> 10
+//    -> input  : purchase.event_time = "12:04:00", window = [12:00, 12:05)
+//    <- output : window_state["12:00-12:05"] = 10   BECAUSE event time 12:04:00 is inside the window
+// step 2 · the watermark reaches 12:05:00 -> the on-time trigger fires -> emitted : {} -> {sum: 10}
+//    -> input  : watermark = "12:05:00", window_state = { "12:00-12:05": 10 }
+//    <- output : emitted = {sum: 10}   BECAUSE the watermark crossed the window end
+// step 3 · a straggler {event_time: "12:04:59"} arrives -> window_state["12:00-12:05"] : 10 -> 20
+//    -> input  : straggler.event_time = "12:04:59", allowed lateness = 60 s
+//    <- output : window_state["12:00-12:05"] = 20   BECAUSE allowed lateness still accepts it
 // ======================================================================
 // downstream : purchase 12:04:00 -> window "12:00-12:05" -> sum 0 -> 10 -> 20   BECAUSE accumulation refines the earlier result, it does not replace it
 //    derivation : window span = 60 * 5 = 300 s   BECAUSE fixed windows are equal, non-overlapping spans`

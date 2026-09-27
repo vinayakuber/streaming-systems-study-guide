@@ -27,9 +27,15 @@ registerChapter({
 // offset 0: {campaign: "C1", click: true}
 // offset 1: {campaign: "C1", click: true}
 // ======================================================================
-// step 1 · the WHERE keeps the row -> filtered : 1 -> 1 row passes   BECAUSE the row matches the predicate
-// step 2 · the GROUP BY updates the key -> result["C1"] : 3 -> 4   BECAUSE COUNT folds the new row in
-// step 3 · the engine emits a retraction of the old row -> sink : { "C1": 3 } -> { "C1": 4 }   BECAUSE the old row is removed then the new row is added
+// step 1 · the WHERE keeps the row -> filtered : 1 -> 1 row passes
+//    -> input  : row = {campaign: "C1", click: true}, predicate = campaign = "C1"
+//    <- output : filtered = 1 row passes   BECAUSE the row matches the predicate
+// step 2 · the GROUP BY updates the key -> result["C1"] : 3 -> 4
+//    -> input  : row = {campaign: "C1"}, result = { "C1": 3 }
+//    <- output : result["C1"] = 4   BECAUSE COUNT folds the new row in
+// step 3 · the engine emits a retraction of the old row -> sink : { "C1": 3 } -> { "C1": 4 }
+//    -> input  : result = { "C1": 4 }, old row = { "C1": 3 }, retraction = { "C1": 3 }
+//    <- output : sink = { "C1": 4 }   BECAUSE the old row is removed then the new row is added
 // ======================================================================
 // downstream : click -> WHERE pass -> GROUP BY 3 -> 4 -> sink stores 4   BECAUSE the retraction replaced the old value, not added to it
 //    derivation : new count = 3 + 1 = 4`
@@ -54,9 +60,15 @@ registerChapter({
 // offset 0: {event_time: "12:04:00", campaign: "C1"}
 // offset 1: {event_time: "12:04:00", campaign: "C1", shape: "same click"}
 // ======================================================================
-// step 1 · TUMBLE assigns the click -> tumble_rows : 0 -> 1   BECAUSE 12:04:00 falls only in [12:00, 12:05)
-// step 2 · HOP assigns the click -> hop_rows : 0 -> 3   BECAUSE it overlaps [12:00,12:10), [12:02,12:12), and [12:04,12:14)
-// step 3 · the watermark at 12:06:30 closes the TUMBLE window -> emitted : {} -> { "[12:00,12:05)": 1 }   BECAUSE the window end is crossed
+// step 1 · TUMBLE assigns the click -> tumble_rows : 0 -> 1
+//    -> input  : click.event_time = "12:04:00", TUMBLE span = [12:00, 12:05)
+//    <- output : tumble_rows = 1   BECAUSE 12:04:00 falls only in [12:00, 12:05)
+// step 2 · HOP assigns the click -> hop_rows : 0 -> 3
+//    -> input  : click.event_time = "12:04:00", HOP windows = [12:00,12:10), [12:02,12:12), [12:04,12:14)
+//    <- output : hop_rows = 3   BECAUSE it overlaps [12:00,12:10), [12:02,12:12), and [12:04,12:14)
+// step 3 · the watermark at 12:06:30 closes the TUMBLE window -> emitted : {} -> { "[12:00,12:05)": 1 }
+//    -> input  : watermark = "12:06:30", window = "[12:00,12:05)", tumble_rows = 1
+//    <- output : emitted = { "[12:00,12:05)": 1 }   BECAUSE the window end is crossed
 // ======================================================================
 // downstream : click 12:04:00 -> TUMBLE 1 row -> HOP 3 rows -> watermark emits 1   BECAUSE HOP windows overlap
 //    derivation : HOP rows per event = 5 - 2 = 3   BECAUSE 5 possible 10-min windows minus the 2 that end before 12:04`
@@ -81,9 +93,17 @@ registerChapter({
 // offset 0: {campaign: "C1", kind: "click", event_time: "12:03:00"}
 // offset 1: {campaign: "C1", kind: "impression", event_time: "12:02:00"}
 // ======================================================================
-// step 1 · both rows fall in the join window -> match : {} -> { "click 12:03", "impression 12:02" }   BECAUSE both event times are inside [12:00, 12:05)
-// step 2 · the join checks completeness -> clicks_ready : false -> true, impressions_ready : false -> false   BECAUSE clicks watermark 12:06:00 passes but impressions 12:04:30 does not
-// step 3 · the match waits -> emitted_rows : 0 -> 0   BECAUSE a late impression could still arrive
+// step 1 · both rows fall in the join window -> match : {} -> { "click 12:03", "impression 12:02" }
+//    -> input  : click.event_time = "12:03:00", impression.event_time = "12:02:00", join window = [12:00, 12:05)
+//    <- output : match = { "click 12:03", "impression 12:02" }   BECAUSE both event times are inside [12:00, 12:05)
+// step 2 · the join checks completeness -> clicks_ready : false -> true, impressions_ready : false -> false
+//    -> input  : clicks watermark = "12:06:00", impressions watermark = "12:04:30", window end = "12:05:00"
+//    decode 2a · compare the clicks watermark against the window end -> clicks_ready : false -> true
+//    decode 2b · compare the impressions watermark against the window end -> impressions_ready : false -> false
+//    <- output : clicks_ready = true, impressions_ready = false   BECAUSE clicks watermark 12:06:00 passes but impressions 12:04:30 does not
+// step 3 · the match waits -> emitted_rows : 0 -> 0
+//    -> input  : clicks_ready = true, impressions_ready = false
+//    <- output : emitted_rows = 0   BECAUSE a late impression could still arrive
 // ======================================================================
 // downstream : click 12:03 -> impression 12:02 -> match held -> wait for both watermarks -> emit 1   BECAUSE the join is bounded by the slower stream
 //    derivation : min watermark = 390 - 120 = 270 s, still short of 300 s, so the join waits for impressions to reach 12:05:00`
@@ -153,9 +173,15 @@ registerChapter({
 // offset 0: {campaign: "C1", event_time: "12:04:00"}
 // offset 1: {campaign: "C1", event_time: "12:04:00", role: "late click"}
 // ======================================================================
-// step 1 · the engine folds the row -> result_table["C1"] : 3 -> 4   BECAUSE COUNT adds the new row
-// step 2 · the engine retracts the old row -> sink : { "C1": 3 } -> { "C1": 4 }   BECAUSE the value changed
-// step 3 · the watermark passes 12:05:00 -> emitted : {} -> { "[12:00,12:05)": 4 }   BECAUSE the window is complete
+// step 1 · the engine folds the row -> result_table["C1"] : 3 -> 4
+//    -> input  : row = {campaign: "C1", event_time: "12:04:00"}, result_table = { "C1": 3 }
+//    <- output : result_table["C1"] = 4   BECAUSE COUNT adds the new row
+// step 2 · the engine retracts the old row -> sink : { "C1": 3 } -> { "C1": 4 }
+//    -> input  : result_table = { "C1": 4 }, old row = { "C1": 3 }, retraction = { "C1": 3 }
+//    <- output : sink = { "C1": 4 }   BECAUSE the value changed
+// step 3 · the watermark passes 12:05:00 -> emitted : {} -> { "[12:00,12:05)": 4 }
+//    -> input  : watermark = "12:06:30", window = "[12:00,12:05)", result_table = { "C1": 4 }
+//    <- output : emitted = { "[12:00,12:05)": 4 }   BECAUSE the window is complete
 // ======================================================================
 // downstream : click 12:04:00 -> COUNT 3 -> 4 -> retract 3 -> emit 4   BECAUSE the updating query replaced the old row
 //    derivation : new count = 3 + 1 = 4`

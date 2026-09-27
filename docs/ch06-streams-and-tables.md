@@ -30,9 +30,15 @@ _Also known as: SS Ch06 · Stream-Table Duality · Change Log · Materialized Vi
 // offset 1: {op: "-3", account: 42}
 // offset 2: {op: "+5", account: 42}
 // ======================================================================
-// step 1 · append the change to the stream -> stream : [ "+10", "-3" ] -> [ "+10", "-3", "+5" ]   BECAUSE the stream is append-only history
-// step 2 · apply to the table -> table[42] : 7 -> 12   BECAUSE 7 + 5 = 12
-// step 3 · the two views stay consistent -> stream tail "+5" and table 12 describe the same account   BECAUSE the table is the running sum
+// step 1 · append the change to the stream -> stream : [ "+10", "-3" ] -> [ "+10", "-3", "+5" ]
+//    -> input  : change = "+5", stream = [ "+10", "-3" ]
+//    <- output : stream = [ "+10", "-3", "+5" ]   BECAUSE the stream is append-only history
+// step 2 · apply to the table -> table[42] : 7 -> 12
+//    -> input  : change = "+5", table[42] = 7
+//    <- output : table[42] = 12   BECAUSE 7 + 5 = 12
+// step 3 · the two views stay consistent -> stream tail "+5" and table 12 describe the same account
+//    -> input  : stream tail = "+5", table[42] = 12
+//    <- output : views consistent, stream tail "+5" = table 12   BECAUSE the table is the running sum
 // ======================================================================
 // downstream : change "+5" -> stream [ "+10", "-3", "+5" ] -> table 7 -> 12   BECAUSE the table is the fold of the stream
 //    derivation : table = 10 - 3 + 5 = 12, exactly the last value of the folded stream
@@ -61,9 +67,18 @@ _Also known as: SS Ch06 · Stream-Table Duality · Change Log · Materialized Vi
 // offset 0: {account: 42, old: 10, new: 7}
 // offset 1: {account: 42, old: 7, new: 12}
 // ======================================================================
-// step 1 · capture the change -> changelog : [ "(0,10)", "(10,7)" ] -> [ "(0,10)", "(10,7)", "(7,12)" ]   BECAUSE the database update 7 -> 12 is captured
-// step 2 · the downstream consumer folds the changelog -> table[42] : 7 -> 12   BECAUSE the last pair (7,12) sets the new value
-// step 3 · a retraction of the old value is implicit in the pair -> table[42] : 7 -> 12   BECAUSE the old 7 is replaced by the new 12
+// step 1 · capture the change -> changelog : [ "(0,10)", "(10,7)" ] -> [ "(0,10)", "(10,7)", "(7,12)" ]
+//    -> input  : table update = (old 7, new 12), changelog = [ "(0,10)", "(10,7)" ]
+//    <- output : changelog = [ "(0,10)", "(10,7)", "(7,12)" ]   BECAUSE the database update 7 -> 12 is captured
+// step 2 · the downstream consumer folds the changelog -> table[42] : 7 -> 12
+//    -> input  : changelog pair = "(7,12)", table[42] = 7
+//    decode 2a · read the new pair from the changelog -> pair : none -> "(7,12)"
+//    decode 2b · retract the old value 7 -> table[42] : 7 -> 0
+//    decode 2c · set the new value 12 -> table[42] : 0 -> 12
+//    <- output : table[42] = 12   BECAUSE the last pair (7,12) sets the new value
+// step 3 · a retraction of the old value is implicit in the pair -> table[42] : 7 -> 12
+//    -> input  : pair = "(7,12)", old = 7, new = 12
+//    <- output : table[42] = 12   BECAUSE the old 7 is replaced by the new 12
 // ======================================================================
 // downstream : database 7 -> changelog (7,12) -> fold -> table 12   BECAUSE change capture + fold = the same state
 //    derivation : fold = 10 - 10 + 7 - 7 + 12 = 12, the table value   BECAUSE each (old,new) pair retracts old then sets new
@@ -93,9 +108,17 @@ _Also known as: SS Ch06 · Stream-Table Duality · Change Log · Materialized Vi
 // offset 1: {op: "-3", account: 42}
 // offset 2: {op: "+5", account: 42}
 // ======================================================================
-// step 1 · fold events up to index 2 -> balance[42] : 0 -> 10 -> 7   BECAUSE +10 then -3
-// step 2 · the past table is materialized -> table : {} -> { 42: 7 }   BECAUSE +10 - 3 = 7
-// step 3 · fold one more event -> table[42] : 7 -> 12   BECAUSE +5 brings it to the present
+// step 1 · fold events up to index 2 -> balance[42] : 0 -> 10 -> 7
+//    -> input  : stream = [ "+10", "-3", "+5" ], fold to index 2, balance = { 42: 0 }
+//    decode 1a · apply the first event +10 -> balance[42] : 0 -> 10
+//    decode 1b · apply the second event -3 -> balance[42] : 10 -> 7
+//    <- output : balance[42] = 7   BECAUSE +10 then -3
+// step 2 · the past table is materialized -> table : {} -> { 42: 7 }
+//    -> input  : balance = { 42: 7 }, fold index = 2
+//    <- output : table = { 42: 7 }   BECAUSE +10 - 3 = 7
+// step 3 · fold one more event -> table[42] : 7 -> 12
+//    -> input  : table = { 42: 7 }, next event = "+5"
+//    <- output : table[42] = 12   BECAUSE +5 brings it to the present
 // ======================================================================
 // downstream : stream [ "+10", "-3", "+5" ] -> fold to 7 -> fold to 12   BECAUSE both are folds of the same stream
 //    derivation : table(2) = 10 - 3 = 7, and table(3) = 10 - 3 + 5 = 12
@@ -169,9 +192,18 @@ _Role: stream processor — derives tables from the stream_
 // offset 0: {account: 42, old: 7, new: 12}
 // offset 1: {account: 42, old: 7, new: 12, role: "consumer fold"}
 // ======================================================================
-// step 1 · CDC captures the change -> changelog : [ "(0,10)", "(10,7)" ] -> [ "(0,10)", "(10,7)", "(7,12)" ]   BECAUSE the database update 7 -> 12 is captured
-// step 2 · the processor folds the new pair -> account_state : { 42: 7 } -> { 42: 12 }   BECAUSE 7 + (12 - 7) = 12
-// step 3 · the derived view matches the source -> table : { 42: 7 } -> { 42: 12 }   BECAUSE the fold reproduces the database state
+// step 1 · CDC captures the change -> changelog : [ "(0,10)", "(10,7)" ] -> [ "(0,10)", "(10,7)", "(7,12)" ]
+//    -> input  : table update = (old 7, new 12), changelog = [ "(0,10)", "(10,7)" ]
+//    <- output : changelog = [ "(0,10)", "(10,7)", "(7,12)" ]   BECAUSE the database update 7 -> 12 is captured
+// step 2 · the processor folds the new pair -> account_state : { 42: 7 } -> { 42: 12 }
+//    -> input  : changelog pair = "(7,12)", account_state = { 42: 7 }
+//    decode 2a · read the new pair from the changelog -> pair : none -> "(7,12)"
+//    decode 2b · retract the old value 7 -> account_state[42] : 7 -> 0
+//    decode 2c · set the new value 12 -> account_state[42] : 0 -> 12
+//    <- output : account_state = { 42: 12 }   BECAUSE 7 + (12 - 7) = 12
+// step 3 · the derived view matches the source -> table : { 42: 7 } -> { 42: 12 }
+//    -> input  : account_state = { 42: 12 }, source table = { 42: 12 }
+//    <- output : table = { 42: 12 }   BECAUSE the fold reproduces the database state
 // ======================================================================
 // downstream : database 7 -> changelog (7,12) -> fold -> view 12   BECAUSE table and stream are dual, the two views cannot drift
 //    derivation : fold = 10 - 10 + 7 - 7 + 12 = 12, the same as the source table

@@ -27,9 +27,17 @@ registerChapter({
 // offset 7: {event_time: "12:05:01"}
 // offset 8: {event_time: "12:05:02"}
 // ======================================================================
-// step 1 · the reader consumes offset 7 in order -> watermark : "12:05:00" -> "12:05:01"   BECAUSE a single ordered log has no out-of-order arrivals
-// step 2 · the new watermark passes 12:05:00 -> window_status : "open" -> "complete"   BECAUSE 12:05:01 > 12:05:00
-// step 3 · the on-time trigger fires -> emitted : {} -> {window: "12:00-12:05", sum: 7, pane: "on-time"}   BECAUSE the window end is crossed
+// step 1 · the reader consumes offset 7 in order -> watermark : "12:05:00" -> "12:05:01"
+//    -> input  : log offset = 7, record.event_time = "12:05:01", watermark = "12:05:00"
+//    decode 1a · read the record at offset 7 -> record : none -> {event_time: "12:05:01"}
+//    decode 1b · advance the watermark to the record's event_time -> watermark : "12:05:00" -> "12:05:01"
+//    <- output : watermark = "12:05:01"   BECAUSE a single ordered log has no out-of-order arrivals
+// step 2 · the new watermark passes 12:05:00 -> window_status : "open" -> "complete"
+//    -> input  : watermark = "12:05:01", window end = "12:05:00"
+//    <- output : window_status = "complete"   BECAUSE 12:05:01 > 12:05:00
+// step 3 · the on-time trigger fires -> emitted : {} -> {window: "12:00-12:05", sum: 7, pane: "on-time"}
+//    -> input  : window_status = "complete", window = "12:00-12:05", sum = 7
+//    <- output : emitted = {window: "12:00-12:05", sum: 7, pane: "on-time"}   BECAUSE the window end is crossed
 // ======================================================================
 // downstream : record 12:05:01 -> watermark 12:05:01 -> window "12:00-12:05" -> emitted sum 7   BECAUSE a perfect watermark needs no skew
 //    derivation : perfect = 1 - 0 = 1 skew-free source   BECAUSE one ordered log has zero out-of-orderness`
@@ -54,9 +62,17 @@ registerChapter({
 // offset 0: {event_time: "12:08:30"}
 // offset 1: {event_time: "12:05:10"}
 // ======================================================================
-// step 1 · the record at offset 0 is newer -> max_seen : "12:07:00" -> "12:08:30"   BECAUSE 12:08:30 > 12:07:00
-// step 2 · recompute the watermark -> watermark : "12:05:00" -> "12:06:30"   BECAUSE 12:08:30 - 120 s skew = 12:06:30
-// step 3 · a delayed record at offset 1 arrives -> status : "on-time" -> "late"   BECAUSE 12:05:10 is older than the 12:06:30 watermark
+// step 1 · the record at offset 0 is newer -> max_seen : "12:07:00" -> "12:08:30"
+//    -> input  : record.event_time = "12:08:30", max_seen = "12:07:00"
+//    decode 1a · read the record's event_time at offset 0 -> candidate : none -> "12:08:30"
+//    decode 1b · compare candidate against max_seen -> max_seen : "12:07:00" -> "12:08:30"
+//    <- output : max_seen = "12:08:30"   BECAUSE 12:08:30 > 12:07:00
+// step 2 · recompute the watermark -> watermark : "12:05:00" -> "12:06:30"
+//    -> input  : max_seen = "12:08:30", skew = 120 s
+//    <- output : watermark = "12:06:30"   BECAUSE 12:08:30 - 120 s skew = 12:06:30
+// step 3 · a delayed record at offset 1 arrives -> status : "on-time" -> "late"
+//    -> input  : record.event_time = "12:05:10", watermark = "12:06:30"
+//    <- output : status = "late"   BECAUSE 12:05:10 is older than the 12:06:30 watermark
 // ======================================================================
 // downstream : record 12:08:30 -> max_seen 12:08:30 -> watermark 12:06:30 -> window "12:00-12:05" closed   BECAUSE the heuristic assumes no record is more than 120 s late
 //    derivation : watermark = 510 - 120 = 390 s into the hour = 12:06:30   BECAUSE 12:08:30 is 510 s and skew is 120 s`
@@ -82,9 +98,19 @@ registerChapter({
 // offset 0: {source: "input_a", watermark: "12:06:00"}
 // offset 1: {source: "input_b", watermark: "12:04:30"}
 // ======================================================================
-// step 1 · read input_a watermark -> watermark : "12:06:00" -> "12:06:00"   BECAUSE it is the only input seen so far
-// step 2 · read input_b watermark -> watermark : "12:06:00" -> "12:04:30"   BECAUSE 12:04:30 < 12:06:00
-// step 3 · the stage cannot emit a join result keyed at 12:05:00 -> emit : "ready" -> "waiting"   BECAUSE input_b may still deliver 12:05:00 records
+// step 1 · read input_a watermark -> watermark : "12:06:00" -> "12:06:00"
+//    -> input  : input_a.watermark = "12:06:00", stage watermark = "12:06:00"
+//    decode 1a · fetch the watermark from input_a -> wm_a : none -> "12:06:00"
+//    decode 1b · fold wm_a into the stage watermark (min) -> watermark : "12:06:00" -> "12:06:00"
+//    <- output : watermark = "12:06:00"   BECAUSE it is the only input seen so far
+// step 2 · read input_b watermark -> watermark : "12:06:00" -> "12:04:30"
+//    -> input  : input_b.watermark = "12:04:30", stage watermark = "12:06:00"
+//    decode 2a · fetch the watermark from input_b -> wm_b : none -> "12:04:30"
+//    decode 2b · fold wm_b into the stage watermark (min) -> watermark : "12:06:00" -> "12:04:30"
+//    <- output : watermark = "12:04:30"   BECAUSE 12:04:30 < 12:06:00
+// step 3 · the stage cannot emit a join result keyed at 12:05:00 -> emit : "ready" -> "waiting"
+//    -> input  : stage watermark = "12:04:30", join key = "12:05:00"
+//    <- output : emit = "waiting"   BECAUSE input_b may still deliver 12:05:00 records
 // ======================================================================
 // downstream : input_a "12:06:00" -> input_b "12:04:30" -> stage watermark "12:04:30" -> join "12:05:00" waits   BECAUSE completeness is bounded by the slowest input
 //    derivation : stage_watermark = 390 - 120 = 270 s into the hour = 12:04:30   BECAUSE input_b lags input_a by 120 s, and completeness is bounded by the slower source`
@@ -156,10 +182,18 @@ registerChapter({
 // offset 0: {event_time: "12:08:30"}
 // offset 1: {event_time: "12:05:10"}
 // ======================================================================
-// step 1 · max_seen updates -> max_seen : "12:07:00" -> "12:08:30"   BECAUSE the record at offset 0 is newer than anything seen
-// step 2 · the watermark recomputes -> watermark : "12:05:00" -> "12:06:30"   BECAUSE 12:08:30 - 120 s skew = 12:06:30
-// step 3 · the on-time trigger fires -> emitted : {} -> {window: "12:00-12:05", sum: 7}   BECAUSE 12:06:30 > 12:05:00
-// step 4 · a late record at offset 1 still updates -> window_state["12:00-12:05"] : 7 -> 8   BECAUSE 12:05:10 is inside allowed lateness
+// step 1 · max_seen updates -> max_seen : "12:07:00" -> "12:08:30"
+//    -> input  : record.event_time = "12:08:30", max_seen = "12:07:00"
+//    <- output : max_seen = "12:08:30"   BECAUSE the record at offset 0 is newer than anything seen
+// step 2 · the watermark recomputes -> watermark : "12:05:00" -> "12:06:30"
+//    -> input  : max_seen = "12:08:30", skew = 120 s
+//    <- output : watermark = "12:06:30"   BECAUSE 12:08:30 - 120 s skew = 12:06:30
+// step 3 · the on-time trigger fires -> emitted : {} -> {window: "12:00-12:05", sum: 7}
+//    -> input  : watermark = "12:06:30", window = "12:00-12:05", window_state = { "12:00-12:05": 7 }
+//    <- output : emitted = {window: "12:00-12:05", sum: 7}   BECAUSE 12:06:30 > 12:05:00
+// step 4 · a late record at offset 1 still updates -> window_state["12:00-12:05"] : 7 -> 8
+//    -> input  : record.event_time = "12:05:10", allowed lateness = 60 s
+//    <- output : window_state["12:00-12:05"] = 8   BECAUSE 12:05:10 is inside allowed lateness
 // ======================================================================
 // downstream : record 12:08:30 -> watermark 12:06:30 -> window "12:00-12:05" -> sum 7 -> 8   BECAUSE the straggler arrived within the 60 s lateness horizon
 //    derivation : watermark = 510 - 120 = 390 s into the hour = 12:06:30   BECAUSE 12:08:30 is 510 s and skew is 120 s`

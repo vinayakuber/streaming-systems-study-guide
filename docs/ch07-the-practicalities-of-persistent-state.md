@@ -30,9 +30,17 @@ _Also known as: SS Ch07 · Persistent State · Checkpoint · State Store · Rock
 // offset 11: {key: 42, value: 1}
 // offset 12: {key: 42, value: 1}
 // ======================================================================
-// step 1 · fold the three events -> count_state[42] : 10 -> 13   BECAUSE 10 + 3 = 13
-// step 2 · the checkpoint saves -> durable : {} -> { 42: 13 }   BECAUSE the periodic snapshot fired
-// step 3 · the restart restores -> count_state[42] : 0 -> 13   BECAUSE the checkpoint holds the last count
+// step 1 · fold the three events -> count_state[42] : 10 -> 13
+//    -> input  : events = [1, 1, 1] for key 42, count_state = { 42: 10 }
+//    <- output : count_state[42] = 13   BECAUSE 10 + 3 = 13
+// step 2 · the checkpoint saves -> durable : {} -> { 42: 13 }
+//    -> input  : count_state = { 42: 13 }, checkpoint interval = 60 s
+//    <- output : durable = { 42: 13 }   BECAUSE the periodic snapshot fired
+// step 3 · the restart restores -> count_state[42] : 0 -> 13
+//    -> input  : durable = { 42: 13 }, count_state = { 42: 0 }
+//    decode 3a · read the checkpoint value for key 42 -> saved : none -> 13
+//    decode 3b · load the saved value into count_state -> count_state[42] : 0 -> 13
+//    <- output : count_state[42] = 13   BECAUSE the checkpoint holds the last count
 // ======================================================================
 // downstream : count 10 -> fold 13 -> checkpoint 13 -> restart 13   BECAUSE the checkpoint persisted the fold, so recovery is a load not a replay
 //    derivation : replayed events saved = 13 - 3 = 10   BECAUSE only the 3 post-checkpoint events would need re-reading
@@ -62,9 +70,15 @@ _Also known as: SS Ch07 · Persistent State · Checkpoint · State Store · Rock
 // offset 1: {key: "key_88", changed: true}
 // offset 2: {key: "key_501", changed: true}
 // ======================================================================
-// step 1 · the changed keys are recorded -> delta : {} -> { "key_7", "key_88", "key_501" }   BECAUSE only three keys changed since the last snapshot
-// step 2 · the incremental checkpoint uploads the delta -> uploaded_keys : 0 -> 3   BECAUSE only changed keys are sent
-// step 3 · a full snapshot comparison -> uploaded_keys : 0 -> 1000   BECAUSE it sends every key
+// step 1 · the changed keys are recorded -> delta : {} -> { "key_7", "key_88", "key_501" }
+//    -> input  : changed keys = [ "key_7", "key_88", "key_501" ], delta = {}
+//    <- output : delta = { "key_7", "key_88", "key_501" }   BECAUSE only three keys changed since the last snapshot
+// step 2 · the incremental checkpoint uploads the delta -> uploaded_keys : 0 -> 3
+//    -> input  : delta = { "key_7", "key_88", "key_501" }, uploaded_keys = 0
+//    <- output : uploaded_keys = 3   BECAUSE only changed keys are sent
+// step 3 · a full snapshot comparison -> uploaded_keys : 0 -> 1000
+//    -> input  : full state = 1000 keys, uploaded_keys = 0
+//    <- output : uploaded_keys = 1000   BECAUSE it sends every key
 // ======================================================================
 // downstream : 3 changed keys -> delta set 3 -> upload 3 -> not 1000   BECAUSE incremental uploads only the delta
 //    derivation : upload ratio = 3 / 1000 = 0.003, so the incremental checkpoint costs 0.3% of a full snapshot
@@ -93,9 +107,18 @@ _Also known as: SS Ch07 · Persistent State · Checkpoint · State Store · Rock
 // offset 499: {key: 42, value: 1}
 // offset 500: {key: 42, value: 1, barrier: true}
 // ======================================================================
-// step 1 · the stage snapshots its state -> snapshot : {} -> { count: { 42: 13 } }   BECAUSE the barrier says "snapshot now"
-// step 2 · the stage records the offset -> snapshot : { count: { 42: 13 } } -> { count: { 42: 13 }, offset: 500 }   BECAUSE state and position must be paired
-// step 3 · recovery restores both -> count_state : { 42: 0 } -> { 42: 13 }, source resumes at 501   BECAUSE offset 500 was already folded
+// step 1 · the stage snapshots its state -> snapshot : {} -> { count: { 42: 13 } }
+//    -> input  : count_state = { 42: 13 }, barrier = true
+//    <- output : snapshot = { count: { 42: 13 } }   BECAUSE the barrier says "snapshot now"
+// step 2 · the stage records the offset -> snapshot : { count: { 42: 13 } } -> { count: { 42: 13 }, offset: 500 }
+//    -> input  : snapshot = { count: { 42: 13 } }, source offset = 500
+//    <- output : snapshot = { count: { 42: 13 }, offset: 500 }   BECAUSE state and position must be paired
+// step 3 · recovery restores both -> count_state : { 42: 0 } -> { 42: 13 }, source resumes at 501
+//    -> input  : snapshot = { count: { 42: 13 }, offset: 500 }, count_state = { 42: 0 }
+//    decode 3a · read the saved count from the snapshot -> saved_count : none -> 13
+//    decode 3b · read the saved offset from the snapshot -> saved_offset : none -> 500
+//    decode 3c · restore state and advance the source to offset + 1 -> count_state : { 42: 0 } -> { 42: 13 }, resume = 501
+//    <- output : count_state = { 42: 13 }, source resumes at 501   BECAUSE offset 500 was already folded
 // ======================================================================
 // downstream : barrier 500 -> snapshot count 13 -> snapshot offset 500 -> resume 501   BECAUSE the checkpoint paired state with its source position
 //    derivation : resume = 500 + 1 = 501, so no record is replayed or skipped
@@ -168,9 +191,18 @@ _Role: durable storage — holds the checkpoint bytes_
 // offset 499: {key: 42, value: 1}
 // offset 500: {key: 42, value: 1, barrier: true}
 // ======================================================================
-// step 1 · the processor snapshots state -> checkpoint : {} -> { count: { 42: 13 } }   BECAUSE the barrier triggers the snapshot
-// step 2 · the processor records the offset -> checkpoint : { count: { 42: 13 } } -> { count: { 42: 13 }, offset: 500 }   BECAUSE state and offset must be paired
-// step 3 · a restart restores both -> count_state : { 42: 0 } -> { 42: 13 }, resume at 501   BECAUSE offset 500 was already folded
+// step 1 · the processor snapshots state -> checkpoint : {} -> { count: { 42: 13 } }
+//    -> input  : count_state = { 42: 13 }, barrier = true
+//    <- output : checkpoint = { count: { 42: 13 } }   BECAUSE the barrier triggers the snapshot
+// step 2 · the processor records the offset -> checkpoint : { count: { 42: 13 } } -> { count: { 42: 13 }, offset: 500 }
+//    -> input  : checkpoint = { count: { 42: 13 } }, source offset = 500
+//    <- output : checkpoint = { count: { 42: 13 }, offset: 500 }   BECAUSE state and offset must be paired
+// step 3 · a restart restores both -> count_state : { 42: 0 } -> { 42: 13 }, resume at 501
+//    -> input  : checkpoint = { count: { 42: 13 }, offset: 500 }, count_state = { 42: 0 }
+//    decode 3a · read the saved count from the checkpoint -> saved_count : none -> 13
+//    decode 3b · read the saved offset from the checkpoint -> saved_offset : none -> 500
+//    decode 3c · restore state and advance the source to offset + 1 -> count_state : { 42: 0 } -> { 42: 13 }, resume = 501
+//    <- output : count_state = { 42: 13 }, resume at 501   BECAUSE offset 500 was already folded
 // ======================================================================
 // downstream : barrier 500 -> checkpoint count 13 -> checkpoint offset 500 -> resume 501   BECAUSE the checkpoint paired state with its source position
 //    derivation : resume offset = 500 + 1 = 501, so no record is replayed or skipped

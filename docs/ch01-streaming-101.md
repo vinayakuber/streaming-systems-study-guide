@@ -29,10 +29,18 @@ _Also known as: SS Ch01 · Event Time · Processing Time · Bounded vs Unbounded
 // offset 0: {user: 42, url: "/shoe/x", event_time: "12:00:59"}
 // offset 1: {user: 42, url: "/shoe/x", event_time: "12:00:59", processing_time: "12:04:11"}
 // ======================================================================
-// step 1 · the device goes offline and the queue delays the click -> lag : "12:00:59" -> "12:04:11"   BECAUSE the device was offline for 3 minutes
-// step 2 · bucket by event time -> counts["12:00"] : 0 -> 1   BECAUSE the user really clicked at 12:00:59
-// step 3 · bucket by processing time -> counts["12:04"] : 0 -> 1   BECAUSE the busy pipeline saw it at 12:04:11
-// step 4 · the watermark at 12:03:00 marks the click late -> status : "on-time" -> "straggler"   BECAUSE 12:00:59 is earlier than 12:03:00
+// step 1 · the device goes offline and the queue delays the click -> lag : "12:00:59" -> "12:04:11"
+//    -> input  : click.event_time = "12:00:59", queue delay = 3 min offline
+//    <- output : lag = "12:04:11"   BECAUSE the device was offline for 3 minutes
+// step 2 · bucket by event time -> counts["12:00"] : 0 -> 1
+//    -> input  : click.event_time = "12:00:59", counts = { "12:00": 0, "12:04": 0 }
+//    <- output : counts["12:00"] = 1   BECAUSE the user really clicked at 12:00:59
+// step 3 · bucket by processing time -> counts["12:04"] : 0 -> 1
+//    -> input  : click.processing_time = "12:04:11", counts = { "12:00": 1, "12:04": 0 }
+//    <- output : counts["12:04"] = 1   BECAUSE the busy pipeline saw it at 12:04:11
+// step 4 · the watermark at 12:03:00 marks the click late -> status : "on-time" -> "straggler"
+//    -> input  : click.event_time = "12:00:59", watermark = "12:03:00"
+//    <- output : status = "straggler"   BECAUSE 12:00:59 is earlier than 12:03:00
 // ======================================================================
 // downstream : event_time "12:00:59" -> observed "12:04:11" -> window "12:00" -> count 0 -> 1   BECAUSE event time, not processing time, is the user truth
 //    derivation : lag = 251 - 59 = 192 s   BECAUSE 12:04:11 is 251 s into the hour and 12:00:59 is 59 s
@@ -59,9 +67,18 @@ _Also known as: SS Ch01 · Event Time · Processing Time · Bounded vs Unbounded
 // offset 0: {user: 42, url: "/shoe/x", event_time: "12:00:59"}
 // offset 1: {user: 42, url: "/shoe/x", event_time: "12:00:59", processing_time: "12:04:11"}
 // ======================================================================
-// step 1 · bucket by event time -> minute_counts["12:00"] : 0 -> 1   BECAUSE the user clicked at 12:00:59
-// step 2 · bucket by processing time -> minute_counts["12:04"] : 0 -> 1   BECAUSE the pipeline saw it at 12:04:11
-// step 3 · the dashboard reads both counts -> answers : "12:00" -> "12:04" disagree   BECAUSE the two clocks are 3m12s apart
+// step 1 · bucket by event time -> minute_counts["12:00"] : 0 -> 1
+//    -> input  : click.event_time = "12:00:59", minute_counts = { "12:00": 0, "12:04": 0 }
+//    <- output : minute_counts["12:00"] = 1   BECAUSE the user clicked at 12:00:59
+// step 2 · bucket by processing time -> minute_counts["12:04"] : 0 -> 1
+//    -> input  : click.processing_time = "12:04:11", minute_counts = { "12:00": 1, "12:04": 0 }
+//    <- output : minute_counts["12:04"] = 1   BECAUSE the pipeline saw it at 12:04:11
+// step 3 · the dashboard reads both counts -> answers : "12:00" -> "12:04" disagree
+//    -> input  : minute_counts = { "12:00": 1, "12:04": 1 }, dashboard bucket keys = [ "12:00", "12:04" ]
+//    decode 3a · fetch the event-time bucket count -> event_answer : none -> 1
+//    decode 3b · fetch the processing-time bucket count -> processing_answer : none -> 1
+//    decode 3c · compare the two fetched counts -> answers : "12:00" -> "12:04" disagree
+//    <- output : answers = "12:04" disagree   BECAUSE the two clocks are 3m12s apart
 // ======================================================================
 // downstream : event_time "12:00:59" -> window "12:00" -> count 0 -> 1   BECAUSE the 12:04 count is a pipeline artifact, not the user truth
 //    derivation : lag = 251 - 59 = 192 s   BECAUSE 12:04:11 is 251 s into the hour and 12:00:59 is 59 s
@@ -90,9 +107,15 @@ _Also known as: SS Ch01 · Event Time · Processing Time · Bounded vs Unbounded
 // offset 0: {user: 42, url: "/shoe/x", ts: "12:00:59"}
 // offset 1: {user: 43, url: "/shoe/y", ts: "12:00:59"}
 // ======================================================================
-// step 1 · bounded : the click joins an 86400-event file -> count["bounded"] : 0 -> 1 at end-of-day   BECAUSE the whole day must finish first
-// step 2 · unbounded batched : the click waits for the midnight boundary -> count["batched"] : 0 -> 1 at the boundary   BECAUSE results lag by up to 24h
-// step 3 · unbounded streaming : the click is counted on arrival -> count["streaming"] : 0 -> 1 in seconds   BECAUSE no artificial boundary is waited on
+// step 1 · bounded : the click joins an 86400-event file -> count["bounded"] : 0 -> 1 at end-of-day
+//    -> input  : click.ts = "12:00:59", bounded file size = 86400 events
+//    <- output : count["bounded"] = 1 at end-of-day   BECAUSE the whole day must finish first
+// step 2 · unbounded batched : the click waits for the midnight boundary -> count["batched"] : 0 -> 1 at the boundary
+//    -> input  : click.ts = "12:00:59", chunk boundary = midnight
+//    <- output : count["batched"] = 1 at the boundary   BECAUSE results lag by up to 24h
+// step 3 · unbounded streaming : the click is counted on arrival -> count["streaming"] : 0 -> 1 in seconds
+//    -> input  : click.ts = "12:00:59", arrival = immediate
+//    <- output : count["streaming"] = 1 in seconds   BECAUSE no artificial boundary is waited on
 // ======================================================================
 // downstream : click "12:00:59" -> shape chosen -> bucket "12:00" -> count 0 -> 1   BECAUSE all three shapes agree on the value, only the streaming shape reports it live
 //    derivation : batch latency = 1 * 24 = 24 h vs streaming latency = 0 * 24 = 0 h added   BECAUSE the streaming shape waits only for the watermark
@@ -163,9 +186,17 @@ _Role: aggregator/store — holds per-window counts_
 // offset 0: {user: 42, url: "/shoe/x", event_time: "12:00:59"}
 // offset 1: {user: 42, url: "/shoe/x", event_time: "12:00:59", processing_time: "12:04:11"}
 // ======================================================================
-// step 1 · the stream queues the click -> processing_time : "12:00:59" -> "12:04:11"   BECAUSE the network delayed it
-// step 2 · the processor buckets by event time -> window_state["12:00"] : 0 -> 1   BECAUSE event time is the key
-// step 3 · the processor keys the dashboard read -> window_state["12:04"] : 0 -> 0   BECAUSE the click does not belong to 12:04
+// step 1 · the stream queues the click -> processing_time : "12:00:59" -> "12:04:11"
+//    -> input  : click.event_time = "12:00:59", network delay = 3m12s
+//    <- output : processing_time = "12:04:11"   BECAUSE the network delayed it
+// step 2 · the processor buckets by event time -> window_state["12:00"] : 0 -> 1
+//    -> input  : click.event_time = "12:00:59", window_state = { "12:00": 0, "12:04": 0 }
+//    <- output : window_state["12:00"] = 1   BECAUSE event time is the key
+// step 3 · the processor keys the dashboard read -> window_state["12:04"] : 0 -> 0
+//    -> input  : window_state = { "12:00": 1, "12:04": 0 }, dashboard key = "12:04"
+//    decode 3a · locate the processing-time bucket -> bucket : none -> "12:04"
+//    decode 3b · read that bucket's count -> window_state["12:04"] : 0 -> 0
+//    <- output : window_state["12:04"] = 0   BECAUSE the click does not belong to 12:04
 // ======================================================================
 // downstream : click "12:00:59" -> stream "12:04:11" -> window "12:00" -> count 0 -> 1   BECAUSE the dashboard reads the event-time answer, not the processing-time one
 //    derivation : lag = 251 - 59 = 192 s   BECAUSE 12:04:11 is 251 s into the hour and 12:00:59 is 59 s

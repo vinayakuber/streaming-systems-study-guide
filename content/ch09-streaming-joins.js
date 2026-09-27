@@ -27,9 +27,18 @@ registerChapter({
 // offset 0: {campaign: "C1", kind: "click", event_time: "12:03:00"}
 // offset 1: {campaign: "C1", kind: "impression", event_time: "12:02:00"}
 // ======================================================================
-// step 1 · the click probes the impression buffer -> match : {} -> { "click 12:03, impression 12:02" }   BECAUSE 12:02 is within 5 min of 12:03
-// step 2 · the join checks completeness -> hold : false -> true   BECAUSE impressions watermark 12:04:30 is still below 12:05:00
-// step 3 · impressions watermark advances -> watermark : "12:04:30" -> "12:06:00" -> match : held -> emitted   BECAUSE both sides passed the window
+// step 1 · the click probes the impression buffer -> match : {} -> { "click 12:03, impression 12:02" }
+//    -> input  : click.event_time = "12:03:00", buffer = [ "impression 12:02" ], join window = [12:00, 12:05)
+//    decode 1a · read the buffered impression at 12:02 -> candidate : none -> "impression 12:02"
+//    decode 1b · check the 5-min distance from the click -> within_window : none -> true
+//    decode 1c · form the match pair -> match : {} -> { "click 12:03, impression 12:02" }
+//    <- output : match = { "click 12:03, impression 12:02" }   BECAUSE 12:02 is within 5 min of 12:03
+// step 2 · the join checks completeness -> hold : false -> true
+//    -> input  : impressions watermark = "12:04:30", window end = "12:05:00"
+//    <- output : hold = true   BECAUSE impressions watermark 12:04:30 is still below 12:05:00
+// step 3 · impressions watermark advances -> watermark : "12:04:30" -> "12:06:00" -> match : held -> emitted
+//    -> input  : impressions watermark = "12:04:30", clicks watermark = "12:06:00"
+//    <- output : watermark = "12:06:00", match = emitted   BECAUSE both sides passed the window
 // ======================================================================
 // downstream : click 12:03 -> probe buffer 12:02 -> hold -> both watermarks pass -> store match 1   BECAUSE a late impression could still arrive
 //    derivation : emit gate = 390 - 300 = 90 s past the 12:05:00 window end -> emit`
@@ -54,9 +63,17 @@ registerChapter({
 // offset 0: {user: 42, event_time: "12:03:00"}
 // offset 1: {user: 42, event_time: "12:03:00", role: "enrichment lookup"}
 // ======================================================================
-// step 1 · probe the table at the join key -> user_table[42] : {} -> { tier: "gold" }   BECAUSE the table holds user 42's current tier
-// step 2 · enrich the click -> enriched : {} -> { user: 42, event_time: "12:03:00", tier: "gold" }   BECAUSE the lookup result is attached to the row
-// step 3 · the enriched row emits immediately -> emit : "waiting" -> "ready"   BECAUSE the table is finite per key, not an unbounded stream
+// step 1 · probe the table at the join key -> user_table[42] : {} -> { tier: "gold" }
+//    -> input  : click.user = 42, user_table = { 42: {tier: "gold"} }
+//    decode 1a · look up user_table at key 42 -> row : none -> { tier: "gold" }
+//    decode 1b · assign the row to the keyed state -> user_table[42] : {} -> { tier: "gold" }
+//    <- output : user_table[42] = { tier: "gold" }   BECAUSE the table holds user 42's current tier
+// step 2 · enrich the click -> enriched : {} -> { user: 42, event_time: "12:03:00", tier: "gold" }
+//    -> input  : click = { user: 42, event_time: "12:03:00" }, lookup = { tier: "gold" }
+//    <- output : enriched = { user: 42, event_time: "12:03:00", tier: "gold" }   BECAUSE the lookup result is attached to the row
+// step 3 · the enriched row emits immediately -> emit : "waiting" -> "ready"
+//    -> input  : enriched = { user: 42, event_time: "12:03:00", tier: "gold" }, source = finite table
+//    <- output : emit = "ready"   BECAUSE the table is finite per key, not an unbounded stream
 // ======================================================================
 // downstream : click 12:03 -> probe table[42] -> tier "gold" -> emit enriched   BECAUSE a table lookup is bounded, no window is needed
 //    derivation : temporal join = 1 - 0 = 1 key lookup, so no window bounds the match`
@@ -81,9 +98,15 @@ registerChapter({
 // offset 0: {campaign: "C1", kind: "impression", event_time: "12:02:00", arrival: "12:06:00"}
 // offset 1: {campaign: "C1", kind: "impression", event_time: "12:02:00", role: "late"}
 // ======================================================================
-// step 1 · the late impression is within the join window -> join_state : "empty" -> "recording"   BECAUSE 12:02:00 is inside [12:00, 12:05)
-// step 2 · the pipeline retracts the old match -> downstream : { "click 12:03, impression 12:01" } -> {}   BECAUSE the old match is now stale
-// step 3 · the corrected match emits -> downstream : {} -> { "click 12:03, impression 12:02" }   BECAUSE 12:02 is closer to 12:03
+// step 1 · the late impression is within the join window -> join_state : "empty" -> "recording"
+//    -> input  : impression.event_time = "12:02:00", join window = [12:00, 12:05), allowed lateness = 60 s
+//    <- output : join_state = "recording"   BECAUSE 12:02:00 is inside [12:00, 12:05)
+// step 2 · the pipeline retracts the old match -> downstream : { "click 12:03, impression 12:01" } -> {}
+//    -> input  : downstream = { "click 12:03, impression 12:01" }, retraction = { "click 12:03, impression 12:01" }
+//    <- output : downstream = {}   BECAUSE the old match is now stale
+// step 3 · the corrected match emits -> downstream : {} -> { "click 12:03, impression 12:02" }
+//    -> input  : downstream = {}, corrected match = { "click 12:03, impression 12:02" }
+//    <- output : downstream = { "click 12:03, impression 12:02" }   BECAUSE 12:02 is closer to 12:03
 // ======================================================================
 // downstream : old match 12:01 -> retraction -> late 12:02 -> corrected match   BECAUSE the late row changed the match
 //    derivation : lateness = 60 - 0 = 60 s, exactly at the allowed lateness bound, so the late row is accepted`
@@ -153,9 +176,18 @@ registerChapter({
 // offset 0: {campaign: "C1", kind: "click", event_time: "12:03:00"}
 // offset 1: {campaign: "C1", kind: "impression", event_time: "12:02:00"}
 // ======================================================================
-// step 1 · the click probes the impression buffer -> join_state.matches : [] -> [ "(12:03, 12:02)" ]   BECAUSE 12:02 is within 5 min of 12:03
-// step 2 · completeness check -> hold : false -> true   BECAUSE impressions watermark 12:04:30 is still below 12:05:00
-// step 3 · impressions watermark advances -> watermark : "12:04:30" -> "12:06:00" -> match : held -> emitted   BECAUSE both sides passed 12:05:00
+// step 1 · the click probes the impression buffer -> join_state.matches : [] -> [ "(12:03, 12:02)" ]
+//    -> input  : click.event_time = "12:03:00", impressions buffer = [ "12:02" ], join window = [12:00, 12:05)
+//    decode 1a · read the buffered impression at 12:02 -> candidate : none -> "12:02"
+//    decode 1b · check the 5-min distance from the click -> within_window : none -> true
+//    decode 1c · append the match to join_state -> join_state.matches : [] -> [ "(12:03, 12:02)" ]
+//    <- output : join_state.matches = [ "(12:03, 12:02)" ]   BECAUSE 12:02 is within 5 min of 12:03
+// step 2 · completeness check -> hold : false -> true
+//    -> input  : impressions watermark = "12:04:30", window end = "12:05:00"
+//    <- output : hold = true   BECAUSE impressions watermark 12:04:30 is still below 12:05:00
+// step 3 · impressions watermark advances -> watermark : "12:04:30" -> "12:06:00" -> match : held -> emitted
+//    -> input  : impressions watermark = "12:04:30", clicks watermark = "12:06:00"
+//    <- output : watermark = "12:06:00", match = emitted   BECAUSE both sides passed 12:05:00
 // ======================================================================
 // downstream : click 12:03 -> probe 12:02 -> hold -> both watermarks pass -> emit 1   BECAUSE the join is bounded by the slower stream, and a late row would retract and re-emit
 //    derivation : emit gate = 390 - 300 = 90 s past the 12:05:00 window end = true`
