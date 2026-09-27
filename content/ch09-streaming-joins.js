@@ -27,6 +27,11 @@ registerChapter({
 // offset 0: {campaign: "C1", kind: "click", event_time: "12:03:00"}
 // offset 1: {campaign: "C1", kind: "impression", event_time: "12:02:00"}
 // ======================================================================
+// BUILD PHASE · run once when the join opens · cost O(1)
+// step 0 · initialize the buffer and match registers -> buffer : none -> [ "impression 12:02" ], match : none -> {}
+//    -> input  : join window = [12:00, 12:05), buffered impressions = [ "impression 12:02" ]
+//    <- output : buffer = [ "impression 12:02" ], match = {}   BECAUSE one side is already buffered
+// QUERY PHASE · per arriving row · cost O(buffer)
 // step 1 · the click probes the impression buffer -> match : {} -> { "click 12:03, impression 12:02" }
 //    -> input  : click.event_time = "12:03:00", buffer = [ "impression 12:02" ], join window = [12:00, 12:05)
 //    decode 1a · read the buffered impression at 12:02 -> candidate : none -> "impression 12:02"
@@ -39,6 +44,23 @@ registerChapter({
 // step 3 · impressions watermark advances -> watermark : "12:04:30" -> "12:06:00" -> match : held -> emitted
 //    -> input  : impressions watermark = "12:04:30", clicks watermark = "12:06:00"
 //    <- output : watermark = "12:06:00", match = emitted   BECAUSE both sides passed the window
+// ======================================================================
+// COMPLEXITY:
+//    time(build)  = O(1) = one constant register write
+//    time(query)  = O(buffer) = one probe over the buffered side
+//    space(extra) = O(buffer) = one buffered row per open match
+// TRACE (click 12:03, impression 12:02, window [12:00, 12:05)):
+//    step                    | match                            | hold
+//    probe buffer 12:02      | { "click 12:03, impression 12:02" } | -
+//    impressions wm 12:04:30 | held                            | true
+//    impressions wm 12:06:00 | emitted                         | false
+// CORRECTNESS (buffered-match lemma): the click probes the buffered impression within the 5-min window — 12:02 is 1
+//    minute from 12:03 — and the match is held until both watermarks pass 12:05:00, so a later-arriving impression
+//    still finds its counterpart and no match is emitted prematurely.
+// VARIANTS (when to pick which):
+//    buffer + watermark gate -> O(buffer) query, correct (use when out-of-order rows exist)   <- THIS ONE
+//    hash-join both sides    -> O(1) query, larger memory (use when both sides buffer)
+//    immediate emit          -> O(1) query, lower latency (use when no late rows are possible)
 // ======================================================================
 // downstream : click 12:03 -> probe buffer 12:02 -> hold -> both watermarks pass -> store match 1   BECAUSE a late impression could still arrive
 //    derivation : emit gate = 390 - 300 = 90 s past the 12:05:00 window end -> emit`
@@ -63,6 +85,11 @@ registerChapter({
 // offset 0: {user: 42, event_time: "12:03:00"}
 // offset 1: {user: 42, event_time: "12:03:00", role: "enrichment lookup"}
 // ======================================================================
+// BUILD PHASE · run once when the table is loaded · cost O(1)
+// step 0 · initialize the table register -> user_table : none -> { 42: { tier: "gold" } }
+//    -> input  : the slowly-changing table = { 42: { tier: "gold" } }
+//    <- output : user_table = { 42: { tier: "gold" } }   BECAUSE the table is loaded before the stream is joined
+// QUERY PHASE · per arriving stream row · cost O(1)
 // step 1 · probe the table at the join key -> user_table[42] : {} -> { tier: "gold" }
 //    -> input  : click.user = 42, user_table = { 42: {tier: "gold"} }
 //    decode 1a · look up user_table at key 42 -> row : none -> { tier: "gold" }
@@ -74,6 +101,22 @@ registerChapter({
 // step 3 · the enriched row emits immediately -> emit : "waiting" -> "ready"
 //    -> input  : enriched = { user: 42, event_time: "12:03:00", tier: "gold" }, source = finite table
 //    <- output : emit = "ready"   BECAUSE the table is finite per key, not an unbounded stream
+// ======================================================================
+// COMPLEXITY:
+//    time(build)  = O(1) = one constant register write
+//    time(query)  = O(1) = one keyed lookup per row
+//    space(extra) = O(1) = the looked-up table cell for the key
+// TRACE (click { user: 42, event_time: "12:03:00" }):
+//    step         | user_table[42]   | enriched
+//    probe key 42 | { tier: "gold" } | {}
+//    attach tier  | { tier: "gold" } | { user: 42, event_time: "12:03:00", tier: "gold" }
+// CORRECTNESS (lookup-invariant lemma): a temporal join reads the table version current for the key — user 42 resolves
+//    to tier "gold" — and attaches it to the row, so each row is enriched exactly once and no window bounds the match
+//    because the table is finite per key.
+// VARIANTS (when to pick which):
+//    temporal lookup -> O(1) query, no window (use for stream-to-table enrichment)   <- THIS ONE
+//    windowed join   -> O(buffer) query, time-bounded (use for stream-to-stream matching)
+//    snapshot join   -> O(1) query, frozen table (use when staleness is acceptable)
 // ======================================================================
 // downstream : click 12:03 -> probe table[42] -> tier "gold" -> emit enriched   BECAUSE a table lookup is bounded, no window is needed
 //    derivation : temporal join = 1 - 0 = 1 key lookup, so no window bounds the match`
@@ -98,6 +141,11 @@ registerChapter({
 // offset 0: {campaign: "C1", kind: "impression", event_time: "12:02:00", arrival: "12:06:00"}
 // offset 1: {campaign: "C1", kind: "impression", event_time: "12:02:00", role: "late"}
 // ======================================================================
+// BUILD PHASE · run once when the first match is emitted · cost O(1)
+// step 0 · initialize the downstream register -> downstream : none -> { "click 12:03, impression 12:01" }
+//    -> input  : the already-emitted match = { "click 12:03, impression 12:01" }
+//    <- output : downstream = { "click 12:03, impression 12:01" }   BECAUSE the first match has already been stored
+// QUERY PHASE · per late row · cost O(1)
 // step 1 · the late impression is within the join window -> join_state : "empty" -> "recording"
 //    -> input  : impression.event_time = "12:02:00", join window = [12:00, 12:05), allowed lateness = 60 s
 //    <- output : join_state = "recording"   BECAUSE 12:02:00 is inside [12:00, 12:05)
@@ -107,6 +155,22 @@ registerChapter({
 // step 3 · the corrected match emits -> downstream : {} -> { "click 12:03, impression 12:02" }
 //    -> input  : downstream = {}, corrected match = { "click 12:03, impression 12:02" }
 //    <- output : downstream = { "click 12:03, impression 12:02" }   BECAUSE 12:02 is closer to 12:03
+// ======================================================================
+// COMPLEXITY:
+//    time(build)  = O(1) = one constant register write
+//    time(query)  = O(1) = one retraction + one emit per late row
+//    space(extra) = O(1) = the corrected match replaces the retracted one
+// TRACE (late impression 12:02, allowed lateness = 60 s):
+//    step           | downstream                          | state
+//    retract old    | {}                                  | recording
+//    emit corrected | { "click 12:03, impression 12:02" } | recording
+// CORRECTNESS (late-correction lemma): a late row within the join window and allowed lateness retracts the stale match
+//    before emitting the corrected one — the old 12:01 impression is retracted and the closer 12:02 impression takes
+//    its place, so the sink shows exactly one corrected match, never both.
+// VARIANTS (when to pick which):
+//    retract + re-emit -> O(1) query, correct (use when late rows change matches)   <- THIS ONE
+//    drop late rows    -> O(1) query, simpler (use when late rows are rare and low-value)
+//    hold past window  -> O(buffer) query, higher recall (use when late matches matter most)
 // ======================================================================
 // downstream : old match 12:01 -> retraction -> late 12:02 -> corrected match   BECAUSE the late row changed the match
 //    derivation : lateness = 60 - 0 = 60 s, exactly at the allowed lateness bound, so the late row is accepted`

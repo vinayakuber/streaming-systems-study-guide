@@ -27,6 +27,11 @@ registerChapter({
 // offset 0: {event_time: "12:04:00"}
 // offset 1: {event_time: "12:04:00", shape: "same click"}
 // ======================================================================
+// BUILD PHASE · run once at pipeline start · cost O(1)
+// step 0 · initialize the per-shape registers -> fixed_count : none -> 0, slide_count : none -> 0, sessions : none -> []
+//    -> input  : window definitions = fixed 5-min, sliding 10-min every 2 min, session 30-min gap
+//    <- output : fixed_count = 0, slide_count = 0, sessions = []   BECAUSE no click has been assigned yet
+// QUERY PHASE · per arriving click · cost O(sliding windows)
 // step 1 · fixed assignment -> fixed_count : 0 -> 1
 //    -> input  : click.event_time = "12:04:00", fixed span = [12:00, 12:05)
 //    <- output : fixed_count = 1   BECAUSE 12:04:00 falls only in [12:00, 12:05)
@@ -36,6 +41,24 @@ registerChapter({
 // step 3 · session assignment -> sessions : [] -> ["s1"]
 //    -> input  : click.event_time = "12:04:00", session gap = 30 min
 //    <- output : sessions = ["s1"]   BECAUSE the click opens a new burst
+// ======================================================================
+// COMPLEXITY:
+//    time(build)  = O(1) = one constant register write
+//    time(query)  = O(windows) = one check per overlapping sliding window
+//    space(extra) = O(1) integers per shape = one count register each
+// TRACE (click 12:04:00):
+//    shape    | spans                                          | count
+//    fixed    | [12:00, 12:05)                                 | 1
+//    sliding  | [12:00,12:10),[12:02,12:12),[12:04,12:14)      | 3
+//    session  | [s1]                                           | 1
+// CORRECTNESS (assignment-invariant lemma): a click is assigned to every window whose span contains its event time —
+//    12:04:00 lies in exactly one fixed span, three overlapping sliding spans, and one freshly opened session, so each
+//    shape counts the click exactly once and the three counts never disagree on the same underlying event.
+// VARIANTS (when to pick which):
+//    fixed window   -> O(1) query, non-overlapping spans (use for periodic totals)   <- THIS ONE
+//    sliding window -> O(windows) query, overlapping spans (use for moving averages)
+//    session window -> O(1) query, data-driven span (use for bursts of activity)
+//    global window  -> O(1) query, one bucket for the whole stream (use for an all-time total)
 // ======================================================================
 // downstream : dashboard reads click 12:04:00 -> fixed 1 -> sliding 3 -> session 1   BECAUSE the shapes define different boundaries for the same event
 //    derivation : sliding overlap = 3 windows = 5 - 2   BECAUSE 5 possible 10-min windows minus the 2 that end before 12:04`
@@ -60,6 +83,11 @@ registerChapter({
 // offset 0: {event_time: "12:20:00"}
 // offset 1: {event_time: "12:20:00", role: "bridge"}
 // ======================================================================
+// BUILD PHASE · run once when the two sessions are opened · cost O(1)
+// step 0 · initialize the session set and gap threshold -> sessions : none -> { "s1": [12:00, 12:10), "s2": [12:40, 12:50) }, gap : none -> 30 min
+//    -> input  : session gap = 30 min, s1 = [12:00, 12:10), s2 = [12:40, 12:50)
+//    <- output : sessions = { "s1", "s2" }, gap = 30 min   BECAUSE the two sessions are already open
+// QUERY PHASE · per arriving event · cost O(sessions)
 // step 1 · the event is 10 min from s1's end and 20 min from s2's start -> gap_check : "apart" -> "bridging"
 //    -> input  : event.event_time = "12:20:00", s1 = [12:00, 12:10), s2 = [12:40, 12:50), gap = 30 min
 //    decode 1a · measure the gap from the event to s1's end -> gap_to_s1 : none -> 10 min
@@ -72,6 +100,21 @@ registerChapter({
 // step 3 · the event folds into the merged session -> sMerged_count : 0 -> 3
 //    -> input  : s1_count = 1, s2_count = 1, bridge = 1 event
 //    <- output : sMerged_count = 3   BECAUSE s1 + s2 + the bridging event = 3 events
+// ======================================================================
+// COMPLEXITY:
+//    time(build)  = O(1) = one constant register write
+//    time(query)  = O(sessions) = one gap check per open session
+//    space(extra) = O(1) = the merged session replaces the two it joins
+// TRACE (bridge event 12:20:00, gap = 30 min):
+//    distance to s1 end | distance to s2 start | threshold | action
+//    10 min             | 20 min               | 30 min    | merge
+// CORRECTNESS (merge-invariant lemma): a session merges exactly when the bridging event sits within the gap of both
+//    neighbors — 12:20:00 is 10 min from s1's end and 20 min from s2's start, both <= 30 min, so the three collapse
+//    into one span [12:00, 12:50) and the merged count is s1 + s2 + the bridge = 3 events.
+// VARIANTS (when to pick which):
+//    gap measured to nearest end/start -> O(sessions) query, one check per neighbor (use for few sessions)   <- THIS ONE
+//    interval tree of sessions          -> O(log sessions) query (use when thousands of sessions are open)
+//    fixed window (no merge)            -> O(1) query, no dynamic span (use when boundaries must stay clock-aligned)
 // ======================================================================
 // downstream : s1 [12:00,12:10) -> s2 [12:40,12:50) -> bridge 12:20:00 -> sMerged [12:00,12:50) count 3   BECAUSE the 12:20 event was inside the gap of both
 //    derivation : gap to s1 = 10 - 0 = 10 min <= 30, gap to s2 = 20 - 0 = 20 min <= 30 -> merge`
@@ -96,6 +139,11 @@ registerChapter({
 // offset 0: {event_time: "12:20:00", arrival: "13:01:00"}
 // offset 1: {event_time: "12:20:00", role: "late bridge"}
 // ======================================================================
+// BUILD PHASE · run once when s1 and s2 are emitted · cost O(1)
+// step 0 · initialize the downstream state and retraction set -> downstream : none -> { "s1": 3, "s2": 2 }, retraction : none -> { "s1", "s2" }
+//    -> input  : already-emitted sessions = { "s1": 3, "s2": 2 }
+//    <- output : downstream = { "s1": 3, "s2": 2 }, retraction = { "s1", "s2" }   BECAUSE both panes are now stale
+// QUERY PHASE · per late event · cost O(1)
 // step 1 · the late event bridges the gap -> sessions : { "s1", "s2" } -> { "sMerged": [12:00, 12:50) }
 //    -> input  : event.event_time = "12:20:00", s1 = [12:00, 12:10), s2 = [12:40, 12:50)
 //    <- output : sessions = { "sMerged": [12:00, 12:50) }   BECAUSE both gaps are within 30 min
@@ -105,6 +153,23 @@ registerChapter({
 // step 3 · the pipeline emits the merged session -> downstream : {} -> { "sMerged": 6 }
 //    -> input  : downstream = {}, merged count = 3 + 2 + 1
 //    <- output : downstream = { "sMerged": 6 }   BECAUSE 3 + 2 + 1 = 6
+// ======================================================================
+// COMPLEXITY:
+//    time(build)  = O(1) = one constant register write
+//    time(query)  = O(1) = one retraction pass + one emit per late event
+//    space(extra) = O(1) = the merged pane replaces the two retracted ones
+// TRACE (late bridge 12:20:00):
+//    step          | downstream       | total
+//    retract s1    | { "s2": 2 }      | 2
+//    retract s2    | {}               | 0
+//    emit merged   | { "sMerged": 6 } | 6
+// CORRECTNESS (retraction-invariant lemma): a corrected merge emits retractions for exactly the panes it replaces before
+//    the merged pane lands — s1 (3) and s2 (2) are retracted, then sMerged = 3 + 2 + 1 = 6 is emitted, so the sink
+//    totals 6, never the 11 a naive double-count would produce.
+// VARIANTS (when to pick which):
+//    retract then emit -> O(1) query, sink must undo (use for an idempotent store)   <- THIS ONE
+//    emit delta only   -> O(1) query, sink applies the difference (use when the sink can add deltas)
+//    drop late data    -> O(1) query, no correction (use when late merges are rare and cost > value)
 // ======================================================================
 // downstream : s1 3 -> s2 2 -> retraction -> sMerged 6   BECAUSE the retractions undid s1 and s2, so the total is 6 not 11
 //    derivation : merged count = 3 + 2 + 1 = 6   BECAUSE s1_count + s2_count + the bridging event`

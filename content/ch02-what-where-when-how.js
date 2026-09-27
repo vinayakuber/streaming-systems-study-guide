@@ -27,6 +27,11 @@ registerChapter({
 // offset 0: {user: 42, amount: 10, event_time: "12:04:00"}
 // offset 1: {user: 42, amount: 15, event_time: "12:09:00"}
 // ======================================================================
+// BUILD PHASE · run once at pipeline start · cost O(1)
+// step 0 · initialize the per-window registers -> sum42 : none -> 0, sessions42 : none -> [], total : none -> 0
+//    -> input  : window definitions = fixed [12:00, 12:05), session 30-min gap, all-time
+//    <- output : sum42 = 0, sessions42 = [], total = 0   BECAUSE no click has been folded yet
+// QUERY PHASE · per arriving click · cost O(1)
 // step 1 · fixed 5-min window : the first click falls in [12:00, 12:05) -> sum42 : 0 -> 10
 //    -> input  : click.event_time = "12:04:00", window span = [12:00, 12:05)
 //    <- output : sum42 = 10   BECAUSE 12:04:00 is inside that slice
@@ -36,6 +41,24 @@ registerChapter({
 // step 3 · all-time window : both clicks fold into the single global sum -> total : 0 -> 25
 //    -> input  : amounts = [10, 15], window = all time
 //    <- output : total = 25   BECAUSE the window is the whole stream
+// ======================================================================
+// COMPLEXITY:
+//    time(build)  = O(1) = one constant register write
+//    time(query)  = O(1) = one window-assignment check per click
+//    space(extra) = O(1) integers per window shape = one sum register each
+// TRACE (click 12:04:00 then 12:09:00):
+//    window shape   | span            | result
+//    fixed 5-min    | [12:00, 12:05)  | sum42 = 10
+//    session 30-min | [s1]            | sessions42 = ["s1"]
+//    all-time       | whole stream    | total = 25
+// CORRECTNESS (bucket-invariant lemma): a click is assigned to exactly the windows whose span contains its event time
+//    — 12:04:00 lands in the single fixed span [12:00, 12:05), opens its own session, and joins the all-time bucket,
+//    so each shape counts the click exactly once and no click falls through or is double-counted.
+// VARIANTS (when to pick which):
+//    fixed window   -> O(1) query, equal non-overlapping spans (use for periodic totals)   <- THIS ONE
+//    session window -> O(1) query, data-driven span (use for bursts of activity)
+//    all-time       -> O(1) query, one running sum (use for a global total)
+//    sliding window -> O(windows) query, one event in many spans (use for moving averages)
 // ======================================================================
 // downstream : click 12:04:00 -> window [12:00, 12:05) -> sum 0 -> 10 -> 25   BECAUSE the transform is the same, only the window boundary changes
 //    derivation : fixed window span = 300 s = 5 * 60   BECAUSE fixed windows are equal, non-overlapping spans`

@@ -67,6 +67,11 @@ _Also known as: SS Ch06 · Stream-Table Duality · Change Log · Materialized Vi
 // offset 0: {account: 42, old: 10, new: 7}
 // offset 1: {account: 42, old: 7, new: 12}
 // ======================================================================
+// BUILD PHASE · run once when the table is materialized · cost O(1)
+// step 0 · initialize the changelog and table registers -> changelog : none -> [ "(0,10)", "(10,7)" ], table : none -> { 42: 7 }
+//    -> input  : the materialized table = { 42: 7 }, prior changelog = [ "(0,10)", "(10,7)" ]
+//    <- output : changelog = [ "(0,10)", "(10,7)" ], table = { 42: 7 }   BECAUSE capture starts from the current state
+// QUERY PHASE · per table update · cost O(1)
 // step 1 · capture the change -> changelog : [ "(0,10)", "(10,7)" ] -> [ "(0,10)", "(10,7)", "(7,12)" ]
 //    -> input  : table update = (old 7, new 12), changelog = [ "(0,10)", "(10,7)" ]
 //    <- output : changelog = [ "(0,10)", "(10,7)", "(7,12)" ]   BECAUSE the database update 7 -> 12 is captured
@@ -79,6 +84,21 @@ _Also known as: SS Ch06 · Stream-Table Duality · Change Log · Materialized Vi
 // step 3 · a retraction of the old value is implicit in the pair -> table[42] : 7 -> 12
 //    -> input  : pair = "(7,12)", old = 7, new = 12
 //    <- output : table[42] = 12   BECAUSE the old 7 is replaced by the new 12
+// ======================================================================
+// COMPLEXITY:
+//    time(build)  = O(1) = one constant register write
+//    time(query)  = O(1) = one (old, new) capture + one fold per update
+//    space(extra) = O(1) = the table register plus the appended changelog record
+// TRACE (update 7 -> 12):
+//    step           | changelog                  | table
+//    capture (7,12) | [ (0,10),(10,7),(7,12) ]   | 7
+//    fold (7,12)    | unchanged                  | 12
+// CORRECTNESS (round-trip lemma): each (old, new) pair retracts the old value and sets the new one, so folding the
+//    changelog reproduces the table — (0,10) then (10,7) then (7,12) fold to 12, exactly the value the database wrote.
+// VARIANTS (when to pick which):
+//    full (old,new) changelog -> O(1) query, reversible (use when downstream must undo updates)   <- THIS ONE
+//    new-value-only stream     -> O(1) query, smaller records (use when retraction is not needed)
+//    snapshot + delta          -> O(1) query, periodic full copy (use when the table is rebuilt infrequently)
 // ======================================================================
 // downstream : database 7 -> changelog (7,12) -> fold -> table 12   BECAUSE change capture + fold = the same state
 //    derivation : fold = 10 - 10 + 7 - 7 + 12 = 12, the table value   BECAUSE each (old,new) pair retracts old then sets new
@@ -108,6 +128,11 @@ _Also known as: SS Ch06 · Stream-Table Duality · Change Log · Materialized Vi
 // offset 1: {op: "-3", account: 42}
 // offset 2: {op: "+5", account: 42}
 // ======================================================================
+// BUILD PHASE · run once before the fold begins · cost O(1)
+// step 0 · initialize the fold register -> balance : none -> { 42: 0 }
+//    -> input  : the full changelog = [ "+10", "-3", "+5" ], balance = { 42: 0 }
+//    <- output : balance = { 42: 0 }   BECAUSE the fold starts from zero
+// QUERY PHASE · per changelog event · cost O(1)
 // step 1 · fold events up to index 2 -> balance[42] : 0 -> 10 -> 7
 //    -> input  : stream = [ "+10", "-3", "+5" ], fold to index 2, balance = { 42: 0 }
 //    decode 1a · apply the first event +10 -> balance[42] : 0 -> 10
@@ -119,6 +144,23 @@ _Also known as: SS Ch06 · Stream-Table Duality · Change Log · Materialized Vi
 // step 3 · fold one more event -> table[42] : 7 -> 12
 //    -> input  : table = { 42: 7 }, next event = "+5"
 //    <- output : table[42] = 12   BECAUSE +5 brings it to the present
+// ======================================================================
+// COMPLEXITY:
+//    time(build)  = O(1) = one constant register write
+//    time(query)  = O(1) = one add per event, or O(n) to fold the whole stream
+//    space(extra) = O(1) = the single balance register
+// TRACE (stream [ +10, -3, +5 ]):
+//    fold index | event | balance
+//    0          | +10   | 10
+//    1          | -3    | 7
+//    2          | +5    | 12
+// CORRECTNESS (fold-invariant lemma): each fold index k yields the sum of the first k events — after +10 then -3 the
+//    balance is 10 - 3 = 7, and after +5 it is 10 - 3 + 5 = 12, so any past table is the fold of the stream up to that
+//    point.
+// VARIANTS (when to pick which):
+//    eager materialize -> O(1) query, pays storage (use for hot lookups)
+//    lazy fold on read -> O(n) query, pays recompute (use for rare lookups)   <- THIS ONE
+//    checkpointed fold -> O(1) query, resume at a snapshot (use when the stream is long)
 // ======================================================================
 // downstream : stream [ "+10", "-3", "+5" ] -> fold to 7 -> fold to 12   BECAUSE both are folds of the same stream
 //    derivation : table(2) = 10 - 3 = 7, and table(3) = 10 - 3 + 5 = 12
