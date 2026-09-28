@@ -68,8 +68,17 @@ registerChapter({
         { num: 4, title: 'The watermark drives emission', detail: 'A windowed aggregate emits when the <strong>watermark passes the window end</strong>. The time attribute (event time) plus the watermark is what makes SQL results correct under out-of-order data.' }
       ],
       program: `// WINDOWED SQL SIDE — the same clicks bucketed by TUMBLE vs HOP give different row counts
+// GOAL (what this is FOR): answer "for one click at 12:04:00, how many rows does the SQL engine emit — the 1 of TUMBLE or the 3 of HOP?"
+//    THE NAIVE WAY (why the window sizes are explicit): aggregate over the whole stream with no time slice — then every click lands in one
+//    ever-growing bucket and a moving average is impossible. We replace the boundaryless GROUP BY with explicit window spans so the same
+//    click lands in 1 fixed span (TUMBLE) or 3 overlapping spans (HOP), and the count differs by construction.
 // DEF: TUMBLE — a 5-min fixed window over event time = [12:00, 12:05)
+//    WHO chose the 5-min TUMBLE size: the query author, not the data. 5 min here only so one click at 12:04:00 lands in exactly one span;
+//    production TUMBLE sizes run from 1 min to 1 hour, matching the reporting cadence.
 // DEF: HOP — a 10-min window sliding every 2 min = [12:00, 12:10)
+//    WHO chose the 10-min/2-min HOP: the query author, not the data. 10 min over 2 min here only so the 5 spans start at 12:00, 12:02, 12:04,
+//    12:06, 12:08 and exactly 3 of them (12:00, 12:02, 12:04) contain 12:04:00; production HOP windows size the slide to the reporting
+//    interval (e.g. 1 hour over 5 min).
 // DEF: click — the event = { event_time: "12:04:00", campaign: "C1" }
 // STATE (before):
 //    tumble_rows : 0
@@ -118,7 +127,13 @@ registerChapter({
         { num: 4, title: 'SQL hides the mechanics, not the semantics', detail: 'Streaming SQL still obeys the Beam model underneath — <strong>the watermark, triggers, and accumulation are configured by the engine</strong>, but the user still chooses the window and time attribute.' }
       ],
       program: `// JOIN SQL SIDE — a windowed join waits for both watermarks before emitting a match
+// GOAL (what this is FOR): answer "when does the (click 12:03, impression 12:02) match emit — the moment both rows arrive, or only after both watermarks pass 12:05:00?"
+//    THE NAIVE WAY (why the join is watermark-gated): emit on first match — then a late impression still inside [12:00,12:05) is missed
+//    and the attribution is wrong. We replace "emit on first match" with "hold until both watermarks pass the window end", so the match
+//    waits for the slower stream.
 // DEF: windowed join — match clicks and impressions whose event times are within 5 min = [12:00, 12:05)
+//    WHO chose the 5-min window: the query author, not the data. 5 min here only so click 12:03 and impression 12:02 fall inside one span;
+//    production join windows are the attribution horizon (e.g. 30 min or 24 h for click-to-conversion).
 // DEF: watermark — clicks = "12:06:00", impressions = "12:04:30"
 // DEF: match — a (click, impression) pair in the join window = { "click 12:03", "impression 12:02" }
 // STATE (before):
@@ -216,7 +231,13 @@ registerChapter({
     ],
     
     program: `// SYSTEM DESIGN — a continuous SQL query updates a campaign count as the watermark closes a TUMBLE window
+// GOAL (what this is FOR): answer "after a click at 12:04:00 and a late click both fold into campaign C1, does the query show 3 or 4, and only after the watermark closes [12:00,12:05)?"
+//    THE NAIVE WAY (why the query is windowed): COUNT every click into one ever-growing bucket — then the result is correct only at an
+//    arbitrary instant and late clicks have no defined admission. We replace the unbounded COUNT with a TUMBLE window closed by the
+//    watermark, so the count updates to 4 and emits once the window is complete.
 // DEF: continuous query — a query that runs forever = "SELECT campaign, COUNT(*) FROM clicks GROUP BY TUMBLE(event_time, 5 min), campaign"
+//    WHO chose the 5-min TUMBLE size: the query author, not the data. 5 min here only so click 12:04:00 and its late twin land in the same
+//    [12:00,12:05) span; production TUMBLE sizes match the reporting cadence (1 min to 1 hour).
 // DEF: watermark — the completeness signal = "12:06:30"
 // DEF: result — the updating output table = { "C1": 3 }
 // STATE (before):

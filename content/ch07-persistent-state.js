@@ -18,8 +18,13 @@ registerChapter({
         { num: 4, title: 'The stream is the truth, state is a cache of it', detail: 'Persistent state is a materialized fold of the stream. <strong>You can always rebuild it from the stream, but persisting it avoids the rebuild cost.</strong>' }
       ],
       program: `// COUNT SIDE — a restart loses in-memory state but a checkpoint preserves it
+// GOAL (what this is FOR): answer "after a crash, does key 42 resume at 13 or at 0?" without re-reading the whole stream.
+//    THE NAIVE WAY (why we checkpoint at all): keep the count only in memory — then a restart drops it to 0 and the job must replay every
+//    event from the start to rebuild 13. We replace the memory-only count with a periodic durable snapshot that a restart loads instead of replaying.
 // DEF: state — the running per-key count = { 42: 10 }
 // DEF: checkpoint — a durable snapshot of state taken periodically = every 60 s
+//    WHO chose the 60 s interval: the pipeline builder, not the data. 60 s here only so the three folded events (10 -> 13) are captured by
+//    one snapshot boundary; production checkpoints are every 1 to 5 minutes, trading snapshot I/O against replay time on restart.
 // DEF: restart — the job restarts and resumes from the checkpoint = at offset 13
 // STATE (before):
 //    count_state : { 42: 10 }
@@ -71,9 +76,14 @@ registerChapter({
         { num: 4, title: 'Checkpoint frequency trades cost vs recovery', detail: 'Frequent checkpoints mean <strong>short recovery but high I/O</strong>; infrequent ones mean cheap steady-state but <strong>long replay on restart</strong>. Pick the frequency for the failure budget.' }
       ],
       program: `// CHECKPOINT SIDE — incremental snapshots upload only the delta, not the whole state
+// GOAL (what this is FOR): answer "how many keys does the next checkpoint upload — all 1000, or just the 3 that changed?"
+//    THE NAIVE WAY (why we track a delta at all): snapshot the whole 1000-key store every interval — then 1000 keys are uploaded when only
+//    3 changed. We replace the full upload with a delta set of changed keys, so each checkpoint ships the 3 changed keys and not the 997 unchanged.
 // DEF: state — the full keyed store = 1000 keys
 // DEF: incremental checkpoint — uploads only keys changed since the last snapshot = { "key_7", "key_88", "key_501" }
 // DEF: delta — the set of changed keys = { "key_7", "key_88", "key_501" }
+//    WHY delta exists: without it, "what changed since the last snapshot?" has no record, so the only option is to re-upload everything.
+//    With it, the checkpoint reads the 3-entry delta and uploads 3 keys, and a restart rebuilds the full state from the prior snapshot + delta.
 // STATE (before):
 //    uploaded_keys : 0
 // ======================================================================
@@ -122,9 +132,15 @@ registerChapter({
         { num: 4, title: 'State grows, so bound it', detail: 'Windows that never close and keys that never expire grow state forever. <strong>Watermarks + allowed lateness are what let the pipeline garbage-collect state.</strong>' }
       ],
       program: `// BARRIER SIDE — a checkpoint barrier snapshots state and offset at one logical point
+// GOAL (what this is FOR): answer "after a crash, does key 42 resume at 13 with no record lost or double-counted?"
+//    THE NAIVE WAY (why we pair state with offset): snapshot the count alone, without the source position — then a restart restores 13 but
+//    has no idea which records were already folded, so it replays offset 500 (double-count) or skips it (loses one). We replace "state alone"
+//    with a { state, offset } pair, so restart resumes at offset + 1 = 501.
 // DEF: barrier — a marker in the stream that tells each stage to snapshot = at offset 500
 // DEF: state — the running count = { 42: 13 }
 // DEF: offset — the source position = 500
+//    WHY the state+offset pair exists: without it, "where in the stream was this count taken?" is unanswerable; with it, resume = 500 + 1
+//    = 501, replaying neither offset 500 nor skipping offset 501.
 // STATE (before):
 //    count_state : { 42: 13 }
 // ======================================================================
@@ -222,8 +238,13 @@ registerChapter({
     ],
     
     program: `// SYSTEM DESIGN — a barrier snapshots state and offset so a restart resumes without loss or double-count
+// GOAL (what this is FOR): answer "after a crash at offset 500, does key 42 resume at 13 with no record lost or double-counted?"
+//    THE NAIVE WAY (why the checkpoint is a pair): snapshot state alone without the offset — then a restart restores 13 but must guess
+//    where the source stopped, so it replays or skips records. We replace "state alone" with a { state, offset } pair, so resume = 500 + 1 = 501.
 // DEF: barrier — the marker that triggers a snapshot = at offset 500
 // DEF: checkpoint — a durable snapshot of { state, offset } = { count: { 42: 13 }, offset: 500 }
+//    WHY the state+offset pair exists: without it, "where in the stream was this count taken?" is unanswerable; with it, offset 500 was
+//    already folded into 13, so restart resumes at 501 and neither replays 500 nor skips 501.
 // DEF: state — the running per-key count = { 42: 13 }
 // STATE (before):
 //    count_state : { 42: 13 }

@@ -18,9 +18,17 @@ registerChapter({
         { num: 4, title: 'Batch already answers what and where', detail: 'A classic MapReduce job also has transformations and (implicitly) windowing — the input file is one big fixed window. <strong>The streaming model makes the window explicit and unbounded.</strong>' }
       ],
       program: `// DATA SERVER SIDE — one keyed sum computed over three different window shapes gives three different boundaries for the same value
+// GOAL (what this is FOR): answer "which event-time slice does a click at 12:04:00 fall into?" so the same sum has a well-defined boundary per shape.
+//    THE NAIVE WAY (why we window at all): fold every click into one all-time total — then "how many per 5 minutes" is unanswerable,
+//    because the total has no boundary and no bucket to key by. We replace the boundaryless total with per-window registers:
+//    one bucket per fixed/session/all-time slice, each a separate fold with its own span rule.
 // DEF: transform — the "what": sum the amount of each click, keyed by user = { user: 42, amount: 10 }
 // DEF: fixed window — a 5-minute event-time slice = [12:00, 12:05)
+//    WHO chose the 5-minute span: the pipeline builder, not the data. 5 min here only so the 12:04:00 click lands in [12:00, 12:05)
+//    and the 12:09:00 click lands in the next span; production fixed windows are 1, 5, or 15 minutes.
 // DEF: session window — a burst of clicks separated by a 30-minute gap = [s1]
+//    WHO chose the 30-minute gap: the pipeline builder, not the data. 30 min is the web-analytics "user left" convention; here it only
+//    has to exceed the 5-minute gap between 12:04:00 and 12:09:00 so both clicks stay in one session.
 // STATE (before):
 //    sum42 : 0
 // ======================================================================
@@ -70,8 +78,14 @@ registerChapter({
         { num: 4, title: 'Allowed lateness bounds the waiting', detail: 'After the watermark passes, a pipeline may keep accepting stragglers for an "allowed lateness" horizon, then discard them. <strong>Allowed lateness is garbage collection for window state — it bounds how long late data can still update a result.</strong>' }
       ],
       program: `// STREAM SIDE — one window emits three times as time advances; the watermark drives on-time, allowed lateness bounds the rest
+// GOAL (what this is FOR): answer "when does window [12:00, 12:05) emit, and how long after the watermark does it still accept stragglers?"
+//    THE NAIVE WAY (why we add a lateness horizon at all): close the window at the watermark and drop anything after — then a click that
+//    happened at 12:04:59 but arrived at 12:06:00 is lost and the count 3 is wrong by one. We replace "drop after the watermark" with an
+//    allowed-lateness register that keeps accepting stragglers for a fixed horizon, so the same window can emit early, on-time, and late.
 // DEF: watermark — "no events with event_time < t will arrive" = "12:05:00"
 // DEF: allowed lateness — how long after the watermark a window still accepts stragglers = 60 s
+//    WHO chose the 60 s lateness: the pipeline builder, not the data. 60 s here only so the 12:04:59 straggler arriving at 12:06:00 is
+//    still inside the horizon (arrival 360 s - window end 300 s = 60 s, exactly the bound); production uses 60 s or 5 min.
 // DEF: trigger — the rule that emits the window result = "on-time"
 // STATE (before):
 //    totals : { "12:00-12:05": 3 }
@@ -181,9 +195,17 @@ registerChapter({
     ],
     
     program: `// SYSTEM DESIGN — a purchase flows through a fixed window; the watermark closes it on time, allowed lateness catches a straggler
+// GOAL (what this is FOR): answer "when is the 12:04:00 purchase's count final, and what catches the 12:04:59 straggler that arrives after?"
+//    THE NAIVE WAY (why we add watermark + lateness): emit the window the moment the first purchase lands — then the 12:04:59 straggler
+//    arriving after the window closed is silently dropped and the dashboard undercounts. We replace "emit on first event" with a
+//    watermark-triggered close plus a bounded lateness horizon that still accepts the straggler.
 // DEF: purchase — the event = {user: 42, amount: 10, event_time: "12:04:00"}
 // DEF: window — the fixed event-time slice = [12:00, 12:05)
+//    WHO chose the 5-minute span: the pipeline builder, not the data. 5 min here only so the 12:04:00 purchase lands in [12:00, 12:05);
+//    production fixed windows are 1, 5, or 15 minutes.
 // DEF: watermark — completeness signal = "12:05:00"
+//    WHO chose the 60 s allowed lateness used at step 3: the pipeline builder, not the data. 60 s here only so the 12:04:59 straggler
+//    arriving just after the 12:05:00 watermark is still inside the horizon; production uses 60 s or 5 min.
 // STATE (before):
 //    window_state : { "12:00-12:05": 0 }
 // ======================================================================
