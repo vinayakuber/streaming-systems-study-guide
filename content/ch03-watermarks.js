@@ -27,11 +27,11 @@ registerChapter({
 // offset 7: {event_time: "12:05:01"}
 // offset 8: {event_time: "12:05:02"}
 // ======================================================================
-// BUILD PHASE · run once at pipeline start · cost O(1)
+// BUILD PHASE · run once at pipeline start
 // step 0 · initialize the watermark register -> watermark : none -> "12:05:00"
 //    -> input  : ordered log, no record yet consumed at the shown offsets
 //    <- output : watermark = "12:05:00"   BECAUSE the generator holds one monotonically increasing register
-// QUERY PHASE · per ordered record · cost O(1)
+// QUERY PHASE · per ordered record
 // step 1 · the reader consumes offset 7 in order -> watermark : "12:05:00" -> "12:05:01"
 //    -> input  : log offset = 7, record.event_time = "12:05:01", watermark = "12:05:00"
 //    decode 1a · read the record at offset 7 -> record : none -> {event_time: "12:05:01"}
@@ -44,10 +44,6 @@ registerChapter({
 //    -> input  : window_status = "complete", window = "12:00-12:05", sum = 7
 //    <- output : emitted = {window: "12:00-12:05", sum: 7, pane: "on-time"}   BECAUSE the window end is crossed
 // ======================================================================
-// COMPLEXITY:
-//    time(build)  = O(1) = one constant register write
-//    time(query)  = O(1) = one read + one assign per record
-//    space(extra) = O(1) integers = the single watermark register
 // TRACE (one ordered log):
 //    offset | record event_time | watermark
 //       7   |     12:05:01      |  12:05:01
@@ -56,10 +52,10 @@ registerChapter({
 //    watermark <- record.event_time never moves backwards — each record sets the watermark to a value >= the
 //    previous one, and no record with event time earlier than the watermark can arrive from one ordered partition.
 // VARIANTS (when to pick which):
-//    perfect watermark   -> O(1) query, zero skew loss   (use when the source is provably ordered)  <- THIS ONE
-//    heuristic watermark -> O(1) query, subtracts a skew (use when records can arrive out of order)
-//    per-source + min    -> O(sources) query, one register per source (use for many partitions)
-//    no watermark        -> O(1) query, no completeness signal (use when windows never need to close)
+//    perfect watermark   -> one register advance per record, zero skew loss   (use when the source is provably ordered)  <- THIS ONE
+//    heuristic watermark -> one compare + one subtract per record (use when records can arrive out of order)
+//    per-source + min    -> one min over each source's register (use for many partitions)
+//    no watermark        -> no advance, no completeness signal (use when windows never need to close)
 // ======================================================================
 // downstream : record 12:05:01 -> watermark 12:05:01 -> window "12:00-12:05" -> emitted sum 7   BECAUSE a perfect watermark needs no skew
 //    derivation : perfect = 1 - 0 = 1 skew-free source   BECAUSE one ordered log has zero out-of-orderness`
@@ -84,11 +80,11 @@ registerChapter({
 // offset 0: {event_time: "12:08:30"}
 // offset 1: {event_time: "12:05:10"}
 // ======================================================================
-// BUILD PHASE · run once at pipeline start · cost O(1)
+// BUILD PHASE · run once at pipeline start
 // step 0 · initialize the generator registers -> max_seen : none -> "12:07:00", watermark : none -> "12:05:00"
 //    -> input  : skew = 120 s, prior max_seen = "12:07:00"
 //    <- output : max_seen = "12:07:00", watermark = "12:05:00"   BECAUSE 12:07:00 - 120 s skew = 12:05:00
-// QUERY PHASE · per arriving record · cost O(1)
+// QUERY PHASE · per arriving record
 // step 1 · the record at offset 0 is newer -> max_seen : "12:07:00" -> "12:08:30"
 //    -> input  : record.event_time = "12:08:30", max_seen = "12:07:00"
 //    decode 1a · read the record's event_time at offset 0 -> candidate : none -> "12:08:30"
@@ -101,10 +97,6 @@ registerChapter({
 //    -> input  : record.event_time = "12:05:10", watermark = "12:06:30"
 //    <- output : status = "late"   BECAUSE 12:05:10 is older than the 12:06:30 watermark
 // ======================================================================
-// COMPLEXITY:
-//    time(build)  = O(1) = one constant register write
-//    time(query)  = O(1) = one compare + one subtract per record
-//    space(extra) = O(1) integers = the single max_seen register
 // TRACE (skew = 120 s):
 //    record    | max_seen  | watermark | status
 //    12:08:30  | 12:08:30  | 12:06:30  | on-time
@@ -113,10 +105,10 @@ registerChapter({
 //    non-decreasing — a later record never lowers it, and any record more than 120 s behind max_seen is labeled late,
 //    which is exactly the bound the skew promises to tolerate.
 // VARIANTS (when to pick which):
-//    global heuristic   -> O(1) query, one shared max_seen register (use for a single well-behaved source)  <- THIS ONE
-//    perfect watermark  -> O(1) query, zero skew loss   (use when the source is provably ordered)
-//    per-source + min   -> O(sources) query, one register per source (use when one idle source must not stall the pipeline)
-//    no watermark       -> O(1) query, no completeness signal (use when latency trumps correctness)
+//    global heuristic   -> one compare + one subtract per record, one shared max_seen register (use for a single well-behaved source)  <- THIS ONE
+//    perfect watermark  -> one register advance per record, zero skew loss   (use when the source is provably ordered)
+//    per-source + min   -> one min over each source's register (use when one idle source must not stall the pipeline)
+//    no watermark       -> no advance, no completeness signal (use when latency trumps correctness)
 // ======================================================================
 // downstream : record 12:08:30 -> max_seen 12:08:30 -> watermark 12:06:30 -> window "12:00-12:05" closed   BECAUSE the heuristic assumes no record is more than 120 s late
 //    derivation : watermark = 510 - 120 = 390 s into the hour = 12:06:30   BECAUSE 12:08:30 is 510 s and skew is 120 s`
@@ -142,11 +134,11 @@ registerChapter({
 // offset 0: {source: "input_a", watermark: "12:06:00"}
 // offset 1: {source: "input_b", watermark: "12:04:30"}
 // ======================================================================
-// BUILD PHASE · run once when the stage opens · cost O(1)
+// BUILD PHASE · run once when the stage opens
 // step 0 · initialize the stage watermark register -> watermark : none -> "12:06:00"
 //    -> input  : first input watermark seen = "12:06:00"
 //    <- output : watermark = "12:06:00"   BECAUSE before the second input arrives the stage mirrors the first input
-// QUERY PHASE · per input watermark update · cost O(inputs)
+// QUERY PHASE · per input watermark update
 // step 1 · read input_a watermark -> watermark : "12:06:00" -> "12:06:00"
 //    -> input  : input_a.watermark = "12:06:00", stage watermark = "12:06:00"
 //    decode 1a · fetch the watermark from input_a -> wm_a : none -> "12:06:00"
@@ -161,10 +153,6 @@ registerChapter({
 //    -> input  : stage watermark = "12:04:30", join key = "12:05:00"
 //    <- output : emit = "waiting"   BECAUSE input_b may still deliver 12:05:00 records
 // ======================================================================
-// COMPLEXITY:
-//    time(build)  = O(1) = one constant register write
-//    time(query)  = O(inputs) = one min over 2 input watermarks
-//    space(extra) = O(1) integers = the single stage watermark register
 // TRACE (two inputs):
 //    input   | watermark | stage watermark
 //    input_a | 12:06:00  | 12:06:00
@@ -173,12 +161,12 @@ registerChapter({
 //    slower input — with input_b at 12:04:30 and input_a at 12:06:00, the stage claims 12:04:30, and any join key
 //    12:05:00 stays unemitted until input_b passes it.
 // VARIANTS (when to pick which):
-//    naive min over inputs -> O(inputs) query, one register (use for a handful of inputs)  <- THIS ONE
-//    per-source tracking    -> O(1) query per source, one register per source (use when a source can be idle)
-//    idle-source timeout    -> O(inputs) query, drops a silent source (use when a source stalls forever)
+//    naive min over inputs -> one min over the 2 input watermarks, one register (use for a handful of inputs)  <- THIS ONE
+//    per-source tracking    -> one advance per source record, one register per source (use when a source can be idle)
+//    idle-source timeout    -> one min over the live inputs, drops a silent source (use when a source stalls forever)
 // ======================================================================
 // downstream : input_a "12:06:00" -> input_b "12:04:30" -> stage watermark "12:04:30" -> join "12:05:00" waits   BECAUSE completeness is bounded by the slowest input
-//    derivation : stage_watermark = 390 - 120 = 270 s into the hour = 12:04:30   BECAUSE input_b lags input_a by 120 s, and completeness is bounded by the slower source`
+//    derivation : stage_watermark = 360 - 90 = 270 s into the hour = 12:04:30   BECAUSE input_b 12:04:30 lags input_a 12:06:00 by 90 s, and completeness is bounded by the slower source`
     }
   ],
 

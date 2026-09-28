@@ -27,11 +27,11 @@ registerChapter({
 // offset 0: {id: "r7", key: 42, value: 10}
 // offset 1: {id: "r7", key: 42, value: 10, delivery: "retry"}
 // ======================================================================
-// BUILD PHASE · run once at the stage start · cost O(1)
+// BUILD PHASE · run once at the stage start
 // step 0 · initialize the delivered-id set -> seen : none -> { "r1", "r2", "r3" }
 //    -> input  : the set of already-delivered ids = { "r1", "r2", "r3" }
 //    <- output : seen = { "r1", "r2", "r3" }   BECAUSE the stage starts with three delivered records
-// QUERY PHASE · per delivered record · cost O(1)
+// QUERY PHASE · per delivered record
 // step 1 · check the id -> delivered : false -> true
 //    -> input  : record.id = "r7", seen = { "r1", "r2", "r3" }
 //    decode 1a · look up record.id in seen -> found : none -> false
@@ -44,10 +44,6 @@ registerChapter({
 //    -> input  : record.id = "r7", seen = { "r1", "r2", "r3", "r7" }
 //    <- output : delivered = true, action = "drop"   BECAUSE "r7" is already in seen
 // ======================================================================
-// COMPLEXITY:
-//    time(build)  = O(1) = one constant register write
-//    time(query)  = O(1) = one set membership check per record
-//    space(extra) = O(seen) = one id per delivered record
 // TRACE (record r7 delivered twice):
 //    delivery | id in seen? | action    | seen size
 //    1        | false       | record r7 | 4
@@ -56,9 +52,9 @@ registerChapter({
 //    later one — r7 is absent on delivery 1 (so it is recorded) and present on delivery 2 (so it is dropped), which
 //    makes two deliveries produce exactly one effect, the value 10 counted once.
 // VARIANTS (when to pick which):
-//    exact id set               -> O(1) query, O(seen) space (use when ids fit in memory)   <- THIS ONE
-//    bounded-id cache           -> O(1) query, O(window) space (use when the id space is huge)
-//    monotonic id + high-water mark -> O(1) query, O(1) space (use for a single ordered source)
+//    exact id set               -> one set lookup per record, stores every id (use when ids fit in memory)   <- THIS ONE
+//    bounded-id cache           -> one cache lookup per record, stores a bounded window of ids (use when the id space is huge)
+//    monotonic id + high-water mark -> one compare per record, stores one number (use for a single ordered source)
 // ======================================================================
 // downstream : the stage reads delivery 1 -> seen r7 -> delivery 2 -> dropped -> effect 10   BECAUSE the second delivery was a duplicate
 //    derivation : dedup = 2 - 1 = 1 effect, so the record contributes value 10 once, not 20`
@@ -83,11 +79,11 @@ registerChapter({
 // offset 0: {key: 42, value: 10}
 // offset 1: {key: 42, value: 10, delivery: "retry"}
 // ======================================================================
-// BUILD PHASE · run once at the sink start · cost O(1)
+// BUILD PHASE · run once at the sink start
 // step 0 · initialize the balance register -> balance : none -> { 42: 30 }
 //    -> input  : starting account balance = { 42: 30 }
 //    <- output : balance = { 42: 30 }   BECAUSE the sink opens with the existing balance
-// QUERY PHASE · per delivered write · cost O(1)
+// QUERY PHASE · per delivered write
 // step 1 · first delivery, idempotent path -> balance[42] : 30 -> 10
 //    -> input  : write = SET 42 -> 10, balance = { 42: 30 }
 //    <- output : balance[42] = 10   BECAUSE SET replaces the old value
@@ -98,10 +94,6 @@ registerChapter({
 //    -> input  : write = ADD 10, balance = { 42: 30 }, deliveries = 2
 //    <- output : balance[42] = 50   BECAUSE ADD 10 runs twice
 // ======================================================================
-// COMPLEXITY:
-//    time(build)  = O(1) = one constant register write
-//    time(query)  = O(1) = one write or one skip per delivery
-//    space(extra) = O(1) = the single balance register
 // TRACE (key 42, value 10 delivered twice):
 //    path        | delivery | balance
 //    idempotent  | 1        | 10
@@ -110,9 +102,9 @@ registerChapter({
 // CORRECTNESS (idempotency-invariant lemma): SET 42 -> 10 maps the balance to 10 whether applied once or twice, while
 //    ADD 10 applied twice gives 30 + 10 + 10 = 50 — so only the idempotent write keeps two deliveries at one effect.
 // VARIANTS (when to pick which):
-//    idempotent SET/upsert -> O(1) query, retry-safe (use when the store supports overwrite)   <- THIS ONE
-//    ADD with dedup        -> O(1) query, needs a seen-id set (use when only increments are available)
-//    two-phase commit      -> O(round-trips) query, atomic but slow (use when the effect spans stores)
+//    idempotent SET/upsert -> one overwrite per key, retry-safe (use when the store supports overwrite)   <- THIS ONE
+//    ADD with dedup        -> one add + one dedup lookup, needs a seen-id set (use when only increments are available)
+//    two-phase commit      -> one extra round-trip per participant, atomic but slow (use when the effect spans stores)
 // ======================================================================
 // downstream : delivery 1 -> balance 10 -> retry -> balance 10   BECAUSE only the idempotent write tolerates the retry
 //    derivation : 2 * 10 = 20 added by ADD, but exactly-once requires 1 * 10 = 10 -> the sink must be idempotent`
@@ -138,11 +130,11 @@ registerChapter({
 // offset 0: {order: "order-99", amount: 10, attempt: 1}
 // offset 1: {order: "order-99", amount: 10, attempt: 2}
 // ======================================================================
-// BUILD PHASE · run once before the first charge · cost O(1)
+// BUILD PHASE · run once before the first charge
 // step 0 · initialize the ledger register -> card_ledger : none -> { "order-99": 0 }
 //    -> input  : idempotency key = "order-99", starting ledger = 0
 //    <- output : card_ledger = { "order-99": 0 }   BECAUSE the order has not been charged yet
-// QUERY PHASE · per charge attempt · cost O(1)
+// QUERY PHASE · per charge attempt
 // step 1 · first attempt with the key -> card_ledger["order-99"] : 0 -> 10
 //    -> input  : order = "order-99", amount = 10, idempotency key = "order-99"
 //    <- output : card_ledger["order-99"] = 10   BECAUSE the charge succeeds and records the key
@@ -153,10 +145,6 @@ registerChapter({
 //    -> input  : order = "order-99", amount = 10, no key, attempts = 2
 //    <- output : card_ledger["order-99"] = 20   BECAUSE the retry has no key to deduplicate on
 // ======================================================================
-// COMPLEXITY:
-//    time(build)  = O(1) = one constant register write
-//    time(query)  = O(1) = one external dedup lookup per attempt
-//    space(extra) = O(1) = the single ledger entry for the key
 // TRACE (order-99, $10, two attempts):
 //    attempt | key seen by API? | action | ledger
 //    1       | false            | charge | 10
@@ -165,9 +153,9 @@ registerChapter({
 //    the prior result on any repeat — order-99 is unseen on attempt 1 (ledger 0 -> 10) and seen on attempt 2 (ledger
 //    stays 10), so exactly $10 is charged, never the $20 a keyless retry would produce.
 // VARIANTS (when to pick which):
-//    idempotency key   -> O(1) query, one key per effect (use when the API supports dedup)   <- THIS ONE
-//    idempotent upsert -> O(1) query, overwrite not append (use for a datastore sink)
-//    two-phase commit  -> O(round-trips) query, atomic across systems (use when a single API cannot dedup)
+//    idempotency key   -> one dedup lookup per effect, one key per effect (use when the API supports dedup)   <- THIS ONE
+//    idempotent upsert -> one overwrite per key, overwrite not append (use for a datastore sink)
+//    two-phase commit  -> one extra round-trip per participant, atomic across systems (use when a single API cannot dedup)
 // ======================================================================
 // downstream : attempt 1 -> charge 10 -> attempt 2 -> no-op -> balance 10   BECAUSE only the key deduplicates the side effect
 //    derivation : exactly-once = 1 * 10 = $10 charged, not 2 * 10 = $20, thanks to idempotency key order-99`

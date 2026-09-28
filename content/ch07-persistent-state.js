@@ -28,11 +28,11 @@ registerChapter({
 // offset 11: {key: 42, value: 1}
 // offset 12: {key: 42, value: 1}
 // ======================================================================
-// BUILD PHASE · run once at the checkpoint interval · cost O(1)
+// BUILD PHASE · run once at the checkpoint interval
 // step 0 · initialize the count register -> count_state : none -> { 42: 10 }
 //    -> input  : the running per-key count = { 42: 10 }
 //    <- output : count_state = { 42: 10 }   BECAUSE the pipeline resumes from the last fold
-// QUERY PHASE · per event (or per checkpoint) · cost O(1)
+// QUERY PHASE · per event (or per checkpoint)
 // step 1 · fold the three events -> count_state[42] : 10 -> 13
 //    -> input  : events = [1, 1, 1] for key 42, count_state = { 42: 10 }
 //    <- output : count_state[42] = 13   BECAUSE 10 + 3 = 13
@@ -45,10 +45,6 @@ registerChapter({
 //    decode 3b · load the saved value into count_state -> count_state[42] : 0 -> 13
 //    <- output : count_state[42] = 13   BECAUSE the checkpoint holds the last count
 // ======================================================================
-// COMPLEXITY:
-//    time(build)  = O(1) = one constant register write
-//    time(query)  = O(1) = one add per event, one snapshot per interval
-//    space(extra) = O(1) = the single count register plus the durable copy
 // TRACE (three events of value 1 for key 42):
 //    phase       | count_state | durable
 //    fold 3      | 13          | {}
@@ -57,9 +53,9 @@ registerChapter({
 // CORRECTNESS (checkpoint-invariant lemma): the checkpoint stores the count at a consistent point — 10 + 3 = 13 — and
 //    the restart loads 13 rather than 0, so recovery skips re-reading the 10 events already folded.
 // VARIANTS (when to pick which):
-//    periodic full snapshot -> O(1) query, simple (use for small state)   <- THIS ONE
-//    incremental snapshot   -> O(1) query, uploads only deltas (use for large state)
-//    no checkpoint, replay  -> O(stream) query, no storage (use when replay is cheap)
+//    periodic full snapshot -> one snapshot write per interval, simple (use for small state)   <- THIS ONE
+//    incremental snapshot   -> one delta upload per interval, uploads only deltas (use for large state)
+//    no checkpoint, replay  -> one full replay of the stream, no storage (use when replay is cheap)
 // ======================================================================
 // downstream : count 10 -> fold 13 -> checkpoint 13 -> restart 13   BECAUSE the checkpoint persisted the fold, so recovery is a load not a replay
 //    derivation : replayed events saved = 13 - 3 = 10   BECAUSE only the 3 post-checkpoint events would need re-reading`
@@ -85,11 +81,11 @@ registerChapter({
 // offset 1: {key: "key_88", changed: true}
 // offset 2: {key: "key_501", changed: true}
 // ======================================================================
-// BUILD PHASE · run once at the snapshot boundary · cost O(1)
+// BUILD PHASE · run once at the snapshot boundary
 // step 0 · initialize the delta register -> delta : none -> {}
 //    -> input  : full state = 1000 keys, changed keys = [ "key_7", "key_88", "key_501" ]
 //    <- output : delta = {}   BECAUSE no changed key has been recorded yet
-// QUERY PHASE · per changed key · cost O(1)
+// QUERY PHASE · per changed key
 // step 1 · the changed keys are recorded -> delta : {} -> { "key_7", "key_88", "key_501" }
 //    -> input  : changed keys = [ "key_7", "key_88", "key_501" ], delta = {}
 //    <- output : delta = { "key_7", "key_88", "key_501" }   BECAUSE only three keys changed since the last snapshot
@@ -100,10 +96,6 @@ registerChapter({
 //    -> input  : full state = 1000 keys, uploaded_keys = 0
 //    <- output : uploaded_keys = 1000   BECAUSE it sends every key
 // ======================================================================
-// COMPLEXITY:
-//    time(build)  = O(1) = one constant register write
-//    time(query)  = O(changed) = one record per changed key
-//    space(extra) = O(changed) = the delta set, not the full 1000 keys
 // TRACE (1000 keys, 3 changed):
 //    snapshot kind | keys uploaded
 //    incremental   | 3
@@ -112,9 +104,9 @@ registerChapter({
 //    snapshot — 3 of 1000 — so a restart that loads the delta plus the prior snapshot reconstructs the full state
 //    without ever missing a changed key.
 // VARIANTS (when to pick which):
-//    incremental delta -> O(changed) query, small uploads (use for large, slowly-changing state)   <- THIS ONE
-//    full snapshot     -> O(n) query, simple (use for small state)
-//    no snapshot       -> O(n) replay (use when the stream can rebuild state cheaply)
+//    incremental delta -> one upload per changed key, small uploads (use for large, slowly-changing state)   <- THIS ONE
+//    full snapshot     -> one upload per key, simple (use for small state)
+//    no snapshot       -> one full replay of the stream (use when the stream can rebuild state cheaply)
 // ======================================================================
 // downstream : 3 changed keys -> delta set 3 -> upload 3 -> not 1000   BECAUSE incremental uploads only the delta
 //    derivation : upload ratio = 3 / 1000 = 0.003, so the incremental checkpoint costs 0.3% of a full snapshot`
@@ -139,11 +131,11 @@ registerChapter({
 // offset 499: {key: 42, value: 1}
 // offset 500: {key: 42, value: 1, barrier: true}
 // ======================================================================
-// BUILD PHASE · run once when the barrier arrives · cost O(1)
+// BUILD PHASE · run once when the barrier arrives
 // step 0 · initialize the snapshot register -> snapshot : none -> {}
 //    -> input  : barrier = true at offset 500, count_state = { 42: 13 }
 //    <- output : snapshot = {}   BECAUSE the stage has not yet recorded its state
-// QUERY PHASE · per barrier · cost O(1)
+// QUERY PHASE · per barrier
 // step 1 · the stage snapshots its state -> snapshot : {} -> { count: { 42: 13 } }
 //    -> input  : count_state = { 42: 13 }, barrier = true
 //    <- output : snapshot = { count: { 42: 13 } }   BECAUSE the barrier says "snapshot now"
@@ -157,10 +149,6 @@ registerChapter({
 //    decode 3c · restore state and advance the source to offset + 1 -> count_state : { 42: 0 } -> { 42: 13 }, resume = 501
 //    <- output : count_state = { 42: 13 }, source resumes at 501   BECAUSE offset 500 was already folded
 // ======================================================================
-// COMPLEXITY:
-//    time(build)  = O(1) = one constant register write
-//    time(query)  = O(1) = one snapshot write per barrier
-//    space(extra) = O(1) = the { state, offset } pair
 // TRACE (barrier at offset 500):
 //    phase      | snapshot                          | resume
 //    snapshot   | { count: { 42: 13 } }             | -
@@ -170,9 +158,9 @@ registerChapter({
 //    already folded into count 13, so resuming at 501 replays neither offset 500 nor skips offset 501, and no record
 //    is lost or double-counted.
 // VARIANTS (when to pick which):
-//    aligned barrier snapshot -> O(1) query, exactly-once (use when correctness is paramount)   <- THIS ONE
-//    unaligned snapshot       -> O(1) query, faster but at-least-once (use when latency wins over exactness)
-//    no barrier               -> O(stream) replay (use when state can be rebuilt)
+//    aligned barrier snapshot -> one snapshot write per barrier, exactly-once (use when correctness is paramount)   <- THIS ONE
+//    unaligned snapshot       -> one snapshot write per barrier, faster but at-least-once (use when latency wins over exactness)
+//    no barrier               -> one full replay of the stream (use when state can be rebuilt)
 // ======================================================================
 // downstream : barrier 500 -> snapshot count 13 -> snapshot offset 500 -> resume 501   BECAUSE the checkpoint paired state with its source position
 //    derivation : resume = 500 + 1 = 501, so no record is replayed or skipped`

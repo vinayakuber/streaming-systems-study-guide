@@ -27,11 +27,11 @@ registerChapter({
 // offset 0: {user: 42, amount: 10, event_time: "12:04:00"}
 // offset 1: {user: 42, amount: 15, event_time: "12:09:00"}
 // ======================================================================
-// BUILD PHASE · run once at pipeline start · cost O(1)
+// BUILD PHASE · run once at pipeline start
 // step 0 · initialize the per-window registers -> sum42 : none -> 0, sessions42 : none -> [], total : none -> 0
 //    -> input  : window definitions = fixed [12:00, 12:05), session 30-min gap, all-time
 //    <- output : sum42 = 0, sessions42 = [], total = 0   BECAUSE no click has been folded yet
-// QUERY PHASE · per arriving click · cost O(1)
+// QUERY PHASE · per arriving click
 // step 1 · fixed 5-min window : the first click falls in [12:00, 12:05) -> sum42 : 0 -> 10
 //    -> input  : click.event_time = "12:04:00", window span = [12:00, 12:05)
 //    <- output : sum42 = 10   BECAUSE 12:04:00 is inside that slice
@@ -42,10 +42,6 @@ registerChapter({
 //    -> input  : amounts = [10, 15], window = all time
 //    <- output : total = 25   BECAUSE the window is the whole stream
 // ======================================================================
-// COMPLEXITY:
-//    time(build)  = O(1) = one constant register write
-//    time(query)  = O(1) = one window-assignment check per click
-//    space(extra) = O(1) integers per window shape = one sum register each
 // TRACE (click 12:04:00 then 12:09:00):
 //    window shape   | span            | result
 //    fixed 5-min    | [12:00, 12:05)  | sum42 = 10
@@ -55,10 +51,10 @@ registerChapter({
 //    — 12:04:00 lands in the single fixed span [12:00, 12:05), opens its own session, and joins the all-time bucket,
 //    so each shape counts the click exactly once and no click falls through or is double-counted.
 // VARIANTS (when to pick which):
-//    fixed window   -> O(1) query, equal non-overlapping spans (use for periodic totals)   <- THIS ONE
-//    session window -> O(1) query, data-driven span (use for bursts of activity)
-//    all-time       -> O(1) query, one running sum (use for a global total)
-//    sliding window -> O(windows) query, one event in many spans (use for moving averages)
+//    fixed window   -> one window-assignment check, equal non-overlapping spans (use for periodic totals)   <- THIS ONE
+//    session window -> one gap check per click, data-driven span (use for bursts of activity)
+//    all-time       -> one fold into the running sum (use for a global total)
+//    sliding window -> one check per overlapping span, one event in many spans (use for moving averages)
 // ======================================================================
 // downstream : click 12:04:00 -> window [12:00, 12:05) -> sum 0 -> 10 -> 25   BECAUSE the transform is the same, only the window boundary changes
 //    derivation : fixed window span = 300 s = 5 * 60   BECAUSE fixed windows are equal, non-overlapping spans`
@@ -94,7 +90,7 @@ registerChapter({
 //    <- output : totals["12:00-12:05"] = 4   BECAUSE 12:06:00 is inside the 60 s allowed lateness
 // ======================================================================
 // downstream : window "12:00-12:05" -> early sum 3 -> on-time sum 3 -> late sum 4   BECAUSE allowed lateness kept the window alive for 60 s past the watermark
-//    derivation : straggler delay = 60 - 0 = 60 s   BECAUSE the window ended at 12:05:00 and the straggler arrived at 12:06:00, exactly at the allowed lateness bound`
+//    derivation : straggler delay = 360 - 300 = 60 s   BECAUSE arrival 12:06:00 (360 s) minus window end 12:05:00 (300 s) is exactly the 60 s allowed lateness`
     },
     {
       section: 'How — accumulation',

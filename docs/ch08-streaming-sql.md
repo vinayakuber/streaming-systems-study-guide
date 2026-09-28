@@ -29,11 +29,11 @@ _Also known as: SS Ch08 · Streaming SQL · Continuous Query · TUMBLE · HOP ·
 // offset 0: {campaign: "C1", click: true}
 // offset 1: {campaign: "C1", click: true}
 // ======================================================================
-// BUILD PHASE · run once when the continuous query starts · cost O(1)
+// BUILD PHASE · run once when the continuous query starts
 // step 0 · initialize the result table register -> result : none -> { "C1": 3 }
 //    -> input  : the updating output table = { "C1": 3 }
 //    <- output : result = { "C1": 3 }   BECAUSE the query opens with the current count
-// QUERY PHASE · per arriving row · cost O(1)
+// QUERY PHASE · per arriving row
 // step 1 · the WHERE keeps the row -> filtered : 1 -> 1 row passes
 //    -> input  : row = {campaign: "C1", click: true}, predicate = campaign = "C1"
 //    <- output : filtered = 1 row passes   BECAUSE the row matches the predicate
@@ -44,10 +44,6 @@ _Also known as: SS Ch08 · Streaming SQL · Continuous Query · TUMBLE · HOP ·
 //    -> input  : result = { "C1": 4 }, old row = { "C1": 3 }, retraction = { "C1": 3 }
 //    <- output : sink = { "C1": 4 }   BECAUSE the old row is removed then the new row is added
 // ======================================================================
-// COMPLEXITY:
-//    time(build)  = O(1) = one constant register write
-//    time(query)  = O(1) = one filter + one count update per row
-//    space(extra) = O(1) = the single result cell for the key
 // TRACE (one click for campaign C1):
 //    phase      | result["C1"] | sink
 //    WHERE pass | 3            | 3
@@ -56,9 +52,9 @@ _Also known as: SS Ch08 · Streaming SQL · Continuous Query · TUMBLE · HOP ·
 // CORRECTNESS (count-invariant lemma): COUNT folds each matching row once — result goes 3 -> 4 for one click — and the
 //    engine retracts (C1, 3) before adding (C1, 4), so the sink stores 4, not 3 + 4 = 7.
 // VARIANTS (when to pick which):
-//    updating result + retract -> O(1) query, correct for changing keys (use for GROUP BY counts)   <- THIS ONE
-//    append-only result        -> O(1) query, no retraction (use when rows only add new facts)
-//    materialized view         -> O(1) query, pays storage (use for fast reads)
+//    updating result + retract -> one count update + one retraction, correct for changing keys (use for GROUP BY counts)   <- THIS ONE
+//    append-only result        -> one count update, no retraction (use when rows only add new facts)
+//    materialized view         -> one stored count per key, pays storage (use for fast reads)
 // ======================================================================
 // downstream : click -> WHERE pass -> GROUP BY 3 -> 4 -> sink stores 4   BECAUSE the retraction replaced the old value, not added to it
 //    derivation : new count = 3 + 1 = 4
@@ -87,11 +83,11 @@ _Also known as: SS Ch08 · Streaming SQL · Continuous Query · TUMBLE · HOP ·
 // offset 0: {event_time: "12:04:00", campaign: "C1"}
 // offset 1: {event_time: "12:04:00", campaign: "C1", shape: "same click"}
 // ======================================================================
-// BUILD PHASE · run once when the query starts · cost O(1)
+// BUILD PHASE · run once when the query starts
 // step 0 · initialize the per-window row counters -> tumble_rows : none -> 0, hop_rows : none -> 0
 //    -> input  : window definitions = TUMBLE 5-min, HOP 10-min every 2 min
 //    <- output : tumble_rows = 0, hop_rows = 0   BECAUSE no click has been assigned yet
-// QUERY PHASE · per arriving click · cost O(hop windows)
+// QUERY PHASE · per arriving click
 // step 1 · TUMBLE assigns the click -> tumble_rows : 0 -> 1
 //    -> input  : click.event_time = "12:04:00", TUMBLE span = [12:00, 12:05)
 //    <- output : tumble_rows = 1   BECAUSE 12:04:00 falls only in [12:00, 12:05)
@@ -102,10 +98,6 @@ _Also known as: SS Ch08 · Streaming SQL · Continuous Query · TUMBLE · HOP ·
 //    -> input  : watermark = "12:06:30", window = "[12:00,12:05)", tumble_rows = 1
 //    <- output : emitted = { "[12:00,12:05)": 1 }   BECAUSE the window end is crossed
 // ======================================================================
-// COMPLEXITY:
-//    time(build)  = O(1) = one constant register write
-//    time(query)  = O(hop windows) = one assignment per overlapping span
-//    space(extra) = O(1) integers per window = one row counter each
 // TRACE (click 12:04:00):
 //    window | spans                                     | rows
 //    TUMBLE | [12:00, 12:05)                            | 1
@@ -114,9 +106,9 @@ _Also known as: SS Ch08 · Streaming SQL · Continuous Query · TUMBLE · HOP ·
 //    span and three HOP spans — so the TUMBLE count is 1 and the HOP count is 3 for the same underlying event, and the
 //    watermark at 12:06:30 emits the TUMBLE window exactly once.
 // VARIANTS (when to pick which):
-//    TUMBLE  -> O(1) query, non-overlapping (use for periodic totals)   <- THIS ONE
-//    HOP     -> O(windows) query, overlapping (use for moving averages)
-//    SESSION -> O(1) query, data-driven span (use for bursts of activity)
+//    TUMBLE  -> one window assignment, non-overlapping (use for periodic totals)   <- THIS ONE
+//    HOP     -> one assignment per overlapping span, overlapping (use for moving averages)
+//    SESSION -> one merge per gap close, data-driven span (use for bursts of activity)
 // ======================================================================
 // downstream : click 12:04:00 -> TUMBLE 1 row -> HOP 3 rows -> watermark emits 1   BECAUSE HOP windows overlap
 //    derivation : HOP rows per event = 5 - 2 = 3   BECAUSE 5 possible 10-min windows minus the 2 that end before 12:04
@@ -145,11 +137,11 @@ _Also known as: SS Ch08 · Streaming SQL · Continuous Query · TUMBLE · HOP ·
 // offset 0: {campaign: "C1", kind: "click", event_time: "12:03:00"}
 // offset 1: {campaign: "C1", kind: "impression", event_time: "12:02:00"}
 // ======================================================================
-// BUILD PHASE · run once when the join opens · cost O(1)
+// BUILD PHASE · run once when the join opens
 // step 0 · initialize the match register -> match : none -> {}, emitted_rows : none -> 0
 //    -> input  : join window = [12:00, 12:05), clicks watermark = "12:06:00", impressions watermark = "12:04:30"
 //    <- output : match = {}, emitted_rows = 0   BECAUSE no pair has matched yet
-// QUERY PHASE · per arriving row · cost O(1)
+// QUERY PHASE · per arriving row
 // step 1 · both rows fall in the join window -> match : {} -> { "click 12:03", "impression 12:02" }
 //    -> input  : click.event_time = "12:03:00", impression.event_time = "12:02:00", join window = [12:00, 12:05)
 //    <- output : match = { "click 12:03", "impression 12:02" }   BECAUSE both event times are inside [12:00, 12:05)
@@ -162,10 +154,6 @@ _Also known as: SS Ch08 · Streaming SQL · Continuous Query · TUMBLE · HOP ·
 //    -> input  : clicks_ready = true, impressions_ready = false
 //    <- output : emitted_rows = 0   BECAUSE a late impression could still arrive
 // ======================================================================
-// COMPLEXITY:
-//    time(build)  = O(1) = one constant register write
-//    time(query)  = O(1) = one watermark compare per side
-//    space(extra) = O(1) = the held match register
 // TRACE (click 12:03, impression 12:02, window [12:00, 12:05)):
 //    side        | watermark | passes 12:05:00? | emit
 //    clicks      | 12:06:00  | true             | -
@@ -175,12 +163,12 @@ _Also known as: SS Ch08 · Streaming SQL · Continuous Query · TUMBLE · HOP ·
 //    impressions at 12:04:30 is short of 12:05:00 so the match is held, and it emits only after impressions advances
 //    to 12:06:00, so a late impression cannot be missed.
 // VARIANTS (when to pick which):
-//    watermark-gated emit -> O(1) query, correct (use when out-of-order data matters)   <- THIS ONE
-//    immediate emit       -> O(1) query, lower latency (use when late rows are impossible)
-//    allowed-lateness hold-> O(1) query, tolerates stragglers (use when late rows are rare)
+//    watermark-gated emit -> one watermark compare per side, correct (use when out-of-order data matters)   <- THIS ONE
+//    immediate emit       -> one emit on first match, lower latency (use when late rows are impossible)
+//    allowed-lateness hold-> one held match until lateness passes, tolerates stragglers (use when late rows are rare)
 // ======================================================================
 // downstream : click 12:03 -> impression 12:02 -> match held -> wait for both watermarks -> emit 1   BECAUSE the join is bounded by the slower stream
-//    derivation : min watermark = 390 - 120 = 270 s, still short of 300 s, so the join waits for impressions to reach 12:05:00
+//    derivation : min watermark = 360 - 90 = 270 s   BECAUSE impressions 12:04:30 is 90 s behind clicks 12:06:00, still short of the 300 s window end
 ```
 
 
