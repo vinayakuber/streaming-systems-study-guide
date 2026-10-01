@@ -68,10 +68,21 @@ def png_read(path):
         return (r[o], r[o+1], r[o+2])
     return w, h, rgb
 
-def shoot(html_path, w, h, out):
+def shoot(html_path, w, h, out, budget=None):
+    # The virtual-time budget exists to let SMIL animation settle before the
+    # screenshot. A STILL frame has no <animate> element, so waiting 4 s for it is
+    # pure cost — and at ~300 frames x 2 shots that was most of a 12-minute run.
+    # The budget is therefore chosen from the content: 4000 ms when the file can
+    # animate, 250 ms when it provably cannot. Nothing about what is MEASURED
+    # changes; only how long Chrome is asked to wait for motion that is not there.
+    if budget is None:
+        try:
+            budget = 4000 if b'<animate' in open(html_path, 'rb').read() else 250
+        except OSError:
+            budget = 4000
     subprocess.run([CHROME, '--headless', '--disable-gpu', '--no-sandbox', '--hide-scrollbars',
                     '--force-device-scale-factor=1', f'--window-size={w},{h}',
-                    '--virtual-time-budget=4000', f'--screenshot={out}', f'file://{html_path}'],
+                    f'--virtual-time-budget={budget}', f'--screenshot={out}', f'file://{html_path}'],
                    capture_output=True, timeout=120)
     return os.path.exists(out)
 
@@ -275,14 +286,31 @@ def main():
         print(f'PASS static-fallback  (strips to exactly frame 1, ink bbox {bb_s})')
         return 0
 
+    def canvas_of(svg):
+        # PER FILE, not once. Batching many SVGs into one invocation was a 2.3x
+        # speed-up and silently broke the margin check: the canvas was read from
+        # the FIRST file and applied to every other, so any file of a different
+        # size had its background rect measured against the wrong bounds and
+        # reported as breaking the margin. An optimisation that changes what a
+        # check MEANS is a defect, however much faster it is.
+        if a.canvas: return W, H
+        head = open(svg, encoding='utf-8').read(400)
+        m = (re.search(r'viewBox="0 0 (\d+) (\d+)"', head)
+             or re.search(r'width="(\d+)"\s+height="(\d+)"', head))
+        if not m: return None, None
+        return int(m.group(1)), int(m.group(2))
+
     total, failed = 0, 0
     for svg in a.svgs:
+        cw, chh = canvas_of(svg)
+        if cw is None:
+            print(f'FAIL {os.path.basename(svg)}'); print('     cannot read its canvas size'); failed += 1; total += 1; continue
         jobs = [(None, os.path.basename(svg) + (' [union of all steps]' if a.union else ''))]
         for seek, label in jobs:
             total += 1
             keep = os.path.join(a.save_dir, label.replace('/', '_').replace('@', '_') + '.png') if a.save_dir else None
-            e1, n = check_engine_bbox(svg, W, H, a.margin, seek, a.union)
-            e2, bbox = check_pixels(svg, W, H, a.guard, a.margin, seek, keep, a.union)
+            e1, n = check_engine_bbox(svg, cw, chh, a.margin, seek, a.union)
+            e2, bbox = check_pixels(svg, cw, chh, a.guard, a.margin, seek, keep, a.union)
             errs = e1 + e2
             if errs:
                 failed += 1

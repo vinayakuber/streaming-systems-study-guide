@@ -23,7 +23,9 @@
 const fs = require('fs'), path = require('path');
 
 const KEYWORDS = new Set(['type', 'fun', 'val', 'var', 'while', 'for', 'in', 'until',
-  'return', 'if', 'else', 'and', 'or', 'not', 'true', 'false', 'null', 'primitive']);
+  'return', 'if', 'else', 'and', 'or', 'not', 'true', 'false', 'null', 'primitive',
+  // control-flow keywords: `continue` and `break` are not identifiers
+  'continue', 'break']);
 const METHODS = new Set(['append', 'length', 'value']);   // fields/methods declared by `type`
 
 function check(file) {

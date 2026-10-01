@@ -81,10 +81,36 @@ function buildMemoryWalkthrough(spec) {
   const PAN_H = SRC.length * LH + 26;
   const Y = { title: 34, step: PAN_Y + PAN_H + 34, cap: PAN_Y + PAN_H + 66 };
   const H = Y.cap + CAP_LINES * CAP_LH + 6;
-  const cv = Canvas(W, H);
-  const P = { src: { x: 24, y: PAN_Y, w: srcW, h: PAN_H },
-              stk: { x: 24 + srcW + 16, y: PAN_Y, w: stkW, h: PAN_H },
-              hp:  { x: 24 + srcW + 16 + stkW + 16, y: PAN_Y, w: hpW, h: PAN_H } };
+  // The STACK and HEAP panels are measured from the steps, exactly as the SOURCE
+  // panel is measured from the listing. They cannot be measured at construction
+  // because the steps arrive at emit(), so `cv` and `P` are rebuilt there — see
+  // relayout(). A typed panel width is a latent overflow that only fires when
+  // someone writes a longer local, which is the worst time to discover it.
+  let cv = Canvas(W, H);
+  let P = { src: { x: 24, y: PAN_Y, w: srcW, h: PAN_H },
+            stk: { x: 24 + srcW + 16, y: PAN_Y, w: stkW, h: PAN_H },
+            hp:  { x: 24 + srcW + 16 + stkW + 16, y: PAN_Y, w: hpW, h: PAN_H } };
+  let CW = W;
+  function relayout(steps) {
+    const probe = Canvas(10, 10);
+    let wideLocal = 0, wideFrame = 0;
+    for (const st of steps) for (const f of (st.stack || [])) {
+      wideFrame = Math.max(wideFrame, probe.textW(f.name, 12, true));
+      for (const l of (f.locals || [])) wideLocal = Math.max(wideLocal, probe.textW(String(l), 11, true));
+    }
+    const needStk = Math.max(stkW, Math.max(wideLocal + 36, wideFrame + 30));
+    let wideHead = 0, wideVal = 0;
+    for (const k of Object.keys(HEAP)) {
+      wideHead = Math.max(wideHead, probe.textW(`${HEAP[k].addr}  ${k} : ${HEAP[k].type}`, 11, true));
+    }
+    const needHp = Math.max(hpW, wideHead + 28);
+    if (needStk === stkW && needHp === hpW) return;
+    CW = 24 + srcW + 16 + needStk + 16 + needHp + 24;
+    cv = Canvas(CW, H);
+    P = { src: { x: 24, y: PAN_Y, w: srcW, h: PAN_H },
+          stk: { x: 24 + srcW + 16, y: PAN_Y, w: needStk, h: PAN_H },
+          hp:  { x: 24 + srcW + 16 + needStk + 16, y: PAN_Y, w: needHp, h: PAN_H } };
+  }
 
   const panel = (p, t, band) =>
     cv.rect(band, p.x, p.y, p.w, p.h, { fill: C.panel, stroke: C.faint }) +
@@ -132,10 +158,10 @@ function buildMemoryWalkthrough(spec) {
 
   const render = (s, i) =>
       cv.text(24, Y.title, title, { size: 15, weight: 700, mono: false, band: 'title' })
-    + cv.text(W - 24, Y.title, subtitle, { size: 11, anchor: 'end', fill: C.dim, band: 'seed' })
+    + cv.text(CW - 24, Y.title, subtitle, { size: 11, anchor: 'end', fill: C.dim, band: 'seed' })
     + drawSource(s.line) + drawStack(s.stack) + drawHeap(s.heap)
-    + cv.text(W / 2, Y.step, `Step ${i + 1}/${STEPS.length} — ${s.t}`, { size: 15, weight: 700, mono: false, anchor: 'middle', band: 'steplbl' })
-    + cv.textBlock(W / 2, Y.cap, s.cap, { maxLines: CAP_LINES, maxPx: W - 120 });
+    + cv.text(CW / 2, Y.step, `Step ${i + 1}/${STEPS.length} — ${s.t}`, { size: 15, weight: 700, mono: false, anchor: 'middle', band: 'steplbl' })
+    + cv.textBlock(CW / 2, Y.cap, s.cap, { maxLines: CAP_LINES, maxPx: CW - 120 });
 
   // The steps handed to emit() are remembered, because embed() used to read
   // spec.steps — which a caller that builds its steps AFTER calling the kit
@@ -146,6 +172,7 @@ function buildMemoryWalkthrough(spec) {
     emit(finalSteps) {
       const ST = finalSteps || STEPS;
       if (!ST || !ST.length) throw new Error(`[${name}] emit() got no steps — a walkthrough with zero steps is not a walkthrough`);
+      relayout(ST);
       EMITTED = ST;
       fs.mkdirSync(path.join(OUTDIR, 'frames'), { recursive: true });
       let errs = [];
@@ -165,7 +192,7 @@ function buildMemoryWalkthrough(spec) {
       fs.writeFileSync(path.join(OUTDIR, 'steps.json'), JSON.stringify(
         { name, steps: ST.map(s => ({ t: s.t, line: s.line, stack: s.stack })) }, null, 2));
       if (errs.length) { console.error('GEOMETRY FAIL:\n' + errs.slice(0, 10).join('\n')); process.exit(1); }
-      return { total: a.total, W, H, steps: ST.length };
+      return { total: a.total, W: CW, H, steps: ST.length };
     },
     embed(opts) {
       const { heading, intro, sub, rel } = opts;
