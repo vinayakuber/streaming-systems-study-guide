@@ -1,0 +1,127 @@
+{
+  "name": "ch05-system-memory",
+  "steps": [
+    {
+      "t": "pass 1 — the dedup set admits it, and the charge lands",
+      "line": [
+        33,
+        36,
+        53
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "withKey = ...",
+            "withoutKey = ...",
+            "doubled = ..."
+          ]
+        },
+        {
+          "name": "run",
+          "locals": [
+            "useKey = true",
+            "proc = @0x100",
+            "pipe = @0x300"
+          ]
+        },
+        {
+          "name": "sinkWrite",
+          "locals": [
+            "proc = @0x100",
+            "pipe = @0x300",
+            "e = EVENTS[4]"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "the crash takes the seen-set and leaves the offset",
+      "line": [
+        43,
+        44
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "withKey = ...",
+            "withoutKey = ...",
+            "doubled = ..."
+          ]
+        },
+        {
+          "name": "run",
+          "locals": [
+            "useKey = true",
+            "proc = @0x100",
+            "pipe = @0x300"
+          ]
+        },
+        {
+          "name": "crash",
+          "locals": [
+            "pipe = @0x300"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "pass 2 — dedup lets it through, and the KEY stops it",
+      "line": [
+        24,
+        25
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "withKey = @0x100",
+            "withoutKey = ...",
+            "doubled = ..."
+          ]
+        },
+        {
+          "name": "run",
+          "locals": [
+            "useKey = true",
+            "proc = @0x100",
+            "pipe = @0x300"
+          ]
+        },
+        {
+          "name": "sinkWrite",
+          "locals": [
+            "proc = @0x100",
+            "pipe = @0x300",
+            "e = EVENTS[4]"
+          ]
+        },
+        {
+          "name": "charge",
+          "locals": [
+            "proc = @0x100",
+            "key = \"order-4\"",
+            "amount = 6"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and without the key the same run charges 12",
+      "line": [
+        64
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "withKey = @0x100",
+            "withoutKey = @0x200",
+            "doubled = 6"
+          ]
+        }
+      ]
+    }
+  ]
+}

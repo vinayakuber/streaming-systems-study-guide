@@ -9,6 +9,7 @@ registerChapter({
   flow: [
     {
       section: 'What exactly-once means',
+      walkthroughs: ['ch05-meaning', 'ch05-meaning-memory'],
       color: 'cyan',
       motivation: `"Exactly-once" is used loosely, so this section fixes the definition — it is about each record affecting the output exactly once, not about a magic guarantee that nothing is ever retried.`,
       steps: [
@@ -17,56 +18,10 @@ registerChapter({
         { num: 3, title: 'Two sub-problems', detail: 'Exactly-once splits into <strong>deduplicating records as they move between stages</strong> (sources and shuffles) and <strong>making the final effect idempotent</strong> (sinks and side effects).' },
         { num: 4, title: 'Exactly-once state vs exactly-once effects', detail: 'Making per-key state exactly-once is easy (recompute a deterministic value); making an <strong>external side effect</strong> exactly-once (send one email, charge one card) is the hard part.' }
       ],
-      program: `// SHUFFLE SIDE — a retried record is deduplicated so it does not double-count
-// GOAL (what this is FOR): answer "has record r7 already been delivered?" so a retry of r7 is dropped and the value 10 counts once, not twice.
-//    THE NAIVE WAY (why we keep a seen set at all): deliver every copy of every record — then a crash-and-retry delivers r7 twice and the
-//    value 10 is counted twice. We replace "deliver every copy" with a seen set of delivered ids: one lookup + one insert per record, and
-//    a retry whose id is already present is dropped.
-// DEF: record — a keyed element = { id: "r7", key: 42, value: 10 }
-// DEF: seen — the set of delivered ids = { "r1", "r2", "r3" }
-//    WHY seen exists: without it, "is this delivery a retry?" is unanswerable — there is no memory of which ids already flowed through.
-//    With it, the retry check is one membership lookup: r7 absent on delivery 1 (record it), present on delivery 2 (drop it).
-// DEF: dedup — the store of already-delivered ids = { "r1", "r2", "r3" }
-// STATE (before):
-//    seen : { "r1", "r2", "r3" }
-// ======================================================================
-// offset 0: {id: "r7", key: 42, value: 10}
-// offset 1: {id: "r7", key: 42, value: 10, delivery: "retry"}
-// ======================================================================
-// BUILD PHASE · run once at the stage start
-// step 0 · initialize the delivered-id set -> seen : none -> { "r1", "r2", "r3" }
-//    -> input  : the set of already-delivered ids = { "r1", "r2", "r3" }
-//    <- output : seen = { "r1", "r2", "r3" }   BECAUSE the stage starts with three delivered records
-// QUERY PHASE · per delivered record
-// step 1 · check the id -> delivered : false -> true
-//    -> input  : record.id = "r7", seen = { "r1", "r2", "r3" }
-//    decode 1a · look up record.id in seen -> found : none -> false
-//    decode 1b · set delivered from the lookup -> delivered : false -> true
-//    <- output : delivered = true   BECAUSE "r7" is not in seen
-// step 2 · record the id -> seen : { "r1", "r2", "r3" } -> { "r1", "r2", "r3", "r7" }
-//    -> input  : record.id = "r7", seen = { "r1", "r2", "r3" }
-//    <- output : seen = { "r1", "r2", "r3", "r7" }   BECAUSE the first delivery succeeded
-// step 3 · the retry delivers the same record -> delivered : true -> true, action "pass" -> "drop"
-//    -> input  : record.id = "r7", seen = { "r1", "r2", "r3", "r7" }
-//    <- output : delivered = true, action = "drop"   BECAUSE "r7" is already in seen
-// ======================================================================
-// TRACE (record r7 delivered twice):
-//    delivery | id in seen? | action    | seen size
-//    1        | false       | record r7 | 4
-//    2        | true        | drop      | 4
-// CORRECTNESS (dedup-invariant lemma): a record is recorded in seen exactly on its first delivery and dropped on every
-//    later one — r7 is absent on delivery 1 (so it is recorded) and present on delivery 2 (so it is dropped), which
-//    makes two deliveries produce exactly one effect, the value 10 counted once.
-// VARIANTS (when to pick which):
-//    exact id set               -> one set lookup per record, stores every id (use when ids fit in memory)   <- THIS ONE
-//    bounded-id cache           -> one cache lookup per record, stores a bounded window of ids (use when the id space is huge)
-//    monotonic id + high-water mark -> one compare per record, stores one number (use for a single ordered source)
-// ======================================================================
-// downstream : the stage reads delivery 1 -> seen r7 -> delivery 2 -> dropped -> effect 10   BECAUSE the second delivery was a duplicate
-//    derivation : dedup = 2 - 1 = 1 effect, so the record contributes value 10 once, not 20`
     },
     {
       section: 'Idempotency and deduplication',
+      walkthroughs: ['ch05-dedup', 'ch05-dedup-memory'],
       color: 'orange',
       motivation: `Exactly-once is not a single mechanism — it is deduplication at the boundaries plus idempotency at the effects, so this section separates the two and shows where each applies.`,
       steps: [
@@ -75,48 +30,10 @@ registerChapter({
         { num: 3, title: 'Sources need replayable, deduplicable records', detail: 'A source that can be <strong>replayed from a checkpoint</strong> (a Kafka offset, a file offset) and whose records carry stable ids can be re-read without double-counting.' },
         { num: 4, title: 'End-to-end exactly-once = source + shuffle + sink', detail: 'End-to-end exactly-once composes: a replayable source, a deduplicating shuffle, and an <strong>idempotent sink</strong>. Drop any one and the guarantee breaks.' }
       ],
-      program: `// SINK SIDE — an idempotent write absorbs a retry, a non-idempotent one double-counts
-// DEF: idempotent write — writing the same (key, value) twice leaves one value = SET 42 -> 10
-// DEF: non-idempotent write — a counter that increments = ADD 10
-// DEF: balance — the downstream account state = { 42: 30 }
-// STATE (before):
-//    balance : { 42: 30 }
-// ======================================================================
-// offset 0: {key: 42, value: 10}
-// offset 1: {key: 42, value: 10, delivery: "retry"}
-// ======================================================================
-// BUILD PHASE · run once at the sink start
-// step 0 · initialize the balance register -> balance : none -> { 42: 30 }
-//    -> input  : starting account balance = { 42: 30 }
-//    <- output : balance = { 42: 30 }   BECAUSE the sink opens with the existing balance
-// QUERY PHASE · per delivered write
-// step 1 · first delivery, idempotent path -> balance[42] : 30 -> 10
-//    -> input  : write = SET 42 -> 10, balance = { 42: 30 }
-//    <- output : balance[42] = 10   BECAUSE SET replaces the old value
-// step 2 · retry, idempotent path -> balance[42] : 10 -> 10
-//    -> input  : write = SET 42 -> 10, balance = { 42: 10 }, key = 42 already seen
-//    <- output : balance[42] = 10   BECAUSE the key is already seen, so the write is skipped and SET 10 again is the same effect
-// step 3 · counter path comparison -> balance[42] : 30 -> 40 -> 50
-//    -> input  : write = ADD 10, balance = { 42: 30 }, deliveries = 2
-//    <- output : balance[42] = 50   BECAUSE ADD 10 runs twice
-// ======================================================================
-// TRACE (key 42, value 10 delivered twice):
-//    path        | delivery | balance
-//    idempotent  | 1        | 10
-//    idempotent  | 2        | 10
-//    counter     | 2        | 50
-// CORRECTNESS (idempotency-invariant lemma): SET 42 -> 10 maps the balance to 10 whether applied once or twice, while
-//    ADD 10 applied twice gives 30 + 10 + 10 = 50 — so only the idempotent write keeps two deliveries at one effect.
-// VARIANTS (when to pick which):
-//    idempotent SET/upsert -> one overwrite per key, retry-safe (use when the store supports overwrite)   <- THIS ONE
-//    ADD with dedup        -> one add + one dedup lookup, needs a seen-id set (use when only increments are available)
-//    two-phase commit      -> one extra round-trip per participant, atomic but slow (use when the effect spans stores)
-// ======================================================================
-// downstream : delivery 1 -> balance 10 -> retry -> balance 10   BECAUSE only the idempotent write tolerates the retry
-//    derivation : 2 * 10 = 20 added by ADD, but exactly-once requires 1 * 10 = 10 -> the sink must be idempotent`
     },
     {
       section: 'Side effects — the hard part',
+      walkthroughs: ['ch05-effects', 'ch05-effects-memory'],
       color: 'green',
       motivation: `The truly hard case is when the pipeline must do something in the outside world — send an email, call a payment API — because that effect cannot be undone by recomputation, so this section covers the patterns that make side effects tractable.`,
       steps: [
@@ -125,46 +42,6 @@ registerChapter({
         { num: 3, title: 'Isolate side effects at the boundary', detail: 'Keep the main computation pure and <strong>push side effects to the very end</strong> of the pipeline, where retries are most controllable and the effect is a single idempotent write.' },
         { num: 4, title: 'Two-phase is expensive and fragile', detail: 'True end-to-end exactly-once across an external side effect often needs a <strong>two-phase commit</strong>, which is expensive and fragile. <strong>Prefer idempotent effects over distributed transactions.</strong>' }
       ],
-      program: `// PAYMENT SIDE — an idempotency key makes a charge retry-safe, a plain charge double-bills
-// DEF: idempotency key — a unique id the external system uses to deduplicate = "order-99"
-// DEF: charge — a side effect on the card = charge $10 for order-99
-// DEF: card — the customer payment instrument charged = card ending 4242
-// DEF: ledger — the external balance record the charge writes = 0
-// STATE (before):
-//    card_ledger : { "order-99": 0 }
-// ======================================================================
-// offset 0: {order: "order-99", amount: 10, attempt: 1}
-// offset 1: {order: "order-99", amount: 10, attempt: 2}
-// ======================================================================
-// BUILD PHASE · run once before the first charge
-// step 0 · initialize the ledger register -> card_ledger : none -> { "order-99": 0 }
-//    -> input  : idempotency key = "order-99", starting ledger = 0
-//    <- output : card_ledger = { "order-99": 0 }   BECAUSE the order has not been charged yet
-// QUERY PHASE · per charge attempt
-// step 1 · first attempt with the key -> card_ledger["order-99"] : 0 -> 10
-//    -> input  : order = "order-99", amount = 10, idempotency key = "order-99"
-//    <- output : card_ledger["order-99"] = 10   BECAUSE the charge succeeds and records the key
-// step 2 · retry with the same key -> card_ledger["order-99"] : 10 -> 10
-//    -> input  : order = "order-99", amount = 10, idempotency key = "order-99"
-//    <- output : card_ledger["order-99"] = 10   BECAUSE the external system sees order-99 already charged
-// step 3 · plain charge comparison -> card_ledger["order-99"] : 0 -> 10 -> 20
-//    -> input  : order = "order-99", amount = 10, no key, attempts = 2
-//    <- output : card_ledger["order-99"] = 20   BECAUSE the retry has no key to deduplicate on
-// ======================================================================
-// TRACE (order-99, $10, two attempts):
-//    attempt | key seen by API? | action | ledger
-//    1       | false            | charge | 10
-//    2       | true             | no-op  | 10
-// CORRECTNESS (key-invariant lemma): the external system records the idempotency key on the first charge and returns
-//    the prior result on any repeat — order-99 is unseen on attempt 1 (ledger 0 -> 10) and seen on attempt 2 (ledger
-//    stays 10), so exactly $10 is charged, never the $20 a keyless retry would produce.
-// VARIANTS (when to pick which):
-//    idempotency key   -> one dedup lookup per effect, one key per effect (use when the API supports dedup)   <- THIS ONE
-//    idempotent upsert -> one overwrite per key, overwrite not append (use for a datastore sink)
-//    two-phase commit  -> one extra round-trip per participant, atomic across systems (use when a single API cannot dedup)
-// ======================================================================
-// downstream : attempt 1 -> charge 10 -> attempt 2 -> no-op -> balance 10   BECAUSE only the key deduplicates the side effect
-//    derivation : exactly-once = 1 * 10 = $10 charged, not 2 * 10 = $20, thanks to idempotency key order-99`
     }
   ],
 
@@ -193,6 +70,7 @@ registerChapter({
     { scenario: "A metrics pipeline recomputes per-key counts from a replayable source after a crash, but downstream sees doubled counts.", q: "Why do the counts double, and how do you make them exactly-once?", solution: "The retried records double-count because the sink is non-idempotent; make the sink an idempotent upsert (set the count) and deduplicate records at the shuffle.", components: ["Replayable source — offset", "Dedup — record ids", "Idempotent sink — upsert count"],  code: "// count before crash = 10\n//   replay delivers same records -> dedup drops duplicates\n//   sink upserts count = 10 (SET), not += 10\n//   -> count stays 10, not 20", tieback: "This is exactly the end-to-end exactly-once material in this chapter.", refs: ["3. Shuffle deduplication", "4. Replayable sources", "5. End-to-end exactly-once"], problems: ["20-metrics-monitoring", "21-ad-click-aggregation"] }
   ],
   systemDesign: {
+    walkthroughs: ['ch05-system', 'ch05-system-memory'],
     question: 'Design a payment pipeline that charges a card exactly once. Premise: the pipeline can crash and retry after a timeout, so the sink must be idempotent on an idempotency key and the shuffle must dedup, otherwise a retry double-charges order-99.',
     pipeline: 'replayable source (offset) -> dedup shuffle -> idempotent sink (idempotency key) -> external system',
     decomposition: [
@@ -222,34 +100,6 @@ registerChapter({
         ] }
     ],
     
-    program: `// SYSTEM DESIGN — a crash and retry still charge the card exactly once via the idempotency key
-// GOAL (what this is FOR): answer "after a crash retries record r7, does order-99 get charged $10 once or $20?"
-//    THE NAIVE WAY (why we pair a dedup set with an idempotency key): retry the charge without either guard — then two deliveries of r7
-//    double-bill order-99. We replace the guard-less retry with a dedup set at the shuffle (drops the duplicate delivery) and an
-//    idempotency key at the sink (turns a repeat charge into a no-op).
-// DEF: idempotency key — a unique id the external system deduplicates on = "order-99"
-// DEF: dedup — a set of record ids already delivered = { "r1", "r2", "r3" }
-//    WHY dedup exists: without it, "is this delivery of r7 a retry?" has no memory to consult; with it, the first delivery records r7 and
-//    the retry is dropped, so the sink sees r7 exactly once.
-// DEF: charge — the side effect = charge $10 for order-99
-// STATE (before):
-//    card_ledger : 0
-// ======================================================================
-// offset 0: {id: "r7", order: "order-99", amount: 10}
-// offset 1: {id: "r7", order: "order-99", amount: 10, delivery: "retry"}
-// ======================================================================
-// step 1 · first delivery of r7 -> dedup : { "r1", "r2", "r3" } -> { "r1", "r2", "r3", "r7" }
-//    -> input  : record.id = "r7", dedup = { "r1", "r2", "r3" }
-//    <- output : dedup = { "r1", "r2", "r3", "r7" }   BECAUSE r7 is new
-// step 2 · the charge succeeds -> card_ledger : 0 -> 10
-//    -> input  : order = "order-99", amount = 10, key = "order-99" new
-//    <- output : card_ledger = 10   BECAUSE the API sees the key order-99 as new
-// step 3 · the retry delivers r7 again -> dedup : { "r1", "r2", "r3", "r7" } -> { "r1", "r2", "r3", "r7" } -> card_ledger : 10 -> 10
-//    -> input  : record.id = "r7", dedup = { "r1", "r2", "r3", "r7" }, key = "order-99" seen
-//    <- output : dedup = { "r1", "r2", "r3", "r7" }, card_ledger = 10   BECAUSE the key is now seen
-// ======================================================================
-// downstream : r7 -> dedup seen -> charge 10 -> retry dropped -> balance 10   BECAUSE dedup blocked the retry and the key made the effect idempotent
-//    derivation : exactly-once = 2 - 1 = 1 charge of $10, so the retry adds nothing`
   },
   quiz: [
     { question: "What does exactly-once mean in this book?", options: ["A. No operation is ever retried", "B. Each record affects the output exactly once", "C. The pipeline never crashes", "D. Every window emits exactly one pane"], answer: 2, explanation: "Exactly-once is the property that a retried record does not affect the output twice.", conceptRef: "1. Retries are unavoidable" },

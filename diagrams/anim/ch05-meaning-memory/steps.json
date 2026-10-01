@@ -1,0 +1,109 @@
+{
+  "name": "ch05-meaning-memory",
+  "steps": [
+    {
+      "t": "at-most-once DROPS everything after the checkpoint",
+      "line": [
+        27,
+        30
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "once = ...",
+            "atMost = ...",
+            "atLeast = ...",
+            "worst = ..."
+          ]
+        },
+        {
+          "name": "deliver",
+          "locals": [
+            "mode = \"at-most-once\"",
+            "out = @0x200",
+            "e = EVENTS[5]"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "at-least-once APPENDS them a second time",
+      "line": [
+        34
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "once = 45",
+            "atMost = 23",
+            "atLeast = ...",
+            "worst = ..."
+          ]
+        },
+        {
+          "name": "deliver",
+          "locals": [
+            "mode = \"at-least-once\"",
+            "out = @0x300",
+            "e = EVENTS[8]"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and the aggregate cannot tell the two apart",
+      "line": [
+        42,
+        44
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "once = 45",
+            "atMost = 23",
+            "atLeast = 67",
+            "worst = ..."
+          ]
+        },
+        {
+          "name": "aggregate",
+          "locals": [
+            "ids = @0x300",
+            "t = 67",
+            "id = 8"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "one duplicate costs v / window total, so thin windows hurt",
+      "line": [
+        51,
+        57
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "once = 45",
+            "atMost = 23",
+            "atLeast = 67",
+            "worst = 100"
+          ]
+        },
+        {
+          "name": "windowCost",
+          "locals": [
+            "id = 8",
+            "w = 480",
+            "base = 8",
+            "e = EVENTS[8]"
+          ]
+        }
+      ]
+    }
+  ]
+}

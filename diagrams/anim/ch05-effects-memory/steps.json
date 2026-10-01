@@ -1,0 +1,150 @@
+{
+  "name": "ch05-effects-memory",
+  "steps": [
+    {
+      "t": "the processor is the only component that can recognise a repeat",
+      "line": [
+        26,
+        27
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "byDedup = ...",
+            "byKey = ...",
+            "worst = ..."
+          ]
+        },
+        {
+          "name": "coverage",
+          "locals": [
+            "useDedup = false",
+            "useKey = true",
+            "n = 0",
+            "p = \"after the charge, before the offset commit\"",
+            "o = ..."
+          ]
+        },
+        {
+          "name": "attempt",
+          "locals": [
+            "proc = @0x100",
+            "crashAt = \"after the charge, before the offset commit\"",
+            "useDedup = false",
+            "useKey = true",
+            "seen = []",
+            "pass = 2"
+          ]
+        },
+        {
+          "name": "charge",
+          "locals": [
+            "proc = @0x100",
+            "key = \"order-4\"",
+            "amount = 6"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "a key generated at SEND TIME defeats the whole mechanism",
+      "line": [
+        40,
+        42
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "byDedup = ...",
+            "byKey = ...",
+            "worst = ..."
+          ]
+        },
+        {
+          "name": "attempt",
+          "locals": [
+            "proc = @0x200",
+            "crashAt = \"after the charge, before the offset commit\"",
+            "useDedup = false",
+            "useKey = false",
+            "seen = []",
+            "pass = 2"
+          ]
+        },
+        {
+          "name": "keyFor",
+          "locals": [
+            "e = EVENTS[4]",
+            "fromData = false"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "dedup covers 1 crash point, and misses the other 2",
+      "line": [
+        54
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "byDedup = 1",
+            "byKey = ...",
+            "worst = ..."
+          ]
+        },
+        {
+          "name": "coverage",
+          "locals": [
+            "useDedup = true",
+            "useKey = false",
+            "n = 1",
+            "p = \"after the shuffle, before the charge\"",
+            "o = ..."
+          ]
+        },
+        {
+          "name": "attempt",
+          "locals": [
+            "proc = @0x200",
+            "crashAt = \"after the shuffle, before the charge\"",
+            "useDedup = true",
+            "useKey = false",
+            "seen = []",
+            "pass = 1"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "so the two guards are NOT interchangeable here",
+      "line": [
+        64,
+        68
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "byDedup = 1",
+            "byKey = 3",
+            "worst = charged 12"
+          ]
+        },
+        {
+          "name": "coverage",
+          "locals": [
+            "useDedup = false",
+            "useKey = true",
+            "n = 3",
+            "p = \"after the charge, before the offset commit\"",
+            "o = ..."
+          ]
+        }
+      ]
+    }
+  ]
+}
