@@ -1,0 +1,123 @@
+{
+  "name": "ch10-lambda-memory",
+  "steps": [
+    {
+      "t": "each layer picks the clock its own context makes obvious",
+      "line": [
+        29,
+        31
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "batch = ...",
+            "speed = ...",
+            "apart = ...",
+            "lam = ...",
+            "kap = ...",
+            "before = ...",
+            "after = ..."
+          ]
+        },
+        {
+          "name": "layerFor",
+          "locals": [
+            "name = \"speed\"",
+            "clock = \"pt\"",
+            "out = (a map)",
+            "e = EVENTS[0]",
+            "b = 0"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "so the two layers are 26 apart, with no bug in either",
+      "line": [
+        45,
+        50
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "batch = @0x100",
+            "speed = @0x200",
+            "apart = 26",
+            "lam = ...",
+            "kap = ...",
+            "before = ...",
+            "after = ..."
+          ]
+        },
+        {
+          "name": "drift",
+          "locals": [
+            "a = @0x100",
+            "b = @0x200",
+            "total = 26",
+            "k = 240",
+            "other = 20"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "the same fix lands in two places, or in one",
+      "line": [
+        58,
+        59
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "batch = @0x100",
+            "speed = @0x200",
+            "apart = 26",
+            "lam = Fix(2, 2)",
+            "kap = Fix(1, 1)",
+            "before = ...",
+            "after = ..."
+          ]
+        },
+        {
+          "name": "applyFix",
+          "locals": [
+            "architecture = \"lambda\""
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and the replay restores the correct total from the log",
+      "line": [
+        66,
+        69
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "batch = @0x100",
+            "speed = @0x200",
+            "apart = 26",
+            "lam = Fix(2, 2)",
+            "kap = Fix(1, 1)",
+            "before = 32",
+            "after = 45"
+          ]
+        },
+        {
+          "name": "replay",
+          "locals": [
+            "fixed = true",
+            "total = 45",
+            "e = EVENTS[8]"
+          ]
+        }
+      ]
+    }
+  ]
+}

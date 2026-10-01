@@ -1,0 +1,106 @@
+{
+  "name": "ch10-converge-memory",
+  "steps": [
+    {
+      "t": "one pipeline, and the fix is one line inside it",
+      "line": [
+        28,
+        33
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "wrong = ...",
+            "right = ...",
+            "invariant = ...",
+            "sameOp = ...",
+            "neverFinal = ..."
+          ]
+        },
+        {
+          "name": "process",
+          "locals": [
+            "fixed = false",
+            "per = (a map)",
+            "total = 32",
+            "e = EVENTS[8]",
+            "v = 4"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "the replay runs the same code over the same log",
+      "line": [
+        72
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "wrong = @0x100",
+            "right = @0x200",
+            "invariant = ...",
+            "sameOp = ...",
+            "neverFinal = ..."
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and an unaffected key is what makes the replay checkable",
+      "line": [
+        45,
+        48
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "wrong = @0x100",
+            "right = @0x200",
+            "invariant = [\"b\"]",
+            "sameOp = ...",
+            "neverFinal = ..."
+          ]
+        },
+        {
+          "name": "unaffectedKeys",
+          "locals": [
+            "before = @0x100",
+            "after = @0x200",
+            "same = [\"b\"]",
+            "k = \"b\""
+          ]
+        }
+      ]
+    },
+    {
+      "t": "but one window is still never final",
+      "line": [
+        62,
+        66
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "wrong = @0x100",
+            "right = @0x200",
+            "invariant = [\"b\"]",
+            "sameOp = \"replay the log\"",
+            "neverFinal = NONE"
+          ]
+        },
+        {
+          "name": "finalAtStreaming",
+          "locals": [
+            "bucket = 480",
+            "i = 8"
+          ]
+        }
+      ]
+    }
+  ]
+}

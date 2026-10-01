@@ -1,0 +1,105 @@
+{
+  "name": "ch10-history-memory",
+  "steps": [
+    {
+      "t": "the grouping is one function, and the clock is its argument",
+      "line": [
+        24,
+        27
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "batch = ...",
+            "stream = ...",
+            "arrival = ..."
+          ]
+        },
+        {
+          "name": "group",
+          "locals": [
+            "events = EVENTS",
+            "clock = \"et\"",
+            "out = (a map)",
+            "e = EVENTS[4]",
+            "b = 240"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "batch's watermark is a constant: end of input",
+      "line": [
+        37,
+        38,
+        57
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "batch = @0x100",
+            "stream = ...",
+            "arrival = ..."
+          ]
+        },
+        {
+          "name": "runAs",
+          "locals": [
+            "mode = \"bounded\"",
+            "w = (a map)",
+            "fin = (4 values)",
+            "b = 480"
+          ]
+        },
+        {
+          "name": "finalAtBounded",
+          "locals": [
+            "bucket = 480"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "streaming asks a real watermark, and one bucket gets NONE",
+      "line": [
+        43,
+        47
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "batch = @0x100",
+            "stream = @0x200",
+            "arrival = ..."
+          ]
+        },
+        {
+          "name": "finalAtStreaming",
+          "locals": [
+            "bucket = 480",
+            "i = 8"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and the old arrival-time pipeline differs in the VALUES",
+      "line": [
+        68
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "batch = @0x100",
+            "stream = @0x200",
+            "arrival = @0x300"
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,113 @@
+{
+  "name": "ch10-system-memory",
+  "steps": [
+    {
+      "t": "the healthy replay reproduces the true total",
+      "line": [
+        43,
+        46,
+        34
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "healthy = ...",
+            "short = ...",
+            "loose = ..."
+          ]
+        },
+        {
+          "name": "verify",
+          "locals": [
+            "log = Log(9 events, retained 9)",
+            "pipe = Pipeline(true, true)",
+            "t = 45"
+          ]
+        },
+        {
+          "name": "replayThrough",
+          "locals": [
+            "log = Log(9 events, retained 9)",
+            "pipe = Pipeline(true, true)",
+            "total = 45",
+            "e = EVENTS[8]"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "short retention produces a smaller total and no error",
+      "line": [
+        57,
+        59
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "healthy = @0x100",
+            "short = @0x200",
+            "loose = ..."
+          ]
+        },
+        {
+          "name": "verify",
+          "locals": [
+            "log = Log(6 events, retained 6)",
+            "pipe = Pipeline(true, true)",
+            "t = 30"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and a non-deterministic pipeline gives the right total for the wrong reason",
+      "line": [
+        60
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "healthy = @0x100",
+            "short = @0x200",
+            "loose = @0x300"
+          ]
+        },
+        {
+          "name": "verify",
+          "locals": [
+            "log = Log(9 events, retained 9)",
+            "pipe = Pipeline(true, false)",
+            "t = 45"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "so two assumptions carry the whole architecture",
+      "line": [
+        61
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "healthy = @0x100",
+            "short = @0x200",
+            "loose = @0x300"
+          ]
+        },
+        {
+          "name": "verify",
+          "locals": [
+            "log = Log(9 events, retained 9)",
+            "pipe = Pipeline(true, true)",
+            "t = 45"
+          ]
+        }
+      ]
+    }
+  ]
+}
