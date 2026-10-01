@@ -243,6 +243,7 @@ _Role: stream processor — derives tables from the stream_
 //    derivation : fold = 10 - 10 + 7 - 7 + 12 = 12, the same as the source table
 ```
 
+
 ## Interview Questions
 
 ### Q1
@@ -388,7 +389,7 @@ A stream is a sequence of events over time — an append-only change log.
 
 **In the wild.** A Flink keyed aggregation produces a stateful table.
 
-<a href="../diagrams/d2/card/ch06-3.png"><img src="../diagrams/d2/card/ch06-3.png" alt="4. Stream -> table" width="308"></a>
+<a href="../diagrams/d2/card/ch06-3.png"><img src="../diagrams/d2/card/ch06-3.png" alt="4. Stream -&gt; table" width="308"></a>
 ### Direction: 5. Table -> stream
 
 **Why.** To react to database changes in real time, capture them as a feed.
@@ -399,7 +400,7 @@ A stream is a sequence of events over time — an append-only change log.
 
 **In the wild.** Debezium CDC turns MySQL/Postgres into Kafka changelogs.
 
-<a href="../diagrams/d2/card/ch06-4.png"><img src="../diagrams/d2/card/ch06-4.png" alt="5. Table -> stream" width="375"></a>
+<a href="../diagrams/d2/card/ch06-4.png"><img src="../diagrams/d2/card/ch06-4.png" alt="5. Table -&gt; stream" width="375"></a>
 ### Duality: 6. The round-trip
 
 **Why.** The two directions should be inverses — that is the formal statement of the duality.

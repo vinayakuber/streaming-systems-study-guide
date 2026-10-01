@@ -17,8 +17,7 @@
  * those differ.
  */
 const fs = require('fs'), path = require('path');
-const COMMON = new Set(('the and for not but its row rows one two all any out set step steps read reads value values code codes column columns block blocks run runs index segment table query data disk file files bucket buckets store sum total order group filter limit slot slots frame frames stack heap name names map size count bits bytes what when why how this that they them then than with from into only same each both every which while after before once still here there does done must will can cannot never always where their just like also more less most many much such make makes made take takes gives give hand hands holds hold note see say says left right first last next new old real full part whole entire side line lines panel panels label labels picture page book chapter reader engine system systems user users answer answers cost costs work works case cases point points way ways time times number numbers thing things kind sort sorted unsorted encoded stored written built build builds frozen immutable per via min max'
-  ).split(/\s+/));
+const COMMON = new Set(('the and for not but its row rows one two all any out set step steps read reads value values code codes column columns block blocks run runs index segment table query data disk file files bucket buckets store sum total order group filter limit slot slots frame frames stack heap name names map size count bits bytes what when why how this that they them then than with from into only same each both every which while after before once still here there does done must will can cannot never always where their just like also more less most many much such make makes made take takes gives give hand hands holds hold note see say says left right first last next new old real full part whole entire side line lines panel panels label labels picture page book chapter reader engine system systems user users answer answers cost costs work works case cases point points way ways time times number numbers thing things kind sort sorted unsorted encoded stored written built build builds frozen immutable per via min max select from where group by order limit between in and or not count sum avg having distinct on as asc desc insert into values null true false').split(/\s+/));
 
 const ANIM = path.join('diagrams', 'anim');
 const dirs = fs.readdirSync(ANIM).map(d => path.join(ANIM, d)).filter(d => fs.existsSync(path.join(d, 'embed.md')));
@@ -41,11 +40,25 @@ for (const d of fs.readdirSync(ANIM)) {
 // it appear in a program listing would be the gate misreading data as an
 // identifier. The seed is the authority for what data the book contains, so its
 // vocabulary joins the lookupable set.
-try {
-  const seed = require(path.resolve('tools', 'rle_seed.js'));
-  for (const k of Object.keys(seed.DICTIONARY || {})) declared.add(k);
-  for (const v of Object.values(seed.DICTIONARY || {})) declared.add(String(v));
-} catch (e) { console.log('note: no tools/rle_seed.js — data labels are not in the lookupable set here'); }
+// Which seed file a repo has is repo-specific (rle_seed.js here, stream_seed.js in
+// the streaming book), so this is a GLOB rather than a name. A hardcoded filename
+// would make the gate silently stop contributing data labels in every other repo —
+// the same "it narrowed its own input" failure recorded in the header above.
+const seeds = fs.readdirSync('tools').filter(f => /_seed\.js$/.test(f));
+if (!seeds.length) console.log('note: no tools/*_seed.js — data labels are not in the lookupable set here');
+for (const sf of seeds) {
+  const seed = require(path.resolve('tools', sf));
+  // Harvest every string/number the seed names or holds, two levels deep: a data
+  // label like `c6` or a key like `a` is DATA, not an identifier, and demanding it
+  // appear in a program listing would be the gate misreading data as code.
+  const harvest = (v, depth) => {
+    if (v === null || v === undefined || depth > 2) return;
+    if (typeof v === 'string' || typeof v === 'number') { declared.add(String(v)); return; }
+    if (Array.isArray(v)) { v.forEach(x => harvest(x, depth + 1)); return; }
+    if (typeof v === 'object') { for (const [k, x] of Object.entries(v)) { declared.add(k); harvest(x, depth + 1); } }
+  };
+  for (const [k, v] of Object.entries(seed)) { declared.add(k); harvest(v, 0); }
+}
 
 let total = 0, checked = 0;
 for (const dir of dirs) {

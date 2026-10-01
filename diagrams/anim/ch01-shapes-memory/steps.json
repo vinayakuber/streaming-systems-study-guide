@@ -1,0 +1,114 @@
+{
+  "name": "ch01-shapes-memory",
+  "steps": [
+    {
+      "t": "the one line where the three shapes differ",
+      "line": [
+        31,
+        32
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "bounded = @0x200",
+            "batch = ...",
+            "stream = ...",
+            "bad = ...",
+            "neverClosed = ..."
+          ]
+        },
+        {
+          "name": "group",
+          "locals": [
+            "events = EVENTS",
+            "shape = \"unbounded-as-batch\"",
+            "out = @0x100",
+            "e = EVENTS[7]",
+            "k = 240"
+          ]
+        },
+        {
+          "name": "keyFor",
+          "locals": [
+            "e = EVENTS[7]",
+            "shape = \"unbounded-as-batch\""
+          ]
+        }
+      ]
+    },
+    {
+      "t": "bounded and streaming produce the SAME groups",
+      "line": [
+        87
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "bounded = @0x200",
+            "batch = @0x100",
+            "stream = @0x200",
+            "bad = ...",
+            "neverClosed = ..."
+          ]
+        }
+      ]
+    },
+    {
+      "t": "so 2 of 9 events are in the wrong bucket",
+      "line": [
+        75,
+        78
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "bounded = @0x200",
+            "batch = @0x100",
+            "stream = @0x200",
+            "bad = @0x300",
+            "neverClosed = ..."
+          ]
+        },
+        {
+          "name": "misplaced",
+          "locals": [
+            "events = EVENTS",
+            "bad = @0x300",
+            "e = EVENTS[7]"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and one window never closes at all",
+      "line": [
+        65,
+        68,
+        70
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "bounded = @0x200",
+            "batch = @0x100",
+            "stream = @0x200",
+            "bad = @0x300",
+            "neverClosed = NONE"
+          ]
+        },
+        {
+          "name": "closesAt",
+          "locals": [
+            "shape = \"unbounded-as-streaming\"",
+            "winStart = 480",
+            "i = 8"
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -20,9 +20,20 @@ _Also known as: SS Ch04 · Session Windows · Fixed Window · Sliding Window · 
 
 ```java
 // STREAM SIDE — one click stream cut three ways gives three different groupings
+// GOAL (what this is FOR): answer "which window does a click at 12:04:00 belong to?" under three different span rules, so one event yields
+//    one fixed count, three sliding counts, and one session.
+//    THE NAIVE WAY (why we pick a shape at all): put every click in one flat count — then "how many per 5 minutes", "what is the rolling
+//    10-minute average", and "how long was the user engaged" all collapse to the same number and none of the three questions is answerable.
+//    We replace the flat count with three span rules, each a separate assignment of the same click.
 // DEF: fixed window — a 5-min non-overlapping span = [12:00, 12:05)
+//    WHO chose the 5-minute span: the pipeline builder, not the data. 5 min here only so 12:04:00 lands in [12:00, 12:05); production
+//    fixed windows are 1, 5, or 15 minutes.
 // DEF: sliding window — a 10-min span that advances every 2 min = [12:00, 12:10)
+//    WHO chose the 10-min / 2-min size and slide: the pipeline builder, not the data. 10 min / 2 min here only so the click at 12:04:00
+//    overlaps exactly three spans ([12:00,12:10), [12:02,12:12), [12:04,12:14)); production sliding windows are 5- or 10-minute with a 1-minute slide.
 // DEF: session window — a burst that closes after a 30-min gap of inactivity = { s1 }
+//    WHO chose the 30-minute gap: the pipeline builder, not the data. 30 min is the web-analytics "user left" convention; here it only has
+//    to exceed any real gap between the clicks so they stay in one session.
 // STATE (before):
 //    fixed_count : 0
 // ======================================================================
@@ -76,9 +87,17 @@ _Also known as: SS Ch04 · Session Windows · Fixed Window · Sliding Window · 
 
 ```java
 // SESSION SIDE — two sessions merge when a bridging event lands inside the gap
+// GOAL (what this is FOR): answer "does a click at 12:20:00 split [12:00,12:10) and [12:40,12:50) apart, or join them into one session?"
+//    THE NAIVE WAY (why we merge at all): treat each burst as its own fixed session and never join them — then a user who pauses 20 min
+//    then returns is counted as two sessions when the gap rule says it is one. We replace "each burst is separate" with a merge step that
+//    collapses any two sessions a bridging event sits inside the gap of.
 // DEF: session gap — the inactivity threshold that splits sessions = 30 min
+//    WHO chose the 30-minute gap: the pipeline builder, not the data. 30 min is the web-analytics "user left" convention; here it only has
+//    to exceed both distances from the bridge (10 min to s1's end and 20 min to s2's start) so the two sessions merge.
 // DEF: s1 — a session window = [12:00, 12:10)
 // DEF: s2 — a session window = [12:40, 12:50)
+//    WHY the session set exists: without it, "does 12:20:00 bridge two sessions?" has no neighbors to measure against; with the open
+//    session set { s1, s2 }, the merge is two distance checks (to each neighbor's end/start) against the one 30-min threshold.
 // STATE (before):
 //    sessions : { "s1": [12:00, 12:10), "s2": [12:40, 12:50) }
 // ======================================================================
@@ -132,7 +151,13 @@ _Also known as: SS Ch04 · Session Windows · Fixed Window · Sliding Window · 
 
 ```java
 // RETRACTION SIDE — a late event merges two already-emitted sessions, forcing a retraction
+// GOAL (what this is FOR): answer "when a late 12:20:00 bridge merges two sessions already emitted, how does the sink end at 6 instead of 11?"
+//    THE NAIVE WAY (why we retract at all): emit the merged session on top of the two already-emitted ones — then the sink holds
+//    s1 (3) + s2 (2) + sMerged (6) = 11, double-counting the same events. We replace "emit on top" with a retraction of the two stale panes
+//    before the merged pane lands.
 // DEF: session gap — the inactivity threshold = 30 min
+//    WHO chose the 30-minute gap: the pipeline builder, not the data. 30 min here only so the 12:20:00 bridge sits within it of both
+//    s1's end and s2's start; production uses the web-analytics 30-minute convention.
 // DEF: retraction — a downstream signal that cancels a previously emitted pane = { "s1", "s2" }
 // DEF: s1, s2 — already-emitted sessions = { "s1": 3, "s2": 2 }
 // STATE (before):
@@ -229,7 +254,13 @@ _Role: trigger/retraction emitter — emits and corrects panes_
 
 ```java
 // SYSTEM DESIGN — a late event merges two sessions and the pipeline retracts the stale panes
+// GOAL (what this is FOR): answer "how does a late 12:20:00 event for user 42 turn two already-reported sessions into one, without double-counting?"
+//    THE NAIVE WAY (why we retract at all): emit the merged session without undoing the two earlier panes — then the store shows
+//    s1 (3) + s2 (2) + sMerged (6) = 11 for what is really one 6-event session. We replace "emit on top" with a retraction of the stale
+//    panes before the merged pane lands.
 // DEF: session gap — the inactivity threshold = 30 min
+//    WHO chose the 30-minute gap: the pipeline builder, not the data. 30 min here only so the 12:20:00 event sits within the gap of both
+//    s1 [12:00,12:10) and s2 [12:40,12:50); production uses the web-analytics 30-minute convention.
 // DEF: retraction — a downstream signal that cancels a previously emitted pane = { "s1", "s2" }
 // DEF: sessions — the current set for user 42 = { "s1": [12:00, 12:10), "s2": [12:40, 12:50) }
 // STATE (before):
@@ -251,6 +282,7 @@ _Role: trigger/retraction emitter — emits and corrects panes_
 // downstream : s1 3 -> s2 2 -> retraction -> sMerged 6   BECAUSE the store must show one session, not three totaling 11
 //    derivation : merged count = 3 + 2 + 1 = 6   BECAUSE s1_count + s2_count + the bridging event
 ```
+
 
 ## Interview Questions
 

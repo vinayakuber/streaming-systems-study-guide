@@ -5,14 +5,6 @@
 # artifact was built. The file can only shrink.
 #
 # format: chNN|<flow section title>|DIAGRAM|PROGRAM
-ch01|What streaming is — terminology|DIAGRAM
-ch01|What streaming is — terminology|PROGRAM
-ch01|Event time vs processing time|DIAGRAM
-ch01|Event time vs processing time|PROGRAM
-ch01|Three shapes of data|DIAGRAM
-ch01|Three shapes of data|PROGRAM
-ch01|systemDesign|DIAGRAM
-ch01|systemDesign|PROGRAM
 ch02|What and Where — transformations and windowing|DIAGRAM
 ch02|What and Where — transformations and windowing|PROGRAM
 ch02|When — triggers and watermarks|DIAGRAM

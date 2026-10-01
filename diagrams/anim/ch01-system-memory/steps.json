@@ -1,0 +1,113 @@
+{
+  "name": "ch01-system-memory",
+  "steps": [
+    {
+      "t": "the 12:00 minute accumulates the events that have arrived",
+      "line": [
+        27,
+        30
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "dash = @0x100",
+            "i = 1",
+            "shown = ...",
+            "fixes = ..."
+          ]
+        },
+        {
+          "name": "onEvent",
+          "locals": [
+            "dash = @0x100",
+            "e = EVENTS[1]",
+            "i = 1",
+            "minute = 0",
+            "closed = false"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "the watermark passes 12:01, so the minute is PUBLISHED",
+      "line": [
+        38,
+        40
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "dash = @0x100",
+            "i = 3",
+            "shown = ...",
+            "fixes = ..."
+          ]
+        },
+        {
+          "name": "publishDue",
+          "locals": [
+            "dash = @0x100",
+            "i = 3",
+            "minute = 0"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "id 7 arrives 148s later, into a minute already published",
+      "line": [
+        29
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "dash = @0x100",
+            "i = 7",
+            "shown = ...",
+            "fixes = ..."
+          ]
+        },
+        {
+          "name": "onEvent",
+          "locals": [
+            "dash = @0x100",
+            "e = EVENTS[7]",
+            "i = 7",
+            "minute = 0",
+            "closed = true"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "three policies, three different published histories",
+      "line": [
+        49,
+        50,
+        51
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "dash = @0x100",
+            "i = 7",
+            "shown = 12",
+            "fixes = 1"
+          ]
+        },
+        {
+          "name": "onLate",
+          "locals": [
+            "dash = @0x100",
+            "e = EVENTS[7]",
+            "policy = \"revise\""
+          ]
+        }
+      ]
+    }
+  ]
+}

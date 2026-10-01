@@ -77,9 +77,17 @@ _Also known as: SS Ch03 · Watermark · Event-time Progress · Heuristic Waterma
 
 ```java
 // AGGREGATOR SIDE — a heuristic watermark from the max seen event time minus a skew
+// GOAL (what this is FOR): answer "how complete is event time, given that records can arrive out of order?" without waiting forever.
+//    THE NAIVE WAY (why we build a watermark at all): wait for the source to go quiet before closing a window — but an unbounded stream
+//    never goes quiet, so the window never closes. We replace "wait for quiet" with a register max_seen that tracks the newest event
+//    time seen and a watermark = max_seen - skew that advances on its own as new records arrive.
 // DEF: skew — the pipeline's bound on out-of-orderness = 120 s
+//    WHO chose the 120 s skew: the pipeline builder, not the data. 120 s here only so a record as much as 2 minutes behind the newest
+//    seen event is still treated on-time; production heuristic skews are typically 30 s to 5 min, tuned to the source's out-of-orderness.
 // DEF: watermark — max_seen_event_time - skew = "12:06:30"
 // DEF: max_seen — the largest event_time observed so far = "12:07:00"
+//    WHY max_seen exists: without it, "is this record late?" has no reference point — there is no newest-seen time to subtract the skew
+//    from. With it, the watermark = max_seen - skew recomputes in one compare + one subtract per record.
 // STATE (before):
 //    watermark : "12:05:00"
 // ======================================================================
@@ -237,9 +245,17 @@ _Role: trigger/emitter — fires on the watermark and handles late data_
 
 ```java
 // SYSTEM DESIGN — a watermark closes a window on time and allowed lateness catches one straggler
+// GOAL (what this is FOR): answer "when does window [12:00, 12:05) close, and what still updates it after the watermark says it is done?"
+//    THE NAIVE WAY (why we pair skew with lateness): close the window at a watermark computed from max_seen with no skew — then a record
+//    that is only 80 s behind the newest seen event is dropped as late even though it is ordinary. We replace "no skew" with
+//    watermark = max_seen - skew, and add an allowed-lateness horizon so a straggler after the watermark still updates the result.
 // DEF: watermark — the pipeline's completeness signal = "12:06:30"
 // DEF: skew — the out-of-orderness bound = 120 s
+//    WHO chose the 120 s skew: the pipeline builder, not the data. 120 s here only so max_seen 12:08:30 minus 120 s gives watermark
+//    12:06:30, which closes [12:00, 12:05) on time; production skews are typically 30 s to 5 min.
 // DEF: allowed lateness — the horizon after the watermark = 60 s
+//    WHO chose the 60 s lateness: the pipeline builder, not the data. 60 s here only so the 12:05:10 straggler arriving just after the
+//    12:06:30 watermark is still inside the horizon; production uses 60 s or 5 min.
 // DEF: window — the fixed event-time slice = [12:00, 12:05)
 // STATE (before):
 //    window_state : { "12:00-12:05": 7 }
@@ -263,6 +279,7 @@ _Role: trigger/emitter — fires on the watermark and handles late data_
 // downstream : record 12:08:30 -> watermark 12:06:30 -> window "12:00-12:05" -> sum 7 -> 8   BECAUSE the straggler arrived within the 60 s lateness horizon
 //    derivation : watermark = 510 - 120 = 390 s into the hour = 12:06:30   BECAUSE 12:08:30 is 510 s and skew is 120 s
 ```
+
 
 ## Interview Questions
 

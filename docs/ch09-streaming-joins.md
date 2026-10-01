@@ -20,8 +20,15 @@ _Also known as: SS Ch09 · Streaming Join · Windowed Join · Temporal Join · S
 
 ```java
 // JOIN SIDE — two streams buffer one side until the other side's watermark catches up
+// GOAL (what this is FOR): answer "when the click at 12:03:00 arrives, how does it find the impression at 12:02:00 that arrived first?"
+//    THE NAIVE WAY (why a buffer exists at all): drop each row after reading it — then the impression is gone before the click arrives
+//    and the two never meet. We replace "read and forget" with a buffer that holds one side until the other probes it, bounded by the join window.
 // DEF: join window — the time bound for a match = [12:00, 12:05)
+//    WHO chose the 5-min window: the pipeline builder, not the data. 5 min here only so impression 12:02 and click 12:03 fall inside one
+//    span; production join windows are the attribution horizon (e.g. 30 min or 24 h for click-to-conversion).
 // DEF: buffer — rows held for the other side = [ "impression 12:02" ]
+//    WHY buffer exists: without it, "where is the impression that arrived first?" has no answer — the row was already discarded. With it,
+//    the click probes the buffer, finds impression 12:02, and forms the match, and the buffer is dropped once both watermarks pass the window.
 // DEF: watermark — clicks = "12:06:00", impressions = "12:04:30"
 // STATE (before):
 //    match : {}
@@ -134,8 +141,14 @@ _Also known as: SS Ch09 · Streaming Join · Windowed Join · Temporal Join · S
 
 ```java
 // LATE JOIN SIDE — a late impression changes an emitted match, forcing a retraction
+// GOAL (what this is FOR): answer "when a late impression (12:02:00) arrives at 12:06:00 — after the window closed — does the join drop it, or retract the old 12:01 match and re-emit the 12:02 match?"
+//    THE NAIVE WAY (why allowed lateness exists): drop any row arriving after the window closed — then the closer impression 12:02 is lost
+//    and the stale 12:01 match stands. We replace "drop late rows" with a lateness window that keeps join state alive, retracts the old
+//    match, and re-emits the corrected one.
 // DEF: join window — the time bound for a match = [12:00, 12:05)
 // DEF: allowed lateness — how long the join keeps state for late rows = 60 s
+//    WHO chose the 60 s lateness: the pipeline builder, not the data. 60 s here only so the 12:02 impression arriving 60 s past the
+//    12:05:00 window end is still admitted; production lateness runs from seconds to hours, trading state retention against straggler recall.
 // DEF: match — the already-emitted pair = { "click 12:03", "impression 12:01" }
 // STATE (before):
 //    downstream : { "click 12:03, impression 12:01" }
@@ -230,7 +243,13 @@ _Role: attribution store — holds the final matches_
 
 ```java
 // SYSTEM DESIGN — a windowed join holds a match until both watermarks pass, then a late row corrects it
+// GOAL (what this is FOR): answer "after a late impression arrives, does the attribution store show one corrected match or two competing matches?"
+//    THE NAIVE WAY (why retraction exists): emit the match with no way to correct it — then a late impression creates a second, conflicting
+//    attribution and the store double-counts. We replace "emit and forget" with a retraction emitter that cancels the old match before
+//    emitting the corrected one.
 // DEF: join window — the time bound for a match = [12:00, 12:05)
+//    WHO chose the 5-min window: the pipeline builder, not the data. 5 min here only so impression 12:02 and click 12:03 fall inside one
+//    span; production join windows are the attribution horizon (e.g. 30 min or 24 h for click-to-conversion).
 // DEF: watermark — clicks = "12:06:00", impressions = "12:04:30"
 // DEF: retraction — a downstream signal that cancels an emitted match = { "click 12:03, impression 12:01" }
 // STATE (before):
@@ -255,6 +274,7 @@ _Role: attribution store — holds the final matches_
 // downstream : click 12:03 -> probe 12:02 -> hold -> both watermarks pass -> emit 1   BECAUSE the join is bounded by the slower stream, and a late row would retract and re-emit
 //    derivation : emit gate = 360 - 300 = 60 s   BECAUSE impressions advances to 12:06:00 (360 s), 60 s past the 12:05:00 (300 s) window end = true
 ```
+
 
 ## Interview Questions
 

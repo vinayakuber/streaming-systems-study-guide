@@ -9,6 +9,7 @@ registerChapter({
   flow: [
     {
       section: 'What streaming is — terminology',
+      walkthroughs: ['ch01-terminology', 'ch01-terminology-memory'],
       color: 'cyan',
       motivation: `Every later chapter assumes you can tell a bounded dataset from an unbounded one and an event-time answer from a processing-time answer, so this section pins the vocabulary down before any of the mechanics.`,
       steps: [
@@ -17,34 +18,10 @@ registerChapter({
         { num: 3, title: 'Why the divergence breaks naive systems', detail: 'A system that buckets by processing time groups events by when it happened to be busy, not by when the user clicked. <strong>A correct answer to "how many clicks at 12:00?" must use event time — the processing-time answer silently shifts under load.</strong>' },
         { num: 4, title: 'The rest of the book in one sentence', detail: 'The book is a systematic answer to four questions you can ask of any data-processing pipeline — <strong>what</strong> results are computed, <strong>where</strong> in event time they are computed, <strong>when</strong> in processing time they are materialized, and <strong>how</strong> later refinements relate to earlier results.' }
       ],
-      program: `// STREAM SIDE — one user click carries two timestamps that disagree; correct analytics must bucket by the event-time one
-// DEF: event time — when the click happened, stamped by the user's device = "12:00:59"
-// DEF: processing time — when the pipeline observed the click = "12:04:11"
-// DEF: watermark — the pipeline's event-time completeness signal = "12:03:00"
-// STATE (before):
-//    counts : { "12:00": 0, "12:04": 0 }
-// ======================================================================
-// offset 0: {user: 42, url: "/shoe/x", event_time: "12:00:59"}
-// offset 1: {user: 42, url: "/shoe/x", event_time: "12:00:59", processing_time: "12:04:11"}
-// ======================================================================
-// step 1 · the device goes offline and the queue delays the click -> lag : "12:00:59" -> "12:04:11"
-//    -> input  : click.event_time = "12:00:59", queue delay = 3 min offline
-//    <- output : lag = "12:04:11"   BECAUSE the device was offline for 3 minutes
-// step 2 · bucket by event time -> counts["12:00"] : 0 -> 1
-//    -> input  : click.event_time = "12:00:59", counts = { "12:00": 0, "12:04": 0 }
-//    <- output : counts["12:00"] = 1   BECAUSE the user really clicked at 12:00:59
-// step 3 · bucket by processing time -> counts["12:04"] : 0 -> 1
-//    -> input  : click.processing_time = "12:04:11", counts = { "12:00": 1, "12:04": 0 }
-//    <- output : counts["12:04"] = 1   BECAUSE the busy pipeline saw it at 12:04:11
-// step 4 · the watermark at 12:03:00 marks the click late -> status : "on-time" -> "straggler"
-//    -> input  : click.event_time = "12:00:59", watermark = "12:03:00"
-//    <- output : status = "straggler"   BECAUSE 12:00:59 is earlier than 12:03:00
-// ======================================================================
-// downstream : event_time "12:00:59" -> observed "12:04:11" -> window "12:00" -> count 0 -> 1   BECAUSE event time, not processing time, is the user truth
-//    derivation : lag = 251 - 59 = 192 s   BECAUSE 12:04:11 is 251 s into the hour and 12:00:59 is 59 s`
     },
     {
       section: 'Event time vs processing time',
+      walkthroughs: ['ch01-eventtime', 'ch01-eventtime-memory'],
       color: 'orange',
       motivation: `Because the two clocks disagree, a pipeline must decide which one its answers are about, so this section makes the distinction concrete with a metric that changes meaning when the clock is wrong.`,
       steps: [
@@ -52,34 +29,10 @@ registerChapter({
         { num: 2, title: 'Processing time is the cheap one', detail: 'Processing time needs no special machinery — the system clock is right there. <strong>It is the correct clock only for questions about the system itself</strong>, such as current queue depth or "how many events did I process this second".' },
         { num: 3, title: 'The lag between them is the cost of correctness', detail: 'Event-time correctness requires waiting for stragglers, and waiting costs latency. <strong>The whole art of the Beam model is choosing how long to wait (watermarks) and what to do with events that arrive later (triggers, allowed lateness).</strong>' }
       ],
-      program: `// DATA SERVER SIDE — one click carries two timestamps; bucketing by the wrong clock moves the count into the wrong minute
-// DEF: minute — the dashboard's 60-second reporting bucket = { "12:00", "12:04" }
-// DEF: event time — when the click happened, stamped by the device = "12:00:59"
-// DEF: processing time — when the busy pipeline observed it = "12:04:11"
-// STATE (before):
-//    minute_counts : { "12:00": 0, "12:04": 0 }
-// ======================================================================
-// offset 0: {user: 42, url: "/shoe/x", event_time: "12:00:59"}
-// offset 1: {user: 42, url: "/shoe/x", event_time: "12:00:59", processing_time: "12:04:11"}
-// ======================================================================
-// step 1 · bucket by event time -> minute_counts["12:00"] : 0 -> 1
-//    -> input  : click.event_time = "12:00:59", minute_counts = { "12:00": 0, "12:04": 0 }
-//    <- output : minute_counts["12:00"] = 1   BECAUSE the user clicked at 12:00:59
-// step 2 · bucket by processing time -> minute_counts["12:04"] : 0 -> 1
-//    -> input  : click.processing_time = "12:04:11", minute_counts = { "12:00": 1, "12:04": 0 }
-//    <- output : minute_counts["12:04"] = 1   BECAUSE the pipeline saw it at 12:04:11
-// step 3 · the dashboard reads both counts -> answers : "12:00" -> "12:04" disagree
-//    -> input  : minute_counts = { "12:00": 1, "12:04": 1 }, dashboard bucket keys = [ "12:00", "12:04" ]
-//    decode 3a · fetch the event-time bucket count -> event_answer : none -> 1
-//    decode 3b · fetch the processing-time bucket count -> processing_answer : none -> 1
-//    decode 3c · compare the two fetched counts -> answers : "12:00" -> "12:04" disagree
-//    <- output : answers = "12:04" disagree   BECAUSE the two clocks are 3m12s apart
-// ======================================================================
-// downstream : event_time "12:00:59" -> window "12:00" -> count 0 -> 1   BECAUSE the 12:04 count is a pipeline artifact, not the user truth
-//    derivation : lag = 251 - 59 = 192 s   BECAUSE 12:04:11 is 251 s into the hour and 12:00:59 is 59 s`,
     },
     {
       section: 'Three shapes of data',
+      walkthroughs: ['ch01-shapes', 'ch01-shapes-memory'],
       color: 'green',
       motivation: `A pipeline's design falls out of whether its input has an end, so this section separates bounded, unbounded-as-batch, and unbounded-as-streaming and shows which machinery each forces on you.`,
       steps: [
@@ -88,28 +41,6 @@ registerChapter({
         { num: 3, title: 'Unbounded data, processed as streaming', detail: 'Process every event as it arrives, continuously, with no artificial end. <strong>This is what the book means by streaming — the engine is built for infinite datasets, and answers are always "as complete as the watermark says".</strong>' },
         { num: 4, title: 'Streaming is the generalization', detail: 'Batch is a special case of streaming: a bounded dataset is just an unbounded one that happens to stop. <strong>A model that handles unbounded data well (the Beam model) therefore also handles batch — one abstraction for both.</strong>' }
       ],
-      program: `// DATA SERVER SIDE — the same click pipeline over three input shapes; only the unbounded-streaming shape gives a live answer
-// DEF: bounded — a finite dataset of one day of clicks = 86400 events
-// DEF: unbounded batched — clicks sliced into 1-day chunks, each chunk run as a batch at midnight = 86400 events per chunk
-// DEF: unbounded streaming — every click processed as it arrives = 1 event per arrival
-// STATE (before):
-//    count : { "bounded": 0, "batched": 0, "streaming": 0 }
-// ======================================================================
-// offset 0: {user: 42, url: "/shoe/x", ts: "12:00:59"}
-// offset 1: {user: 43, url: "/shoe/y", ts: "12:00:59"}
-// ======================================================================
-// step 1 · bounded : the click joins an 86400-event file -> count["bounded"] : 0 -> 1 at end-of-day
-//    -> input  : click.ts = "12:00:59", bounded file size = 86400 events
-//    <- output : count["bounded"] = 1 at end-of-day   BECAUSE the whole day must finish first
-// step 2 · unbounded batched : the click waits for the midnight boundary -> count["batched"] : 0 -> 1 at the boundary
-//    -> input  : click.ts = "12:00:59", chunk boundary = midnight
-//    <- output : count["batched"] = 1 at the boundary   BECAUSE results lag by up to 24h
-// step 3 · unbounded streaming : the click is counted on arrival -> count["streaming"] : 0 -> 1 in seconds
-//    -> input  : click.ts = "12:00:59", arrival = immediate
-//    <- output : count["streaming"] = 1 in seconds   BECAUSE no artificial boundary is waited on
-// ======================================================================
-// downstream : click "12:00:59" -> shape chosen -> bucket "12:00" -> count 0 -> 1   BECAUSE all three shapes agree on the value, only the streaming shape reports it live
-//    derivation : batch latency = 1 * 24 = 24 h vs streaming latency = 0 * 24 = 0 h added   BECAUSE the streaming shape waits only for the watermark`,
     }
   ],
 
@@ -139,6 +70,7 @@ registerChapter({
     { scenario: "A team runs a daily ETL job over a click stream. A fraud alert that should fire the moment a card is used instead fires the next morning, because every answer waits for the midnight batch boundary.", q: "What is the shape of this data, and what changes if it is processed as a stream instead of batch?", solution: "The data is unbounded but processed as batch, so results lag by up to one chunk. Processing it as a stream removes the artificial boundary and reflects each event as it arrives.", components: ["Unbounded data — never completes", "Batch chunk — the artificial 24h boundary", "Streaming — process each event on arrival"],  code: "// unbounded-as-batch : slice into 1-day chunks, run a job per chunk\n//   -> a change is reflected only at the next chunk boundary (up to 24h)\n// unbounded-as-streaming : process each event on arrival\n//   -> no artificial boundary, latency ~ watermark wait", tieback: "This is exactly the Three shapes of data distinction in this chapter.", refs: ["5. Bounded data", "6. Unbounded as batch", "7. Unbounded as streaming"], problems: ["21-ad-click-aggregation", "20-metrics-monitoring"] }
   ],
   systemDesign: {
+    walkthroughs: ['ch01-system', 'ch01-system-memory'],
     question: 'Design a real-time clicks-per-minute dashboard. Use case: ops watches live click counts. Premise: each click is stamped with its event time, but the network delays it by minutes, so a click at 12:00:59 processed at 12:04:11 must land in the 12:00 window (event time), not 12:04.',
     pipeline: 'writer (event producer) -> transport (unbounded stream) -> collector (processor) -> aggregator/store (window state) -> reader (dashboard)',
     decomposition: [
@@ -168,30 +100,6 @@ registerChapter({
         ] }
     ],
     
-    program: `// SYSTEM DESIGN — a producer emits a click, the stream delays it, the processor buckets by event time, the dashboard reads the count
-// DEF: click — the immutable event = {user: 42, url: "/shoe/x", event_time: "12:00:59"}
-// DEF: watermark — the stream's completeness signal = "12:03:00"
-// DEF: window — an event-time bucket that aggregates the count of events inside it = { "12:00": 0, "12:04": 0 }
-// STATE (before):
-//    window_state : { "12:00": 0, "12:04": 0 }
-// ======================================================================
-// offset 0: {user: 42, url: "/shoe/x", event_time: "12:00:59"}
-// offset 1: {user: 42, url: "/shoe/x", event_time: "12:00:59", processing_time: "12:04:11"}
-// ======================================================================
-// step 1 · the stream queues the click -> processing_time : "12:00:59" -> "12:04:11"
-//    -> input  : click.event_time = "12:00:59", network delay = 3m12s
-//    <- output : processing_time = "12:04:11"   BECAUSE the network delayed it
-// step 2 · the processor buckets by event time -> window_state["12:00"] : 0 -> 1
-//    -> input  : click.event_time = "12:00:59", window_state = { "12:00": 0, "12:04": 0 }
-//    <- output : window_state["12:00"] = 1   BECAUSE event time is the key
-// step 3 · the processor keys the dashboard read -> window_state["12:04"] : 0 -> 0
-//    -> input  : window_state = { "12:00": 1, "12:04": 0 }, dashboard key = "12:04"
-//    decode 3a · locate the processing-time bucket -> bucket : none -> "12:04"
-//    decode 3b · read that bucket's count -> window_state["12:04"] : 0 -> 0
-//    <- output : window_state["12:04"] = 0   BECAUSE the click does not belong to 12:04
-// ======================================================================
-// downstream : click "12:00:59" -> stream "12:04:11" -> window "12:00" -> count 0 -> 1   BECAUSE the dashboard reads the event-time answer, not the processing-time one
-//    derivation : lag = 251 - 59 = 192 s   BECAUSE 12:04:11 is 251 s into the hour and 12:00:59 is 59 s`
   },
   quiz: [
     { question: "What precise meaning does the book give to 'streaming'?", options: ["A. Any program that is not batch", "B. A data processing engine designed with infinite datasets in mind, applied to unbounded data that arrives gradually and never completes", "C. A synonym for low latency", "D. A synonym for event-driven architecture"], answer: 2, explanation: "The book fixes 'streaming' to one meaning — an engine for infinite datasets — rather than letting it mean merely 'fast' or 'not batch'.", conceptRef: "1. \"Streaming\" means too many things" },

@@ -1,0 +1,101 @@
+{
+  "name": "ch01-terminology-memory",
+  "steps": [
+    {
+      "t": "the late event is bucketed by its EVENT time",
+      "line": [
+        22,
+        25
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "byEvent = ...",
+            "byProc = ...",
+            "diff = ..."
+          ]
+        },
+        {
+          "name": "countBy",
+          "locals": [
+            "events = EVENTS",
+            "clock = \"et\"",
+            "m = @0x100",
+            "e = EVENTS[7]",
+            "minute = 0"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "the SAME line, with clock = \"pt\", sends it somewhere else",
+      "line": [
+        25,
+        26
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "byEvent = @0x100",
+            "byProc = ...",
+            "diff = ..."
+          ]
+        },
+        {
+          "name": "countBy",
+          "locals": [
+            "events = EVENTS",
+            "clock = \"pt\"",
+            "m = @0x200",
+            "e = EVENTS[7]",
+            "minute = 240"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "so 3 of 6 minutes hold different numbers",
+      "line": [
+        33,
+        36
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "byEvent = @0x100",
+            "byProc = @0x200",
+            "diff = ..."
+          ]
+        },
+        {
+          "name": "disagree",
+          "locals": [
+            "a = @0x100",
+            "b = @0x200",
+            "out = @0x300",
+            "minute = 240"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and neither counter is wrong",
+      "line": [
+        45
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "byEvent = @0x100",
+            "byProc = @0x200",
+            "diff = @0x300"
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -20,17 +20,28 @@ if (!file || !title) { console.error('usage: drop_program_block.js <file> <secti
 const load = (src) => { const C = []; global.registerChapter = (c) => C.push(c); eval(src); return C; };
 const before = load(fs.readFileSync(file, 'utf8'));
 const secBefore = before.flatMap(c => c.flow || []);
-const target = secBefore.find(s => s.section === title);
-if (!target) { console.error(`FATAL: no flow section titled ${JSON.stringify(title)} in ${file}`); process.exit(2); }
+let target = secBefore.find(s => s.section === title);
+// A concept may also be a CHAPTER-LEVEL object — `systemDesign` is one per chapter,
+// and 11 of them were invisible to the band census for the same reason: code that
+// only knows about `flow` cannot see them.
+let chapterKey = null;
+if (!target) {
+  for (const ch of before) {
+    if (ch[title] && typeof ch[title] === 'object' && typeof ch[title].program === 'string') { target = ch[title]; chapterKey = title; break; }
+  }
+}
+if (!target) { console.error(`FATAL: no flow section or chapter-level key named ${JSON.stringify(title)} in ${file}`); process.exit(2); }
 if (!target.program) { console.error(`FATAL: section ${JSON.stringify(title)} has no program block to drop`); process.exit(2); }
 
 let s = fs.readFileSync(file, 'utf8');
 // Bound the search to THIS section: from its own `section:` line to the next one.
-const anchor = s.indexOf(`section: ${JSON.stringify(title).replace(/"/g, "'")}`) !== -1
-  ? s.indexOf(`section: ${JSON.stringify(title).replace(/"/g, "'")}`)
-  : s.indexOf(`section: \`${title}\``);
+const anchor = chapterKey
+  ? s.indexOf(`${chapterKey}:`)
+  : (s.indexOf(`section: ${JSON.stringify(title).replace(/"/g, "'")}`) !== -1
+      ? s.indexOf(`section: ${JSON.stringify(title).replace(/"/g, "'")}`)
+      : s.indexOf(`section: \`${title}\``));
 if (anchor === -1) { console.error(`FATAL: could not locate the section literal for ${JSON.stringify(title)}`); process.exit(2); }
-const nextAnchor = (() => { const i = s.indexOf('section:', anchor + 8); return i === -1 ? s.length : i; })();
+const nextAnchor = chapterKey ? s.length : (() => { const i = s.indexOf('section:', anchor + 8); return i === -1 ? s.length : i; })();
 const pi = s.indexOf('program: `', anchor);
 if (pi === -1 || pi > nextAnchor) { console.error('FATAL: the program block is not inside this section — refusing to guess'); process.exit(2); }
 const lineStart = s.lastIndexOf('\n', pi) + 1;
@@ -44,7 +55,7 @@ if (walks.length) {
   const a = s.slice(anchor - 200, anchor + 400).includes('walkthroughs:')
     ? null
     : s.indexOf('\n', s.indexOf('section:', Math.max(0, anchor - 300)));
-  const at = s.indexOf('\n', s.indexOf(title, Math.max(0, anchor - 300))) + 1;
+  const at = s.indexOf('\n', chapterKey ? anchor : s.indexOf(title, Math.max(0, anchor - 300))) + 1;
   s = s.slice(0, at) + `      walkthroughs: [${walks.map(w => `'${w}'`).join(', ')}],\n` + s.slice(at);
 }
 
@@ -57,14 +68,14 @@ if (secAfter.length !== secBefore.length) errs.push(`section count changed: ${se
 for (const b of secBefore) {
   const a = secAfter.find(x => x.section === b.section);
   if (!a) { errs.push(`section vanished: ${b.section}`); continue; }
-  if (b.section === title) {
+  if (b.section === title && !chapterKey) {
     if (a.program) errs.push(`the target section still has a program block`);
   } else if (!!a.program !== !!b.program) {
     errs.push(`COLLATERAL DAMAGE: section ${JSON.stringify(b.section)} lost its program block`);
   }
   if ((a.steps || []).length !== (b.steps || []).length) errs.push(`section ${JSON.stringify(b.section)} lost steps`);
 }
-if (walks.length) {
+if (walks.length && !chapterKey) {
   const a = secAfter.find(x => x.section === title);
   if ((a.walkthroughs || []).join() !== walks.join()) errs.push(`walkthroughs not registered: got ${JSON.stringify(a.walkthroughs)}`);
 }

@@ -20,8 +20,14 @@ _Also known as: SS Ch05 · Exactly-Once · Idempotency · Deduplication · Side 
 
 ```java
 // SHUFFLE SIDE — a retried record is deduplicated so it does not double-count
+// GOAL (what this is FOR): answer "has record r7 already been delivered?" so a retry of r7 is dropped and the value 10 counts once, not twice.
+//    THE NAIVE WAY (why we keep a seen set at all): deliver every copy of every record — then a crash-and-retry delivers r7 twice and the
+//    value 10 is counted twice. We replace "deliver every copy" with a seen set of delivered ids: one lookup + one insert per record, and
+//    a retry whose id is already present is dropped.
 // DEF: record — a keyed element = { id: "r7", key: 42, value: 10 }
 // DEF: seen — the set of delivered ids = { "r1", "r2", "r3" }
+//    WHY seen exists: without it, "is this delivery a retry?" is unanswerable — there is no memory of which ids already flowed through.
+//    With it, the retry check is one membership lookup: r7 absent on delivery 1 (record it), present on delivery 2 (drop it).
 // DEF: dedup — the store of already-delivered ids = { "r1", "r2", "r3" }
 // STATE (before):
 //    seen : { "r1", "r2", "r3" }
@@ -227,8 +233,14 @@ _Role: external system — the outside-world effect_
 
 ```java
 // SYSTEM DESIGN — a crash and retry still charge the card exactly once via the idempotency key
+// GOAL (what this is FOR): answer "after a crash retries record r7, does order-99 get charged $10 once or $20?"
+//    THE NAIVE WAY (why we pair a dedup set with an idempotency key): retry the charge without either guard — then two deliveries of r7
+//    double-bill order-99. We replace the guard-less retry with a dedup set at the shuffle (drops the duplicate delivery) and an
+//    idempotency key at the sink (turns a repeat charge into a no-op).
 // DEF: idempotency key — a unique id the external system deduplicates on = "order-99"
 // DEF: dedup — a set of record ids already delivered = { "r1", "r2", "r3" }
+//    WHY dedup exists: without it, "is this delivery of r7 a retry?" has no memory to consult; with it, the first delivery records r7 and
+//    the retry is dropped, so the sink sees r7 exactly once.
 // DEF: charge — the side effect = charge $10 for order-99
 // STATE (before):
 //    card_ledger : 0
@@ -249,6 +261,7 @@ _Role: external system — the outside-world effect_
 // downstream : r7 -> dedup seen -> charge 10 -> retry dropped -> balance 10   BECAUSE dedup blocked the retry and the key made the effect idempotent
 //    derivation : exactly-once = 2 - 1 = 1 charge of $10, so the retry adds nothing
 ```
+
 
 ## Interview Questions
 
