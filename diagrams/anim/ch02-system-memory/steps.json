@@ -1,0 +1,120 @@
+{
+  "name": "ch02-system-memory",
+  "steps": [
+    {
+      "t": "WHERE: anything outside this window is skipped",
+      "line": [
+        47,
+        53
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "dash = ...",
+            "final = ...",
+            "count = ..."
+          ]
+        },
+        {
+          "name": "run",
+          "locals": [
+            "events = EVENTS",
+            "dash = @0x100",
+            "ids = @0x200",
+            "last = NONE",
+            "i = 3",
+            "e = EVENTS[3]"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "WHEN: the allowed-lateness check is what can drop an event",
+      "line": [
+        54
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "dash = ...",
+            "final = ...",
+            "count = ..."
+          ]
+        },
+        {
+          "name": "run",
+          "locals": [
+            "events = EVENTS",
+            "dash = @0x100",
+            "ids = @0x200",
+            "last = 15",
+            "i = 7",
+            "e = EVENTS[7]"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "HOW: the refinement emits an undo before the new total",
+      "line": [
+        39,
+        40,
+        32
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "dash = ...",
+            "final = ...",
+            "count = ..."
+          ]
+        },
+        {
+          "name": "run",
+          "locals": [
+            "events = EVENTS",
+            "dash = @0x100",
+            "ids = @0x200",
+            "last = 15",
+            "i = 7",
+            "e = EVENTS[7]"
+          ]
+        },
+        {
+          "name": "refine",
+          "locals": [
+            "dash = @0x100",
+            "oldValue = 15",
+            "newValue = 19"
+          ]
+        },
+        {
+          "name": "publish",
+          "locals": [
+            "dash = @0x100",
+            "value = -15"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "WHAT: and the consumer ends on the right number",
+      "line": [
+        67
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "dash = @0x100",
+            "final = 19",
+            "count = 4"
+          ]
+        }
+      ]
+    }
+  ]
+}

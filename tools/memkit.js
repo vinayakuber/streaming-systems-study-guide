@@ -57,8 +57,17 @@ function buildMemoryWalkthrough(spec) {
   // invent a distinguishing comment for each one — friction that recurs for every
   // concept and tempts a weaker, non-throwing lookup. Scoping keeps the hard
   // guarantee (0 or >1 matches is an error) while making the common case easy.
+  // The separator is '::', NOT '>'. It was '>' at first, and '>' occurs constantly in
+  // the code being matched: a needle like `return watermarkAfter(i) >= W0 + WIN` was
+  // silently re-read as scope `return watermarkAfter(i) ` plus needle `= W0 + WIN`.
+  // That usually resolved to the right line by luck — both halves come from the same
+  // line — so it passed for a long corpus, and then threw AMBIGUOUS on an unrelated
+  // listing. A separator must be a string that cannot appear in the input.
   const at = (...needles) => needles.map(spec => {
-    const [scope, nd] = spec.includes('>') ? spec.split('>', 2) : [null, spec];
+    if ((spec.match(/::/g) || []).length > 1)
+      throw new Error(`[${name}] needle has more than one '::' separator: ${JSON.stringify(spec)}`);
+    const i = spec.indexOf('::');
+    const [scope, nd] = i === -1 ? [null, spec] : [spec.slice(0, i), spec.slice(i + 2)];
     let from = 0;
     if (scope !== null) {
       const anchors = SRC.map((l, i) => l.includes(scope) ? i : -1).filter(i => i !== -1);
@@ -70,7 +79,7 @@ function buildMemoryWalkthrough(spec) {
     if (hits.length === 0) throw new Error(`[${name}] source line not found: "${nd}"${scope ? ` after "${scope}"` : ''}`);
     if (scope !== null) return hits[0];            // first match inside the scope
     if (hits.length > 1)
-      throw new Error(`[${name}] AMBIGUOUS needle "${nd}" matches lines ${hits.map(i => i + 1).join(', ')} — make it unique, or scope it as "enclosingFunction>${nd}"`);
+      throw new Error(`[${name}] AMBIGUOUS needle "${nd}" matches lines ${hits.map(i => i + 1).join(', ')} — make it unique, or scope it as "enclosingFunction::${nd}"`);
     return hits[0];
   });
   const lineOf = (needle) => at(needle)[0] + 1;

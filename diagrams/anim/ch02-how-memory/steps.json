@@ -1,0 +1,107 @@
+{
+  "name": "ch02-how-memory",
+  "steps": [
+    {
+      "t": "discarding publishes the DELTA, not the total",
+      "line": [
+        27,
+        28
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "okDisc = ...",
+            "okAcc = ...",
+            "okRetr = ...",
+            "badSum = ...",
+            "badRepl = ..."
+          ]
+        },
+        {
+          "name": "panesFor",
+          "locals": [
+            "mode = \"discarding\""
+          ]
+        }
+      ]
+    },
+    {
+      "t": "a summing sink reaches the right answer from those panes",
+      "line": [
+        37,
+        39
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "okDisc = 19",
+            "okAcc = ...",
+            "okRetr = ...",
+            "badSum = ...",
+            "badRepl = ..."
+          ]
+        },
+        {
+          "name": "sinkSum",
+          "locals": [
+            "p = @0x100",
+            "acc = 19",
+            "x = 4"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "the SAME sink, given accumulating panes, double counts",
+      "line": [
+        57
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "okDisc = 19",
+            "okAcc = 19",
+            "okRetr = 19",
+            "badSum = 34",
+            "badRepl = ..."
+          ]
+        },
+        {
+          "name": "sinkSum",
+          "locals": [
+            "p = @0x200",
+            "acc = 34",
+            "x = 19"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "which is why retraction exists: an undo makes adding safe",
+      "line": [
+        30
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "okDisc = 19",
+            "okAcc = 19",
+            "okRetr = 19",
+            "badSum = 34",
+            "badRepl = 4"
+          ]
+        },
+        {
+          "name": "panesFor",
+          "locals": [
+            "mode = \"retracting\""
+          ]
+        }
+      ]
+    }
+  ]
+}

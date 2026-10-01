@@ -1,0 +1,107 @@
+{
+  "name": "ch02-whatwhere-memory",
+  "steps": [
+    {
+      "t": "WHERE: an event can belong to MORE THAN ONE window",
+      "line": [
+        34,
+        37
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "fixedSums = @0x100",
+            "slidingSums = ...",
+            "fixedCounts = ...",
+            "tFixed = ...",
+            "tSliding = ..."
+          ]
+        },
+        {
+          "name": "assign",
+          "locals": [
+            "events = EVENTS",
+            "where = \"sliding\"",
+            "out = @0x200",
+            "e = EVENTS[4]",
+            "w = 240"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "WHAT: the transform never sees the window rule",
+      "line": [
+        47,
+        50
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "fixedSums = @0x100",
+            "slidingSums = @0x200",
+            "fixedCounts = @0x300",
+            "tFixed = ...",
+            "tSliding = ..."
+          ]
+        },
+        {
+          "name": "compute",
+          "locals": [
+            "grouped = @0x100",
+            "what = \"count\"",
+            "out = @0x300",
+            "w = 0"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "so the sliding total exceeds the data, by construction",
+      "line": [
+        57,
+        59
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "fixedSums = @0x100",
+            "slidingSums = @0x200",
+            "fixedCounts = @0x300",
+            "tFixed = 45",
+            "tSliding = ..."
+          ]
+        },
+        {
+          "name": "totalOf",
+          "locals": [
+            "r = @0x200",
+            "t = 78",
+            "w = 540"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and nine combinations, all legal",
+      "line": [
+        67
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "fixedSums = @0x100",
+            "slidingSums = @0x200",
+            "fixedCounts = @0x300",
+            "tFixed = 45",
+            "tSliding = 78"
+          ]
+        }
+      ]
+    }
+  ]
+}

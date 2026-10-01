@@ -1,0 +1,111 @@
+{
+  "name": "ch02-when-memory",
+  "steps": [
+    {
+      "t": "the watermark has not passed 12:02, so nothing fires",
+      "line": [
+        29,
+        30
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "st = @0x100",
+            "i = 3",
+            "final = ...",
+            "fired = ..."
+          ]
+        },
+        {
+          "name": "feed",
+          "locals": [
+            "st = @0x100",
+            "e = EVENTS[3]",
+            "i = 3"
+          ]
+        },
+        {
+          "name": "onTimeDue",
+          "locals": [
+            "i = 3"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "it passes, and the ON-TIME pane is published",
+      "line": [
+        49
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "st = @0x100",
+            "i = 4",
+            "final = ...",
+            "fired = ..."
+          ]
+        },
+        {
+          "name": "feed",
+          "locals": [
+            "st = @0x100",
+            "e = EVENTS[4]",
+            "i = 4"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "id 7 arrives — and `open` is what decides its fate",
+      "line": [
+        37,
+        38
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "st = @0x100",
+            "i = 7",
+            "final = ...",
+            "fired = ..."
+          ]
+        },
+        {
+          "name": "feed",
+          "locals": [
+            "st = @0x100",
+            "e = EVENTS[7]",
+            "i = 7"
+          ]
+        },
+        {
+          "name": "stillOpen",
+          "locals": [
+            "i = 7"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "so one window published twice, and the second one is right",
+      "line": [
+        62
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "st = @0x100",
+            "i = 8",
+            "final = 19",
+            "fired = 2"
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -458,11 +458,11 @@ PROGRAMS.push({
     const MAIN = (o = {}) => ({ name: 'main', locals: [
       `byEvent = ${o.byEvent || '...'}`, `byProc = ${o.byProc || '...'}`, `diff = ${o.diff || '...'}`] });
     return [
-      { t: `the late event is bucketed by its EVENT time`, line: at('fun countBy(events, clock)', 'fun countBy(events, clock)>val minute = minOf(e[clock])'),
+      { t: `the late event is bucketed by its EVENT time`, line: at('fun countBy(events, clock)', 'fun countBy(events, clock)::val minute = minOf(e[clock])'),
         stack: [MAIN(), { name: 'countBy', locals: ['events = EVENTS', 'clock = "et"', 'm = @0x100', `e = EVENTS[${L.id}]`, `minute = ${minOf(L.et)}`] }],
         heap: [{ key: 'byEvent', hot: true }],
         cap: `On the pass for id ${L.id}, \`clock\` is \`"et"\`, so \`minute\` is \`minOf(${L.et})\` = ${minOf(L.et)} — the ${hhmmss(M0).slice(0, 5)} minute, where the click actually happened. Its ${L.v} joins ids ${BY_ET[M0].filter(i => i !== L.id).join(' and ')} for a total of ${M0_TRUE}.` },
-      { t: 'the SAME line, with clock = "pt", sends it somewhere else', line: at('fun countBy(events, clock)>val minute = minOf(e[clock])', 'fun countBy(events, clock)>add(m, minute, e.v)'),
+      { t: 'the SAME line, with clock = "pt", sends it somewhere else', line: at('fun countBy(events, clock)::val minute = minOf(e[clock])', 'fun countBy(events, clock)::add(m, minute, e.v)'),
         stack: [MAIN({ byEvent: '@0x100' }), { name: 'countBy', locals: ['events = EVENTS', 'clock = "pt"', 'm = @0x200', `e = EVENTS[${L.id}]`, `minute = ${minOf(L.pt)}`] }],
         heap: [{ key: 'byEvent' }, { key: 'byProc', hot: true }],
         cap: `Identical code, one argument changed. Now \`minute\` is \`minOf(${L.pt})\` = ${minOf(L.pt)} — the ${hhmmss(minOf(L.pt)).slice(0, 5)} minute, ${Math.round((minOf(L.pt) - minOf(L.et)) / MIN)} minutes away from where the click happened. The ${L.v} lands in a minute during which this user did nothing.` },
@@ -550,7 +550,7 @@ PROGRAMS.push({
         stack: [MAIN(), { name: 'watermarkAfter', locals: [`i = ${EVENTS.indexOf(L)}`, `seen = ${Math.max(...EVENTS.slice(0, EVENTS.indexOf(L) + 1).map(e => e.et))}`, `j = ${EVENTS.indexOf(L)}`] }],
         heap: [],
         cap: `\`seen\` is the highest event time in the first ${EVENTS.indexOf(L) + 1} events — ${Math.max(...EVENTS.slice(0, EVENTS.indexOf(L) + 1).map(e => e.et))}s — so the claim is ${Math.max(...EVENTS.slice(0, EVENTS.indexOf(L) + 1).map(e => e.et))} − ${LAG} = ${WATERMARKS[EVENTS.indexOf(L)]}. That asserts nothing earlier than ${hhmmss(WATERMARKS[EVENTS.indexOf(L)])} can still arrive. id ${L.id}, at ${hhmmss(L.et)}, is arriving right now. The claim is false and the function has no way to know.` },
-      { t: `waiting ${LAG}s: id ${L.id} falls on the wrong side`, line: at('fun waitFor(events, budget)', 'fun waitFor(events, budget)>if (skewOf(e) > budget)  { dropped.append(e.id) }'),
+      { t: `waiting ${LAG}s: id ${L.id} falls on the wrong side`, line: at('fun waitFor(events, budget)', 'fun waitFor(events, budget)::if (skewOf(e) > budget)  { dropped.append(e.id) }'),
         stack: [MAIN({ claim: WATERMARKS[EVENTS.indexOf(L)] }), { name: 'waitFor', locals: ['events = EVENTS', `budget = ${LAG}`, `kept = ${EVENTS.length - DROP_LAG.length} ids`, 'dropped = @0x100', `e = EVENTS[${L.id}]`] }],
         heap: [{ key: 'cheap', hot: true }],
         cap: `\`skewOf(EVENTS[${L.id}])\` is ${skewOf(L)}, and \`budget\` is ${LAG}, so ${skewOf(L)} > ${LAG} and the event is dropped. ${EVENTS.length - DROP_LAG.length} of ${EVENTS.length} events are kept. Note what decided it: one comparison against a number a human typed.` },
@@ -753,7 +753,7 @@ PROGRAMS.push({
       'dash = @0x100', `i = ${o.i !== undefined ? o.i : '...'}`,
       `shown = ${o.shown !== undefined ? o.shown : '...'}`, `fixes = ${o.fixes !== undefined ? o.fixes : '...'}`] });
     return [
-      { t: `the ${hhmmss(M0).slice(0, 5)} minute accumulates the events that have arrived`, line: at('fun onEvent(dash, e, i)', 'fun onEvent(dash, e, i)>add(dash.display, minute, e.v)'),
+      { t: `the ${hhmmss(M0).slice(0, 5)} minute accumulates the events that have arrived`, line: at('fun onEvent(dash, e, i)', 'fun onEvent(dash, e, i)::add(dash.display, minute, e.v)'),
         stack: [MAIN({ i: 1 }), { name: 'onEvent', locals: ['dash = @0x100', 'e = EVENTS[1]', 'i = 1', `minute = ${M0}`, 'closed = false'] }],
         heap: [{ key: 'dash', hot: true }],
         cap: `After events 0 and 1, \`display[${M0}]\` holds ${EVENTS[0].v} + ${EVENTS[1].v} = ${M0_SHOWN}. \`closed\` is false — the minute has not been published, so nothing is a revision yet. Everything here is correct; the problem is not in this function.` },
@@ -761,7 +761,7 @@ PROGRAMS.push({
         stack: [MAIN({ i: M0_DECL }), { name: 'publishDue', locals: ['dash = @0x100', `i = ${M0_DECL}`, `minute = ${M0}`] }],
         heap: [{ key: 'dash' }, { key: 'published', hot: true }],
         cap: `At event ${M0_DECL} (id ${EVENTS[M0_DECL].id}, seen ${hhmmss(M0_DECL_PT)}) the watermark reaches ${WATERMARKS[M0_DECL]}, which is ≥ ${M0} + ${MIN}. So minute ${M0} joins \`published\` and ops sees **${M0_SHOWN}**. The true answer is ${M0_TRUE}. The pipeline is not behind — it has decided.` },
-      { t: `id ${L.id} arrives ${M0_BLIND}s later, into a minute already published`, line: at(`fun onEvent(dash, e, i)>val closed = (minute in dash.published)`),
+      { t: `id ${L.id} arrives ${M0_BLIND}s later, into a minute already published`, line: at(`fun onEvent(dash, e, i)::val closed = (minute in dash.published)`),
         stack: [MAIN({ i: EVENTS.indexOf(L) }), { name: 'onEvent', locals: ['dash = @0x100', `e = EVENTS[${L.id}]`, `i = ${EVENTS.indexOf(L)}`, `minute = ${M0}`, 'closed = true'] }],
         heap: [{ key: 'dash' }, { key: 'published' }],
         cap: `\`minute\` is ${minOf(L.et)} — correct, it is bucketed by event time — and \`closed\` is now **true**, because ${M0} is in \`published\`. This is the exact line where a pipeline discovers it has already lied. For ${M0_BLIND}s, from ${hhmmss(M0_DECL_PT)} to ${hhmmss(M0_FIX_PT)}, the screen said ${M0_SHOWN} and the answer was ${M0_TRUE}.` },
