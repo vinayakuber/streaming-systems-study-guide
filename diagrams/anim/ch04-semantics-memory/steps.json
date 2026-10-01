@@ -1,0 +1,116 @@
+{
+  "name": "ch04-semantics-memory",
+  "steps": [
+    {
+      "t": "the session is emitted, and it is not final",
+      "line": [
+        38,
+        43
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "panes = ...",
+            "good = ...",
+            "bad = ...",
+            "unkeyed = ..."
+          ]
+        },
+        {
+          "name": "emitPanes",
+          "locals": [
+            "key = \"b\"",
+            "gap = 40",
+            "out = @0x100",
+            "i = 4",
+            "s = Session(90, 90, [2])"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "so the pane must be UN-SAID, by its old bounds",
+      "line": [
+        46,
+        47
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "panes = @0x100",
+            "good = ...",
+            "bad = ...",
+            "unkeyed = ..."
+          ]
+        },
+        {
+          "name": "emitPanes",
+          "locals": [
+            "key = \"b\"",
+            "gap = 40",
+            "out = @0x100",
+            "i = 4",
+            "s = Session(90, 90, [2])",
+            "finalS = Session(50, 90, [7,2])"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "a store that drops retractions is wrong by the old value",
+      "line": [
+        58,
+        61
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "panes = @0x100",
+            "good = 11",
+            "bad = 18",
+            "unkeyed = ..."
+          ]
+        },
+        {
+          "name": "storeTotal",
+          "locals": [
+            "panes = @0x100",
+            "acceptsRetraction = false",
+            "t = 18",
+            "p = Pane(..., 11, \"LATE\")"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and ignoring the key collapses 5 sessions into 2",
+      "line": [
+        69,
+        71
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "panes = @0x100",
+            "good = 11",
+            "bad = 18",
+            "unkeyed = @0x200"
+          ]
+        },
+        {
+          "name": "sessionsIgnoringKey",
+          "locals": [
+            "gap = 120",
+            "out = @0x200",
+            "e = EVENTS[3]",
+            "last = Session(50, 90, ...)"
+          ]
+        }
+      ]
+    }
+  ]
+}

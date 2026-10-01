@@ -9,6 +9,7 @@ registerChapter({
   flow: [
     {
       section: 'Window shapes — fixed, sliding, session',
+      walkthroughs: ['ch04-shapes', 'ch04-shapes-memory'],
       color: 'cyan',
       motivation: `Different questions need different event-time boundaries, so this section distinguishes the three canonical window shapes and when each is the right tool.`,
       steps: [
@@ -17,61 +18,10 @@ registerChapter({
         { num: 3, title: 'Session windows', detail: 'Session windows are <strong>dynamic and data-driven</strong>: a session is a burst of activity separated by a gap of inactivity. They answer "how long did a user stay engaged".' },
         { num: 4, title: 'Sessions capture behavior, not just counting', detail: 'Because session boundaries follow the data, they model real user journeys — a visit with a 30-minute gap is two sessions, not one. <strong>The window is defined by the data, not the clock.</strong>' }
       ],
-      program: `// STREAM SIDE — one click stream cut three ways gives three different groupings
-// GOAL (what this is FOR): answer "which window does a click at 12:04:00 belong to?" under three different span rules, so one event yields
-//    one fixed count, three sliding counts, and one session.
-//    THE NAIVE WAY (why we pick a shape at all): put every click in one flat count — then "how many per 5 minutes", "what is the rolling
-//    10-minute average", and "how long was the user engaged" all collapse to the same number and none of the three questions is answerable.
-//    We replace the flat count with three span rules, each a separate assignment of the same click.
-// DEF: fixed window — a 5-min non-overlapping span = [12:00, 12:05)
-//    WHO chose the 5-minute span: the pipeline builder, not the data. 5 min here only so 12:04:00 lands in [12:00, 12:05); production
-//    fixed windows are 1, 5, or 15 minutes.
-// DEF: sliding window — a 10-min span that advances every 2 min = [12:00, 12:10)
-//    WHO chose the 10-min / 2-min size and slide: the pipeline builder, not the data. 10 min / 2 min here only so the click at 12:04:00
-//    overlaps exactly three spans ([12:00,12:10), [12:02,12:12), [12:04,12:14)); production sliding windows are 5- or 10-minute with a 1-minute slide.
-// DEF: session window — a burst that closes after a 30-min gap of inactivity = { s1 }
-//    WHO chose the 30-minute gap: the pipeline builder, not the data. 30 min is the web-analytics "user left" convention; here it only has
-//    to exceed any real gap between the clicks so they stay in one session.
-// STATE (before):
-//    fixed_count : 0
-// ======================================================================
-// offset 0: {event_time: "12:04:00"}
-// offset 1: {event_time: "12:04:00", shape: "same click"}
-// ======================================================================
-// BUILD PHASE · run once at pipeline start
-// step 0 · initialize the per-shape registers -> fixed_count : none -> 0, slide_count : none -> 0, sessions : none -> []
-//    -> input  : window definitions = fixed 5-min, sliding 10-min every 2 min, session 30-min gap
-//    <- output : fixed_count = 0, slide_count = 0, sessions = []   BECAUSE no click has been assigned yet
-// QUERY PHASE · per arriving click
-// step 1 · fixed assignment -> fixed_count : 0 -> 1
-//    -> input  : click.event_time = "12:04:00", fixed span = [12:00, 12:05)
-//    <- output : fixed_count = 1   BECAUSE 12:04:00 falls only in [12:00, 12:05)
-// step 2 · sliding assignment -> slide_count : 0 -> 3
-//    -> input  : click.event_time = "12:04:00", windows = [12:00,12:10), [12:02,12:12), [12:04,12:14)
-//    <- output : slide_count = 3   BECAUSE 12:04:00 overlaps [12:00,12:10), [12:02,12:12), and [12:04,12:14)
-// step 3 · session assignment -> sessions : [] -> ["s1"]
-//    -> input  : click.event_time = "12:04:00", session gap = 30 min
-//    <- output : sessions = ["s1"]   BECAUSE the click opens a new burst
-// ======================================================================
-// TRACE (click 12:04:00):
-//    shape    | spans                                          | count
-//    fixed    | [12:00, 12:05)                                 | 1
-//    sliding  | [12:00,12:10),[12:02,12:12),[12:04,12:14)      | 3
-//    session  | [s1]                                           | 1
-// CORRECTNESS (assignment-invariant lemma): a click is assigned to every window whose span contains its event time —
-//    12:04:00 lies in exactly one fixed span, three overlapping sliding spans, and one freshly opened session, so each
-//    shape counts the click exactly once and the three counts never disagree on the same underlying event.
-// VARIANTS (when to pick which):
-//    fixed window   -> one window-assignment check, non-overlapping spans (use for periodic totals)   <- THIS ONE
-//    sliding window -> one assignment per overlapping span, overlapping spans (use for moving averages)
-//    session window -> one session assignment, data-driven span (use for bursts of activity)
-//    global window  -> one add per event into the single bucket, one bucket for the whole stream (use for an all-time total)
-// ======================================================================
-// downstream : dashboard reads click 12:04:00 -> fixed 1 -> sliding 3 -> session 1   BECAUSE the shapes define different boundaries for the same event
-//    derivation : sliding overlap = 3 windows = 5 - 2   BECAUSE 5 possible 10-min windows minus the 2 that end before 12:04`
     },
     {
       section: 'The window lifecycle',
+      walkthroughs: ['ch04-lifecycle', 'ch04-lifecycle-memory'],
       color: 'orange',
       motivation: `Windowing is more than "which bucket" — a window is assigned, merged, grouped, triggered, accumulated, and finally garbage-collected, so this section walks the full lifecycle in order.`,
       steps: [
@@ -80,58 +30,10 @@ registerChapter({
         { num: 3, title: 'Group and trigger', detail: 'Elements are <strong>grouped by (key, window)</strong> into the state that will be aggregated, then <strong>triggers</strong> decide when that state emits.' },
         { num: 4, title: 'Accumulate and garbage-collect', detail: 'Each emitted pane is <strong>accumulated</strong> per the accumulation mode, and the window state is <strong>garbage-collected</strong> once the watermark passes the window end plus allowed lateness.' }
       ],
-      program: `// SESSION SIDE — two sessions merge when a bridging event lands inside the gap
-// GOAL (what this is FOR): answer "does a click at 12:20:00 split [12:00,12:10) and [12:40,12:50) apart, or join them into one session?"
-//    THE NAIVE WAY (why we merge at all): treat each burst as its own fixed session and never join them — then a user who pauses 20 min
-//    then returns is counted as two sessions when the gap rule says it is one. We replace "each burst is separate" with a merge step that
-//    collapses any two sessions a bridging event sits inside the gap of.
-// DEF: session gap — the inactivity threshold that splits sessions = 30 min
-//    WHO chose the 30-minute gap: the pipeline builder, not the data. 30 min is the web-analytics "user left" convention; here it only has
-//    to exceed both distances from the bridge (10 min to s1's end and 20 min to s2's start) so the two sessions merge.
-// DEF: s1 — a session window = [12:00, 12:10)
-// DEF: s2 — a session window = [12:40, 12:50)
-//    WHY the session set exists: without it, "does 12:20:00 bridge two sessions?" has no neighbors to measure against; with the open
-//    session set { s1, s2 }, the merge is two distance checks (to each neighbor's end/start) against the one 30-min threshold.
-// STATE (before):
-//    sessions : { "s1": [12:00, 12:10), "s2": [12:40, 12:50) }
-// ======================================================================
-// offset 0: {event_time: "12:20:00"}
-// offset 1: {event_time: "12:20:00", role: "bridge"}
-// ======================================================================
-// BUILD PHASE · run once when the two sessions are opened
-// step 0 · initialize the session set and gap threshold -> sessions : none -> { "s1": [12:00, 12:10), "s2": [12:40, 12:50) }, gap : none -> 30 min
-//    -> input  : session gap = 30 min, s1 = [12:00, 12:10), s2 = [12:40, 12:50)
-//    <- output : sessions = { "s1", "s2" }, gap = 30 min   BECAUSE the two sessions are already open
-// QUERY PHASE · per arriving event
-// step 1 · the event is 10 min from s1's end and 20 min from s2's start -> gap_check : "apart" -> "bridging"
-//    -> input  : event.event_time = "12:20:00", s1 = [12:00, 12:10), s2 = [12:40, 12:50), gap = 30 min
-//    decode 1a · measure the gap from the event to s1's end -> gap_to_s1 : none -> 10 min
-//    decode 1b · measure the gap from the event to s2's start -> gap_to_s2 : none -> 20 min
-//    decode 1c · compare both gaps against the 30-min threshold -> gap_check : "apart" -> "bridging"
-//    <- output : gap_check = "bridging"   BECAUSE both distances are within the 30-min gap
-// step 2 · the merged session spans s1 and s2 -> sessions : { "s1", "s2" } -> { "sMerged": [12:00, 12:50) }
-//    -> input  : s1 = [12:00, 12:10), s2 = [12:40, 12:50), gap_check = "bridging"
-//    <- output : sessions = { "sMerged": [12:00, 12:50) }   BECAUSE the bridge joins the two ends
-// step 3 · the event folds into the merged session -> sMerged_count : 0 -> 3
-//    -> input  : s1_count = 1, s2_count = 1, bridge = 1 event
-//    <- output : sMerged_count = 3   BECAUSE s1 + s2 + the bridging event = 3 events
-// ======================================================================
-// TRACE (bridge event 12:20:00, gap = 30 min):
-//    distance to s1 end | distance to s2 start | threshold | action
-//    10 min             | 20 min               | 30 min    | merge
-// CORRECTNESS (merge-invariant lemma): a session merges exactly when the bridging event sits within the gap of both
-//    neighbors — 12:20:00 is 10 min from s1's end and 20 min from s2's start, both <= 30 min, so the three collapse
-//    into one span [12:00, 12:50) and the merged count is s1 + s2 + the bridge = 3 events.
-// VARIANTS (when to pick which):
-//    gap measured to nearest end/start -> one check per neighbor (use for few sessions)   <- THIS ONE
-//    interval tree of sessions          -> one tree lookup per event (use when thousands of sessions are open)
-//    fixed window (no merge)            -> one assignment per event, no dynamic span (use when boundaries must stay clock-aligned)
-// ======================================================================
-// downstream : s1 [12:00,12:10) -> s2 [12:40,12:50) -> bridge 12:20:00 -> sMerged [12:00,12:50) count 3   BECAUSE the 12:20 event was inside the gap of both
-//    derivation : gap to s1 = 20 - 10 = 10 min <= 30, gap to s2 = 40 - 20 = 20 min <= 30 -> merge`
     },
     {
       section: 'Session semantics and pitfalls',
+      walkthroughs: ['ch04-semantics', 'ch04-semantics-memory'],
       color: 'green',
       motivation: `Sessions are powerful but subtle — their boundaries change as data arrives, so this section covers what the lifecycle implies and where implementations get it wrong.`,
       steps: [
@@ -140,52 +42,6 @@ registerChapter({
         { num: 3, title: 'Session windows are keyed', detail: 'Sessions are per key — <strong>user A\'s session and user B\'s session never merge</strong> because they are in different key groups. The gap is measured within a key.' },
         { num: 4, title: 'Choose the window to match the question', detail: 'Fixed windows for periodic aggregates, sliding windows for moving averages, sessions for user behavior. <strong>The window shape is part of the answer, not an implementation detail.</strong>' }
       ],
-      program: `// RETRACTION SIDE — a late event merges two already-emitted sessions, forcing a retraction
-// GOAL (what this is FOR): answer "when a late 12:20:00 bridge merges two sessions already emitted, how does the sink end at 6 instead of 11?"
-//    THE NAIVE WAY (why we retract at all): emit the merged session on top of the two already-emitted ones — then the sink holds
-//    s1 (3) + s2 (2) + sMerged (6) = 11, double-counting the same events. We replace "emit on top" with a retraction of the two stale panes
-//    before the merged pane lands.
-// DEF: session gap — the inactivity threshold = 30 min
-//    WHO chose the 30-minute gap: the pipeline builder, not the data. 30 min here only so the 12:20:00 bridge sits within it of both
-//    s1's end and s2's start; production uses the web-analytics 30-minute convention.
-// DEF: retraction — a downstream signal that cancels a previously emitted pane = { "s1", "s2" }
-// DEF: s1, s2 — already-emitted sessions = { "s1": 3, "s2": 2 }
-// STATE (before):
-//    downstream : { "s1": 3, "s2": 2 }
-// ======================================================================
-// offset 0: {event_time: "12:20:00", arrival: "13:01:00"}
-// offset 1: {event_time: "12:20:00", role: "late bridge"}
-// ======================================================================
-// BUILD PHASE · run once when s1 and s2 are emitted
-// step 0 · initialize the downstream state and retraction set -> downstream : none -> { "s1": 3, "s2": 2 }, retraction : none -> { "s1", "s2" }
-//    -> input  : already-emitted sessions = { "s1": 3, "s2": 2 }
-//    <- output : downstream = { "s1": 3, "s2": 2 }, retraction = { "s1", "s2" }   BECAUSE both panes are now stale
-// QUERY PHASE · per late event
-// step 1 · the late event bridges the gap -> sessions : { "s1", "s2" } -> { "sMerged": [12:00, 12:50) }
-//    -> input  : event.event_time = "12:20:00", s1 = [12:00, 12:10), s2 = [12:40, 12:50)
-//    <- output : sessions = { "sMerged": [12:00, 12:50) }   BECAUSE both gaps are within 30 min
-// step 2 · the pipeline emits a retraction for s1 and s2 -> downstream : { "s1": 3, "s2": 2 } -> {}
-//    -> input  : downstream = { "s1": 3, "s2": 2 }, retraction = { "s1", "s2" }
-//    <- output : downstream = {}   BECAUSE the earlier panes are now stale
-// step 3 · the pipeline emits the merged session -> downstream : {} -> { "sMerged": 6 }
-//    -> input  : downstream = {}, merged count = 3 + 2 + 1
-//    <- output : downstream = { "sMerged": 6 }   BECAUSE 3 + 2 + 1 = 6
-// ======================================================================
-// TRACE (late bridge 12:20:00):
-//    step          | downstream       | total
-//    retract s1    | { "s2": 2 }      | 2
-//    retract s2    | {}               | 0
-//    emit merged   | { "sMerged": 6 } | 6
-// CORRECTNESS (retraction-invariant lemma): a corrected merge emits retractions for exactly the panes it replaces before
-//    the merged pane lands — s1 (3) and s2 (2) are retracted, then sMerged = 3 + 2 + 1 = 6 is emitted, so the sink
-//    totals 6, never the 11 a naive double-count would produce.
-// VARIANTS (when to pick which):
-//    retract then emit -> one retraction + one emit, sink must undo (use for an idempotent store)   <- THIS ONE
-//    emit delta only   -> one delta write, sink applies the difference (use when the sink can add deltas)
-//    drop late data    -> one discard of the late event, no correction (use when late merges are rare and cost > value)
-// ======================================================================
-// downstream : s1 3 -> s2 2 -> retraction -> sMerged 6   BECAUSE the retractions undid s1 and s2, so the total is 6 not 11
-//    derivation : merged count = 3 + 2 + 1 = 6   BECAUSE s1_count + s2_count + the bridging event`
     }
   ],
 
@@ -214,6 +70,7 @@ registerChapter({
     { scenario: "A dashboard needs both an hourly total and a rolling 10-minute average, but the team used one window type for both and the numbers look wrong.", q: "Which window shapes should each metric use, and why?", solution: "The hourly total is a fixed window (equal, non-overlapping buckets); the rolling average is a sliding window (10-minute window advancing every minute).", components: ["Fixed window — hourly total", "Sliding window — rolling 10-min average", "Window size + slide — defines the overlap"],  code: "// fixed   : event @ 12:04 belongs to [12:00,12:05) only\n// sliding : event @ 12:04 belongs to [11:55,12:05), [11:56,12:06), ... [12:04,12:14)\n//   -> count once vs count many", tieback: "This is exactly the fixed vs sliding window material in this chapter.", refs: ["2. Fixed windows", "3. Sliding windows"], problems: ["20-metrics-monitoring"] }
   ],
   systemDesign: {
+    walkthroughs: ['ch04-system', 'ch04-system-memory'],
     question: 'Design session-window analytics for user activity. Premise: a late event can bridge two already-emitted sessions, so the pipeline must retract the two stale panes and emit the merged session instead of double-counting.',
     pipeline: 'event source -> window assigner -> session merger -> keyed session state -> trigger/retraction emitter -> analytics store',
     decomposition: [
@@ -243,34 +100,6 @@ registerChapter({
         ] }
     ],
     
-    program: `// SYSTEM DESIGN — a late event merges two sessions and the pipeline retracts the stale panes
-// GOAL (what this is FOR): answer "how does a late 12:20:00 event for user 42 turn two already-reported sessions into one, without double-counting?"
-//    THE NAIVE WAY (why we retract at all): emit the merged session without undoing the two earlier panes — then the store shows
-//    s1 (3) + s2 (2) + sMerged (6) = 11 for what is really one 6-event session. We replace "emit on top" with a retraction of the stale
-//    panes before the merged pane lands.
-// DEF: session gap — the inactivity threshold = 30 min
-//    WHO chose the 30-minute gap: the pipeline builder, not the data. 30 min here only so the 12:20:00 event sits within the gap of both
-//    s1 [12:00,12:10) and s2 [12:40,12:50); production uses the web-analytics 30-minute convention.
-// DEF: retraction — a downstream signal that cancels a previously emitted pane = { "s1", "s2" }
-// DEF: sessions — the current set for user 42 = { "s1": [12:00, 12:10), "s2": [12:40, 12:50) }
-// STATE (before):
-//    session_state : { "s1": 3, "s2": 2 }
-// ======================================================================
-// offset 0: {user: 42, event_time: "12:20:00"}
-// offset 1: {user: 42, event_time: "12:20:00", arrival: "13:01:00"}
-// ======================================================================
-// step 1 · the event bridges s1 and s2 -> sessions : { "s1", "s2" } -> { "sMerged": [12:00, 12:50) }
-//    -> input  : event.event_time = "12:20:00", s1 = [12:00, 12:10), s2 = [12:40, 12:50)
-//    <- output : sessions = { "sMerged": [12:00, 12:50) }   BECAUSE both gaps are within 30 min
-// step 2 · the pipeline retracts the stale panes -> session_state : { "s1": 3, "s2": 2 } -> {}
-//    -> input  : session_state = { "s1": 3, "s2": 2 }, retraction = { "s1", "s2" }
-//    <- output : session_state = {}   BECAUSE the earlier panes are now wrong
-// step 3 · the merged pane is emitted -> session_state : {} -> { "sMerged": 6 }
-//    -> input  : session_state = {}, merged count = 3 + 2 + 1
-//    <- output : session_state = { "sMerged": 6 }   BECAUSE 3 + 2 + 1 = 6
-// ======================================================================
-// downstream : s1 3 -> s2 2 -> retraction -> sMerged 6   BECAUSE the store must show one session, not three totaling 11
-//    derivation : merged count = 3 + 2 + 1 = 6   BECAUSE s1_count + s2_count + the bridging event`
   },
   quiz: [
     { question: "Which window shape is defined by the data rather than the clock?", options: ["A. Fixed", "B. Sliding", "C. Session", "D. Global"], answer: 3, explanation: "Session windows are dynamic — their boundaries follow bursts of activity and gaps.", conceptRef: "4. Session windows" },

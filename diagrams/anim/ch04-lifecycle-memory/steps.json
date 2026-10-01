@@ -1,0 +1,115 @@
+{
+  "name": "ch04-lifecycle-memory",
+  "steps": [
+    {
+      "t": "ASSIGN and MERGE are the same line, read twice",
+      "line": [
+        29,
+        34
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "afterFirst = ...",
+            "afterAll = ...",
+            "didMerge = ...",
+            "mustRetract = ..."
+          ]
+        },
+        {
+          "name": "sessionsUpto",
+          "locals": [
+            "key = \"b\"",
+            "gap = 120",
+            "i = 6",
+            "out = @0x100",
+            "e = EVENTS[6]",
+            "last = Session(220, ...)"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "so 2 out-of-order arrivals each absorb a session",
+      "line": [
+        43,
+        45
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "afterFirst = @0x100",
+            "afterAll = @0x200",
+            "didMerge = true",
+            "mustRetract = ..."
+          ]
+        },
+        {
+          "name": "merged",
+          "locals": [
+            "key = \"b\"",
+            "gap = 120",
+            "i = 6",
+            "s = Session(220, ...)"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "collection is a watermark comparison, not an idle timer",
+      "line": [
+        54,
+        56
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "afterFirst = @0x100",
+            "afterAll = @0x200",
+            "didMerge = true",
+            "mustRetract = ..."
+          ]
+        },
+        {
+          "name": "collectedAt",
+          "locals": [
+            "s = Session(50, 90, ...)",
+            "gap = 120",
+            "i = 8"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and whether a retraction is needed turns on ONE comparison",
+      "line": [
+        64,
+        68
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "afterFirst = @0x100",
+            "afterAll = @0x200",
+            "didMerge = true",
+            "mustRetract = false"
+          ]
+        },
+        {
+          "name": "needsRetraction",
+          "locals": [
+            "key = \"b\"",
+            "gap = 120",
+            "s = Session(50, ...)",
+            "c = 8",
+            "id = 7"
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,107 @@
+{
+  "name": "ch04-shapes-memory",
+  "steps": [
+    {
+      "t": "fixed and sliding differ only in the LENGTH of the answer",
+      "line": [
+        33,
+        35
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "tFixed = ...",
+            "tSliding = ...",
+            "wide = ...",
+            "tight = ..."
+          ]
+        },
+        {
+          "name": "totalAcross",
+          "locals": [
+            "shape = \"sliding\"",
+            "t = (partial)",
+            "e = EVENTS[4]"
+          ]
+        },
+        {
+          "name": "assign",
+          "locals": [
+            "e = EVENTS[4]",
+            "shape = \"sliding\""
+          ]
+        }
+      ]
+    },
+    {
+      "t": "a session cannot be assigned from one event at all",
+      "line": [
+        36
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "tFixed = 45",
+            "tSliding = 78",
+            "wide = ...",
+            "tight = ..."
+          ]
+        },
+        {
+          "name": "assign",
+          "locals": [
+            "e = EVENTS[4]",
+            "shape = \"session\""
+          ]
+        }
+      ]
+    },
+    {
+      "t": "so sessions are built by comparing CONSECUTIVE event times",
+      "line": [
+        42,
+        47
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "tFixed = 45",
+            "tSliding = 78",
+            "wide = @0x100",
+            "tight = ..."
+          ]
+        },
+        {
+          "name": "sessionize",
+          "locals": [
+            "key = \"a\"",
+            "gap = 120",
+            "out = @0x100",
+            "e = (et 130)",
+            "last = Session(1, 3, ...)"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and the same events give a different number of sessions",
+      "line": [
+        72
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "tFixed = 45",
+            "tSliding = 78",
+            "wide = @0x100",
+            "tight = @0x200"
+          ]
+        }
+      ]
+    }
+  ]
+}

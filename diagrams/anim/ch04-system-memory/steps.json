@@ -1,0 +1,130 @@
+{
+  "name": "ch04-system-memory",
+  "steps": [
+    {
+      "t": "the row key is the session's BOUNDS, which is the whole problem",
+      "line": [
+        34,
+        35
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "correct = ...",
+            "broken = ...",
+            "entries = ..."
+          ]
+        },
+        {
+          "name": "run",
+          "locals": [
+            "key = \"b\"",
+            "gap = 40",
+            "canErase = true",
+            "store = @0x100",
+            "seen = [1 session]",
+            "i = 4",
+            "s = Session(90, 90, ...)",
+            "old = ...",
+            "now = ..."
+          ]
+        },
+        {
+          "name": "write",
+          "locals": [
+            "store = @0x100",
+            "s = Session(90, 90, ...)"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "so a correction is an ERASE plus a write",
+      "line": [
+        54,
+        64
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "correct = @0x100",
+            "broken = ...",
+            "entries = ..."
+          ]
+        },
+        {
+          "name": "run",
+          "locals": [
+            "key = \"b\"",
+            "gap = 40",
+            "canErase = true",
+            "store = @0x100",
+            "seen = [1 session]",
+            "i = 7",
+            "s = ...",
+            "old = Session(90, 90, ...)",
+            "now = Session(50, 90, ...)"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "without the erase, the old row survives",
+      "line": [
+        42,
+        43
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "correct = @0x100",
+            "broken = @0x200",
+            "entries = ..."
+          ]
+        },
+        {
+          "name": "run",
+          "locals": [
+            "key = \"b\"",
+            "gap = 40",
+            "canErase = false",
+            "store = @0x200",
+            "seen = [1 session]",
+            "i = 7",
+            "s = ...",
+            "old = Session(90, 90, ...)",
+            "now = Session(50, 90, ...)"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and the state size is decided by the data, not the schema",
+      "line": [
+        73,
+        75
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "correct = @0x100",
+            "broken = @0x200",
+            "entries = 5"
+          ]
+        },
+        {
+          "name": "stateEntries",
+          "locals": [
+            "gap = 120",
+            "n = 5",
+            "k = \"b\""
+          ]
+        }
+      ]
+    }
+  ]
+}

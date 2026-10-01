@@ -5,14 +5,6 @@
 # artifact was built. The file can only shrink.
 #
 # format: chNN|<flow section title>|DIAGRAM|PROGRAM
-ch04|Window shapes — fixed, sliding, session|DIAGRAM
-ch04|Window shapes — fixed, sliding, session|PROGRAM
-ch04|The window lifecycle|DIAGRAM
-ch04|The window lifecycle|PROGRAM
-ch04|Session semantics and pitfalls|DIAGRAM
-ch04|Session semantics and pitfalls|PROGRAM
-ch04|systemDesign|DIAGRAM
-ch04|systemDesign|PROGRAM
 ch05|What exactly-once means|DIAGRAM
 ch05|What exactly-once means|PROGRAM
 ch05|Idempotency and deduplication|DIAGRAM
