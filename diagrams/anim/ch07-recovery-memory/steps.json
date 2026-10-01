@@ -1,0 +1,109 @@
+{
+  "name": "ch07-recovery-memory",
+  "steps": [
+    {
+      "t": "the stage waits for the LATEST barrier, and buffers meanwhile",
+      "line": [
+        30,
+        37
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "a = ...",
+            "good = ...",
+            "stale = ...",
+            "noState = ...",
+            "bound = ..."
+          ]
+        },
+        {
+          "name": "align",
+          "locals": [
+            "latest = 5",
+            "held = [3, 4]",
+            "i = 5",
+            "k = \"b\""
+          ]
+        }
+      ]
+    },
+    {
+      "t": "the matching pair reaches the no-crash total",
+      "line": [
+        45,
+        49
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "a = @0x100",
+            "good = @0x200",
+            "stale = ...",
+            "noState = ...",
+            "bound = ..."
+          ]
+        },
+        {
+          "name": "recover",
+          "locals": [
+            "hasState = true",
+            "offset = 4",
+            "total = 45",
+            "i = 8"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and the two half-checkpoints fail in OPPOSITE directions",
+      "line": [
+        73
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "a = @0x100",
+            "good = @0x200",
+            "stale = @0x300",
+            "noState = @0x400",
+            "bound = ..."
+          ]
+        }
+      ]
+    },
+    {
+      "t": "so the checkpoint interval IS the at-least-once error bound",
+      "line": [
+        57,
+        63
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "a = @0x100",
+            "good = @0x200",
+            "stale = @0x300",
+            "noState = @0x400",
+            "bound = 12"
+          ]
+        },
+        {
+          "name": "errorBound",
+          "locals": [
+            "k = 3",
+            "worst = 12",
+            "i = 8",
+            "since = 2",
+            "j = 8",
+            "run = (a partial sum)"
+          ]
+        }
+      ]
+    }
+  ]
+}

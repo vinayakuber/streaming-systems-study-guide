@@ -9,6 +9,7 @@ registerChapter({
   flow: [
     {
       section: 'Why state must persist',
+      walkthroughs: ['ch07-why', 'ch07-why-memory'],
       color: 'cyan',
       motivation: `A pipeline that keeps a running count in memory loses it on restart, so this section establishes why durable state is a requirement, not an optimization.`,
       steps: [
@@ -17,56 +18,10 @@ registerChapter({
         { num: 3, title: 'Recovery is about correctness and cost', detail: 'Losing state forces a full reprocessing of the stream — <strong>correct but slow</strong>. Persisting state makes recovery <strong>fast and still correct</strong>.' },
         { num: 4, title: 'The stream is the truth, state is a cache of it', detail: 'Persistent state is a materialized fold of the stream. <strong>You can always rebuild it from the stream, but persisting it avoids the rebuild cost.</strong>' }
       ],
-      program: `// COUNT SIDE — a restart loses in-memory state but a checkpoint preserves it
-// GOAL (what this is FOR): answer "after a crash, does key 42 resume at 13 or at 0?" without re-reading the whole stream.
-//    THE NAIVE WAY (why we checkpoint at all): keep the count only in memory — then a restart drops it to 0 and the job must replay every
-//    event from the start to rebuild 13. We replace the memory-only count with a periodic durable snapshot that a restart loads instead of replaying.
-// DEF: state — the running per-key count = { 42: 10 }
-// DEF: checkpoint — a durable snapshot of state taken periodically = every 60 s
-//    WHO chose the 60 s interval: the pipeline builder, not the data. 60 s here only so the three folded events (10 -> 13) are captured by
-//    one snapshot boundary; production checkpoints are every 1 to 5 minutes, trading snapshot I/O against replay time on restart.
-// DEF: restart — the job restarts and resumes from the checkpoint = at offset 13
-// STATE (before):
-//    count_state : { 42: 10 }
-// ======================================================================
-// offset 10: {key: 42, value: 1}
-// offset 11: {key: 42, value: 1}
-// offset 12: {key: 42, value: 1}
-// ======================================================================
-// BUILD PHASE · run once at the checkpoint interval
-// step 0 · initialize the count register -> count_state : none -> { 42: 10 }
-//    -> input  : the running per-key count = { 42: 10 }
-//    <- output : count_state = { 42: 10 }   BECAUSE the pipeline resumes from the last fold
-// QUERY PHASE · per event (or per checkpoint)
-// step 1 · fold the three events -> count_state[42] : 10 -> 13
-//    -> input  : events = [1, 1, 1] for key 42, count_state = { 42: 10 }
-//    <- output : count_state[42] = 13   BECAUSE 10 + 3 = 13
-// step 2 · the checkpoint saves -> durable : {} -> { 42: 13 }
-//    -> input  : count_state = { 42: 13 }, checkpoint interval = 60 s
-//    <- output : durable = { 42: 13 }   BECAUSE the periodic snapshot fired
-// step 3 · the restart restores -> count_state[42] : 0 -> 13
-//    -> input  : durable = { 42: 13 }, count_state = { 42: 0 }
-//    decode 3a · read the checkpoint value for key 42 -> saved : none -> 13
-//    decode 3b · load the saved value into count_state -> count_state[42] : 0 -> 13
-//    <- output : count_state[42] = 13   BECAUSE the checkpoint holds the last count
-// ======================================================================
-// TRACE (three events of value 1 for key 42):
-//    phase       | count_state | durable
-//    fold 3      | 13          | {}
-//    checkpoint  | 13          | { 42: 13 }
-//    restart     | 13          | { 42: 13 }
-// CORRECTNESS (checkpoint-invariant lemma): the checkpoint stores the count at a consistent point — 10 + 3 = 13 — and
-//    the restart loads 13 rather than 0, so recovery skips re-reading the 10 events already folded.
-// VARIANTS (when to pick which):
-//    periodic full snapshot -> one snapshot write per interval, simple (use for small state)   <- THIS ONE
-//    incremental snapshot   -> one delta upload per interval, uploads only deltas (use for large state)
-//    no checkpoint, replay  -> one full replay of the stream, no storage (use when replay is cheap)
-// ======================================================================
-// downstream : count 10 -> fold 13 -> checkpoint 13 -> restart 13   BECAUSE the checkpoint persisted the fold, so recovery is a load not a replay
-//    derivation : replayed events saved = 13 - 3 = 10   BECAUSE only the 3 post-checkpoint events would need re-reading`
     },
     {
       section: 'Checkpoints and state stores',
+      walkthroughs: ['ch07-checkpoints', 'ch07-checkpoints-memory'],
       color: 'orange',
       motivation: `Persisting state has real machinery — how often to snapshot, where to put the bytes, and how to keep snapshots small — so this section covers the practical knobs.`,
       steps: [
@@ -75,54 +30,10 @@ registerChapter({
         { num: 3, title: 'Incremental checkpoints keep cost down', detail: 'Rather than snapshotting all state every time, <strong>incremental checkpointing uploads only what changed</strong> since the last snapshot — the difference between uploading 10 KB or 10 GB.' },
         { num: 4, title: 'Checkpoint frequency trades cost vs recovery', detail: 'Frequent checkpoints mean <strong>short recovery but high I/O</strong>; infrequent ones mean cheap steady-state but <strong>long replay on restart</strong>. Pick the frequency for the failure budget.' }
       ],
-      program: `// CHECKPOINT SIDE — incremental snapshots upload only the delta, not the whole state
-// GOAL (what this is FOR): answer "how many keys does the next checkpoint upload — all 1000, or just the 3 that changed?"
-//    THE NAIVE WAY (why we track a delta at all): snapshot the whole 1000-key store every interval — then 1000 keys are uploaded when only
-//    3 changed. We replace the full upload with a delta set of changed keys, so each checkpoint ships the 3 changed keys and not the 997 unchanged.
-// DEF: state — the full keyed store = 1000 keys
-// DEF: incremental checkpoint — uploads only keys changed since the last snapshot = { "key_7", "key_88", "key_501" }
-// DEF: delta — the set of changed keys = { "key_7", "key_88", "key_501" }
-//    WHY delta exists: without it, "what changed since the last snapshot?" has no record, so the only option is to re-upload everything.
-//    With it, the checkpoint reads the 3-entry delta and uploads 3 keys, and a restart rebuilds the full state from the prior snapshot + delta.
-// STATE (before):
-//    uploaded_keys : 0
-// ======================================================================
-// offset 0: {key: "key_7", changed: true}
-// offset 1: {key: "key_88", changed: true}
-// offset 2: {key: "key_501", changed: true}
-// ======================================================================
-// BUILD PHASE · run once at the snapshot boundary
-// step 0 · initialize the delta register -> delta : none -> {}
-//    -> input  : full state = 1000 keys, changed keys = [ "key_7", "key_88", "key_501" ]
-//    <- output : delta = {}   BECAUSE no changed key has been recorded yet
-// QUERY PHASE · per changed key
-// step 1 · the changed keys are recorded -> delta : {} -> { "key_7", "key_88", "key_501" }
-//    -> input  : changed keys = [ "key_7", "key_88", "key_501" ], delta = {}
-//    <- output : delta = { "key_7", "key_88", "key_501" }   BECAUSE only three keys changed since the last snapshot
-// step 2 · the incremental checkpoint uploads the delta -> uploaded_keys : 0 -> 3
-//    -> input  : delta = { "key_7", "key_88", "key_501" }, uploaded_keys = 0
-//    <- output : uploaded_keys = 3   BECAUSE only changed keys are sent
-// step 3 · a full snapshot comparison -> uploaded_keys : 0 -> 1000
-//    -> input  : full state = 1000 keys, uploaded_keys = 0
-//    <- output : uploaded_keys = 1000   BECAUSE it sends every key
-// ======================================================================
-// TRACE (1000 keys, 3 changed):
-//    snapshot kind | keys uploaded
-//    incremental   | 3
-//    full          | 1000
-// CORRECTNESS (delta-invariant lemma): the incremental checkpoint uploads exactly the keys changed since the last
-//    snapshot — 3 of 1000 — so a restart that loads the delta plus the prior snapshot reconstructs the full state
-//    without ever missing a changed key.
-// VARIANTS (when to pick which):
-//    incremental delta -> one upload per changed key, small uploads (use for large, slowly-changing state)   <- THIS ONE
-//    full snapshot     -> one upload per key, simple (use for small state)
-//    no snapshot       -> one full replay of the stream (use when the stream can rebuild state cheaply)
-// ======================================================================
-// downstream : 3 changed keys -> delta set 3 -> upload 3 -> not 1000   BECAUSE incremental uploads only the delta
-//    derivation : upload ratio = 3 / 1000 = 0.003, so the incremental checkpoint costs 0.3% of a full snapshot`
     },
     {
       section: 'Consistency and recovery',
+      walkthroughs: ['ch07-recovery', 'ch07-recovery-memory'],
       color: 'green',
       motivation: `A snapshot is only useful if it is consistent — taken at one logical point in the stream — and recovery is only safe if the pipeline knows exactly where that point was, so this section covers the correctness side.`,
       steps: [
@@ -131,55 +42,6 @@ registerChapter({
         { num: 3, title: 'At-least-once vs exactly-once recovery', detail: 'With at-least-once checkpointing, some records after the last checkpoint may be replayed (duplicates). <strong>Exactly-once checkpointing aligns state and offsets so no record is lost or double-counted.</strong>' },
         { num: 4, title: 'State grows, so bound it', detail: 'Windows that never close and keys that never expire grow state forever. <strong>Watermarks + allowed lateness are what let the pipeline garbage-collect state.</strong>' }
       ],
-      program: `// BARRIER SIDE — a checkpoint barrier snapshots state and offset at one logical point
-// GOAL (what this is FOR): answer "after a crash, does key 42 resume at 13 with no record lost or double-counted?"
-//    THE NAIVE WAY (why we pair state with offset): snapshot the count alone, without the source position — then a restart restores 13 but
-//    has no idea which records were already folded, so it replays offset 500 (double-count) or skips it (loses one). We replace "state alone"
-//    with a { state, offset } pair, so restart resumes at offset + 1 = 501.
-// DEF: barrier — a marker in the stream that tells each stage to snapshot = at offset 500
-// DEF: state — the running count = { 42: 13 }
-// DEF: offset — the source position = 500
-//    WHY the state+offset pair exists: without it, "where in the stream was this count taken?" is unanswerable; with it, resume = 500 + 1
-//    = 501, replaying neither offset 500 nor skipping offset 501.
-// STATE (before):
-//    count_state : { 42: 13 }
-// ======================================================================
-// offset 499: {key: 42, value: 1}
-// offset 500: {key: 42, value: 1, barrier: true}
-// ======================================================================
-// BUILD PHASE · run once when the barrier arrives
-// step 0 · initialize the snapshot register -> snapshot : none -> {}
-//    -> input  : barrier = true at offset 500, count_state = { 42: 13 }
-//    <- output : snapshot = {}   BECAUSE the stage has not yet recorded its state
-// QUERY PHASE · per barrier
-// step 1 · the stage snapshots its state -> snapshot : {} -> { count: { 42: 13 } }
-//    -> input  : count_state = { 42: 13 }, barrier = true
-//    <- output : snapshot = { count: { 42: 13 } }   BECAUSE the barrier says "snapshot now"
-// step 2 · the stage records the offset -> snapshot : { count: { 42: 13 } } -> { count: { 42: 13 }, offset: 500 }
-//    -> input  : snapshot = { count: { 42: 13 } }, source offset = 500
-//    <- output : snapshot = { count: { 42: 13 }, offset: 500 }   BECAUSE state and position must be paired
-// step 3 · recovery restores both -> count_state : { 42: 0 } -> { 42: 13 }, source resumes at 501
-//    -> input  : snapshot = { count: { 42: 13 }, offset: 500 }, count_state = { 42: 0 }
-//    decode 3a · read the saved count from the snapshot -> saved_count : none -> 13
-//    decode 3b · read the saved offset from the snapshot -> saved_offset : none -> 500
-//    decode 3c · restore state and advance the source to offset + 1 -> count_state : { 42: 0 } -> { 42: 13 }, resume = 501
-//    <- output : count_state = { 42: 13 }, source resumes at 501   BECAUSE offset 500 was already folded
-// ======================================================================
-// TRACE (barrier at offset 500):
-//    phase      | snapshot                          | resume
-//    snapshot   | { count: { 42: 13 } }             | -
-//    record off | { count: { 42: 13 }, offset: 500 }| -
-//    recover    | { count: { 42: 13 }, offset: 500 }| 501
-// CORRECTNESS (barrier-invariant lemma): the snapshot captures state and offset at one logical point — offset 500 was
-//    already folded into count 13, so resuming at 501 replays neither offset 500 nor skips offset 501, and no record
-//    is lost or double-counted.
-// VARIANTS (when to pick which):
-//    aligned barrier snapshot -> one snapshot write per barrier, exactly-once (use when correctness is paramount)   <- THIS ONE
-//    unaligned snapshot       -> one snapshot write per barrier, faster but at-least-once (use when latency wins over exactness)
-//    no barrier               -> one full replay of the stream (use when state can be rebuilt)
-// ======================================================================
-// downstream : barrier 500 -> snapshot count 13 -> snapshot offset 500 -> resume 501   BECAUSE the checkpoint paired state with its source position
-//    derivation : resume = 500 + 1 = 501, so no record is replayed or skipped`
     }
   ],
 
@@ -208,6 +70,7 @@ registerChapter({
     { scenario: "A metrics pipeline has 10 GB of state; snapshotting the whole thing every minute saturates the network, but snapshotting rarely makes crashes expensive.", q: "How do you keep checkpoint cost low while keeping recovery fast?", solution: "Use incremental checkpoints — upload only the keys that changed since the last snapshot — and tune the frequency so the recovery time matches the failure budget.", components: ["Incremental checkpoint — delta only", "State store — disk-backed", "Frequency — tuned to failure budget"],  code: "// 1000 keys, 12 changed\n//   incremental: upload 12 keys\n//   full:        upload 1000 keys\n//   -> 0.3% of the I/O", tieback: "This is exactly the incremental-checkpoint material in this chapter.", refs: ["4. Incremental checkpoints", "7. Checkpoint frequency"], problems: ["20-metrics-monitoring"] }
   ],
   systemDesign: {
+    walkthroughs: ['ch07-system', 'ch07-system-memory'],
     question: 'Design checkpointing for a stateful stream processor. Premise: after a crash the processor must resume from the last barrier snapshot (state plus offset) without losing events or double-counting, even though the source replays from the checkpoint.',
     pipeline: 'stream -> processor (state store) -> checkpoint (state + offset) -> durable storage -> restart recovery',
     decomposition: [
@@ -237,36 +100,6 @@ registerChapter({
         ] }
     ],
     
-    program: `// SYSTEM DESIGN — a barrier snapshots state and offset so a restart resumes without loss or double-count
-// GOAL (what this is FOR): answer "after a crash at offset 500, does key 42 resume at 13 with no record lost or double-counted?"
-//    THE NAIVE WAY (why the checkpoint is a pair): snapshot state alone without the offset — then a restart restores 13 but must guess
-//    where the source stopped, so it replays or skips records. We replace "state alone" with a { state, offset } pair, so resume = 500 + 1 = 501.
-// DEF: barrier — the marker that triggers a snapshot = at offset 500
-// DEF: checkpoint — a durable snapshot of { state, offset } = { count: { 42: 13 }, offset: 500 }
-//    WHY the state+offset pair exists: without it, "where in the stream was this count taken?" is unanswerable; with it, offset 500 was
-//    already folded into 13, so restart resumes at 501 and neither replays 500 nor skips 501.
-// DEF: state — the running per-key count = { 42: 13 }
-// STATE (before):
-//    count_state : { 42: 13 }
-// ======================================================================
-// offset 499: {key: 42, value: 1}
-// offset 500: {key: 42, value: 1, barrier: true}
-// ======================================================================
-// step 1 · the processor snapshots state -> checkpoint : {} -> { count: { 42: 13 } }
-//    -> input  : count_state = { 42: 13 }, barrier = true
-//    <- output : checkpoint = { count: { 42: 13 } }   BECAUSE the barrier triggers the snapshot
-// step 2 · the processor records the offset -> checkpoint : { count: { 42: 13 } } -> { count: { 42: 13 }, offset: 500 }
-//    -> input  : checkpoint = { count: { 42: 13 } }, source offset = 500
-//    <- output : checkpoint = { count: { 42: 13 }, offset: 500 }   BECAUSE state and offset must be paired
-// step 3 · a restart restores both -> count_state : { 42: 0 } -> { 42: 13 }, resume at 501
-//    -> input  : checkpoint = { count: { 42: 13 }, offset: 500 }, count_state = { 42: 0 }
-//    decode 3a · read the saved count from the checkpoint -> saved_count : none -> 13
-//    decode 3b · read the saved offset from the checkpoint -> saved_offset : none -> 500
-//    decode 3c · restore state and advance the source to offset + 1 -> count_state : { 42: 0 } -> { 42: 13 }, resume = 501
-//    <- output : count_state = { 42: 13 }, resume at 501   BECAUSE offset 500 was already folded
-// ======================================================================
-// downstream : barrier 500 -> checkpoint count 13 -> checkpoint offset 500 -> resume 501   BECAUSE the checkpoint paired state with its source position
-//    derivation : resume offset = 500 + 1 = 501, so no record is replayed or skipped`
   },
   quiz: [
     { question: "Why must stream-processing state persist?", options: ["A. To make the stream ordered", "B. To survive restarts without re-reading the whole stream", "C. To reduce event size", "D. To create watermarks"], answer: 2, explanation: "Persistent state makes the aggregation durable and restart fast.", conceptRef: "1. Memory state dies with the process" },

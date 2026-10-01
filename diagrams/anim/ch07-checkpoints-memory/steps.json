@@ -1,0 +1,104 @@
+{
+  "name": "ch07-checkpoints-memory",
+  "steps": [
+    {
+      "t": "the checkpoint writes the state AND the offset",
+      "line": [
+        29,
+        36
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "cp = ...",
+            "correct = ...",
+            "stale = ...",
+            "cost = ..."
+          ]
+        },
+        {
+          "name": "take",
+          "locals": [
+            "upto = 4",
+            "ent = (a map)",
+            "i = 4",
+            "id = \"a@240\""
+          ]
+        }
+      ]
+    },
+    {
+      "t": "restoring with the matching offset gives the no-crash total",
+      "line": [
+        42,
+        45
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "cp = @0x100",
+            "correct = 45",
+            "stale = ...",
+            "cost = ..."
+          ]
+        },
+        {
+          "name": "restore",
+          "locals": [
+            "cp = @0x100",
+            "useOffset = 4",
+            "total = 45",
+            "id = \"a@240\" (the loop over entries is done)",
+            "i = 8"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and with a stale offset the prefix is counted twice",
+      "line": [
+        71
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "cp = @0x100",
+            "correct = 45",
+            "stale = 68",
+            "cost = ..."
+          ]
+        }
+      ]
+    },
+    {
+      "t": "incremental uploads churn; full uploads everything, every time",
+      "line": [
+        56,
+        62
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "cp = @0x100",
+            "correct = 45",
+            "stale = 68",
+            "cost = @0x200"
+          ]
+        },
+        {
+          "name": "uploadVolume",
+          "locals": [
+            "full = 14",
+            "incr = 8",
+            "prev = 5",
+            "c = 8"
+          ]
+        }
+      ]
+    }
+  ]
+}

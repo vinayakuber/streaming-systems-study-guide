@@ -1,0 +1,120 @@
+{
+  "name": "ch07-system-memory",
+  "steps": [
+    {
+      "t": "steady state: one entry per (key, window), updated in place",
+      "line": [
+        29,
+        32
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "store = @0x100",
+            "i = 4",
+            "cpGood = ...",
+            "cpTorn = ...",
+            "good = ...",
+            "torn = ..."
+          ]
+        },
+        {
+          "name": "applyTo",
+          "locals": [
+            "store = @0x100",
+            "e = EVENTS[4]",
+            "id = \"a@240\""
+          ]
+        }
+      ]
+    },
+    {
+      "t": "the commit writes state and offset to durable storage",
+      "line": [
+        44,
+        45
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "store = @0x100",
+            "i = 4",
+            "cpGood = @0x200",
+            "cpTorn = ...",
+            "good = ...",
+            "torn = ..."
+          ]
+        },
+        {
+          "name": "commit",
+          "locals": [
+            "store = @0x100",
+            "offset = 4",
+            "atomic = true",
+            "cp = @0x200"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "resuming from the intact pair reproduces the no-crash run",
+      "line": [
+        53,
+        56
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "store = @0x100",
+            "i = 4",
+            "cpGood = @0x200",
+            "cpTorn = offset 0",
+            "good = @0x300",
+            "torn = ..."
+          ]
+        },
+        {
+          "name": "resume",
+          "locals": [
+            "cp = @0x200",
+            "store = (restored)",
+            "n = 4",
+            "i = 8",
+            "total = 45"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "a torn commit replays the prefix and over-counts",
+      "line": [
+        46
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "store = @0x100",
+            "i = 4",
+            "cpGood = @0x200",
+            "cpTorn = offset 0",
+            "good = @0x300",
+            "torn = @0x400"
+          ]
+        },
+        {
+          "name": "commit",
+          "locals": [
+            "store = @0x100",
+            "offset = 4",
+            "atomic = false",
+            "cp = (offset 0)"
+          ]
+        }
+      ]
+    }
+  ]
+}
