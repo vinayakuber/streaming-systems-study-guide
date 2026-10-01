@@ -1,0 +1,115 @@
+{
+  "name": "ch09-system-memory",
+  "steps": [
+    {
+      "t": "the join publishes a NEGATIVE attribution",
+      "line": [
+        43,
+        44,
+        35,
+        36
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "withT = ...",
+            "withoutT = ..."
+          ]
+        },
+        {
+          "name": "run",
+          "locals": [
+            "canTombstone = true",
+            "store = @0x100",
+            "l = (id 0, et 1)",
+            "e = (an Emission)",
+            "late = []"
+          ]
+        },
+        {
+          "name": "markUnattributed",
+          "locals": [
+            "store = @0x100",
+            "clickId = 0"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "then a late impression contradicts it",
+      "line": [
+        62,
+        70
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "withT = ...",
+            "withoutT = ..."
+          ]
+        },
+        {
+          "name": "run",
+          "locals": [
+            "canTombstone = true",
+            "store = @0x100",
+            "l = (id 0, et 1)",
+            "e = (an Emission)",
+            "late = [7]"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "retracting a negative needs a TOMBSTONE, not an overwrite",
+      "line": [
+        53,
+        54
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "withT = ...",
+            "withoutT = ..."
+          ]
+        },
+        {
+          "name": "run",
+          "locals": [
+            "canTombstone = true",
+            "store = @0x100",
+            "l = (id 0, et 1)",
+            "e = (an Emission)",
+            "late = [7]"
+          ]
+        },
+        {
+          "name": "retract",
+          "locals": [
+            "store = @0x100",
+            "clickId = 0",
+            "canTombstone = true"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and without it the two stores look identical",
+      "line": [
+        81
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "withT = @0x100",
+            "withoutT = @0x200"
+          ]
+        }
+      ]
+    }
+  ]
+}

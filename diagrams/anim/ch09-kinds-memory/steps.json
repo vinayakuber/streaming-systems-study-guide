@@ -1,0 +1,115 @@
+{
+  "name": "ch09-kinds-memory",
+  "steps": [
+    {
+      "t": "the windowed join compares two STREAM rows",
+      "line": [
+        23,
+        27
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "pairs = ...",
+            "enriched = ...",
+            "wWaits = ...",
+            "tWaits = ..."
+          ]
+        },
+        {
+          "name": "windowedJoin",
+          "locals": [
+            "out = @0x100",
+            "l = (id 3, et 130)",
+            "r = (id 2, et 90)"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "the temporal join probes a TABLE as of the row's own time",
+      "line": [
+        36,
+        40
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "pairs = @0x100",
+            "enriched = ...",
+            "wWaits = ...",
+            "tWaits = ..."
+          ]
+        },
+        {
+          "name": "temporalJoin",
+          "locals": [
+            "out = @0x200",
+            "l = (id 3, et 130)"
+          ]
+        },
+        {
+          "name": "tableAsOf",
+          "locals": [
+            "et = 130",
+            "total = 11",
+            "any = true",
+            "r = (id 7, et 50)"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "so a row before the table existed gets NONE, not a wait",
+      "line": [
+        44
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "pairs = @0x100",
+            "enriched = @0x200",
+            "wWaits = ...",
+            "tWaits = ..."
+          ]
+        },
+        {
+          "name": "tableAsOf",
+          "locals": [
+            "et = 1",
+            "total = 0",
+            "any = false",
+            "r = (id 7, et 50)"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and that is the whole difference: one waits, one does not",
+      "line": [
+        61,
+        62
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "pairs = @0x100",
+            "enriched = @0x200",
+            "wWaits = \"both watermarks\"",
+            "tWaits = \"nothing\""
+          ]
+        },
+        {
+          "name": "waitsFor",
+          "locals": [
+            "kind = \"windowed\""
+          ]
+        }
+      ]
+    }
+  ]
+}

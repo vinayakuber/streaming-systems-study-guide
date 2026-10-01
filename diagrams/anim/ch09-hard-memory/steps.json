@@ -1,0 +1,115 @@
+{
+  "name": "ch09-hard-memory",
+  "steps": [
+    {
+      "t": "the join predicate is one subtraction",
+      "line": [
+        23,
+        27
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "all = ...",
+            "clean = ...",
+            "lost = ...",
+            "claim = ..."
+          ]
+        },
+        {
+          "name": "trueMatches",
+          "locals": [
+            "out = @0x100",
+            "l = (id 0, et 1)",
+            "r = (id 7, et 50)"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "a silent side blocks the join's claim entirely",
+      "line": [
+        48,
+        52
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "all = @0x100",
+            "clean = ...",
+            "lost = ...",
+            "claim = ..."
+          ]
+        },
+        {
+          "name": "joinWatermark",
+          "locals": [
+            "i = 0",
+            "lowest = NONE",
+            "k = \"b\"",
+            "w = NONE"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "one click reaches its emission point",
+      "line": [
+        61,
+        65
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "all = @0x100",
+            "clean = @0x200",
+            "lost = ...",
+            "claim = ..."
+          ]
+        },
+        {
+          "name": "planFor",
+          "locals": [
+            "l = (id 3, et 130)",
+            "when = 8",
+            "ms = (a list)",
+            "i = 8",
+            "w = 200",
+            "p = (a pair)"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and 2 click never reaches it, holding 2 matches",
+      "line": [
+        71
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "all = @0x100",
+            "clean = @0x200",
+            "lost = @0x300",
+            "claim = 200"
+          ]
+        },
+        {
+          "name": "planFor",
+          "locals": [
+            "l = (id 4, et 245)",
+            "when = NONE",
+            "ms = [5, 6]",
+            "i = 8",
+            "w = 200",
+            "p = (a pair)"
+          ]
+        }
+      ]
+    }
+  ]
+}

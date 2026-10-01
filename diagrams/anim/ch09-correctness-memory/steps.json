@@ -1,0 +1,117 @@
+{
+  "name": "ch09-correctness-memory",
+  "steps": [
+    {
+      "t": "a click with no match yet still PUBLISHES — a no-match",
+      "line": [
+        36,
+        47
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "emitted = ...",
+            "wrongAbout = ...",
+            "counts = ...",
+            "total = ..."
+          ]
+        },
+        {
+          "name": "emitFor",
+          "locals": [
+            "l = (id 0, et 1)",
+            "when = 5",
+            "have = []",
+            "i = 8",
+            "w = 200",
+            "m = (a match)"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and the impression that contradicts it arrives later",
+      "line": [
+        54,
+        58
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "emitted = @0x100",
+            "wrongAbout = @0x200",
+            "counts = ...",
+            "total = ..."
+          ]
+        },
+        {
+          "name": "contradictedBy",
+          "locals": [
+            "l = (id 0, et 1)",
+            "e = @0x100",
+            "out = [7]",
+            "m = 7"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "a never-emitted click contributes to neither count",
+      "line": [
+        42
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "emitted = @0x100",
+            "wrongAbout = @0x200",
+            "counts = ...",
+            "total = ..."
+          ]
+        },
+        {
+          "name": "emitFor",
+          "locals": [
+            "l = (id 4, et 245)",
+            "when = NONE",
+            "have = []",
+            "i = 8",
+            "w = 200",
+            "m = (a match)"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "so the tally is 1 / 2 / 2, summing to 5",
+      "line": [
+        66,
+        72
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "emitted = @0x100",
+            "wrongAbout = @0x200",
+            "counts = @0x300",
+            "total = 5"
+          ]
+        },
+        {
+          "name": "tally",
+          "locals": [
+            "on = 1",
+            "la = 2",
+            "nv = 2",
+            "l = (id 8, et 540)",
+            "e = (an Emission)"
+          ]
+        }
+      ]
+    }
+  ]
+}
