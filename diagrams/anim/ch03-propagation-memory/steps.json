@@ -1,0 +1,108 @@
+{
+  "name": "ch03-propagation-memory",
+  "steps": [
+    {
+      "t": "a source that has said nothing blocks the claim entirely",
+      "line": [
+        38,
+        42
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "claim = ...",
+            "global = ...",
+            "held = ...",
+            "gap = ..."
+          ]
+        },
+        {
+          "name": "stageWatermark",
+          "locals": [
+            "i = 0",
+            "lowest = NONE",
+            "k = \"b\"",
+            "w = NONE"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "the claim is the lowest of the inputs, never the highest",
+      "line": [
+        43
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "claim = ...",
+            "global = ...",
+            "held = ...",
+            "gap = ..."
+          ]
+        },
+        {
+          "name": "stageWatermark",
+          "locals": [
+            "i = 8",
+            "lowest = 200",
+            "k = \"b\"",
+            "w = 200"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "a single global watermark would over-claim",
+      "line": [
+        55,
+        56
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "claim = 200",
+            "global = ...",
+            "held = ...",
+            "gap = ..."
+          ]
+        },
+        {
+          "name": "globalWatermark",
+          "locals": [
+            "i = 8"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and the correct claim withholds a window that is actually complete",
+      "line": [
+        62,
+        65
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "claim = 200",
+            "global = 480",
+            "held = @0x200",
+            "gap = 280"
+          ]
+        },
+        {
+          "name": "withheld",
+          "locals": [
+            "i = 8",
+            "out = @0x200",
+            "w = 120"
+          ]
+        }
+      ]
+    }
+  ]
+}

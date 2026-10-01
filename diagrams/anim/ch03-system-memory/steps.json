@@ -1,0 +1,132 @@
+{
+  "name": "ch03-system-memory",
+  "steps": [
+    {
+      "t": "the naive formula reads only the CURRENT event",
+      "line": [
+        24,
+        25
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "naive = ...",
+            "correct = ...",
+            "broken = ..."
+          ]
+        },
+        {
+          "name": "run",
+          "locals": [
+            "useMax = false",
+            "out = (6 values)",
+            "seen = 260",
+            "back = 0",
+            "prev = 200",
+            "e = EVENTS[6]",
+            "w = 160"
+          ]
+        },
+        {
+          "name": "naiveWatermark",
+          "locals": [
+            "e = EVENTS[6]"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "so it goes BACKWARDS — 2 times",
+      "line": [
+        48
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "naive = ...",
+            "correct = ...",
+            "broken = ..."
+          ]
+        },
+        {
+          "name": "run",
+          "locals": [
+            "useMax = false",
+            "out = (8 values)",
+            "seen = 260",
+            "back = 2",
+            "prev = 160",
+            "e = EVENTS[7]",
+            "w = -10"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "one line makes it monotonic",
+      "line": [
+        30,
+        32
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "naive = @0x100",
+            "correct = ...",
+            "broken = ..."
+          ]
+        },
+        {
+          "name": "run",
+          "locals": [
+            "useMax = true",
+            "out = (6 values)",
+            "seen = 260",
+            "back = 0",
+            "prev = 200",
+            "e = EVENTS[6]",
+            "w = 200"
+          ]
+        },
+        {
+          "name": "correctWatermark",
+          "locals": [
+            "seen = 260",
+            "e = EVENTS[6]",
+            "m = 260"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and a regression would UN-close a published window",
+      "line": [
+        60,
+        66
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "naive = @0x100",
+            "correct = @0x200",
+            "broken = @0x300"
+          ]
+        },
+        {
+          "name": "reopened",
+          "locals": [
+            "g = @0x100",
+            "out = @0x300",
+            "w = 0",
+            "i = 4",
+            "j = 7"
+          ]
+        }
+      ]
+    }
+  ]
+}

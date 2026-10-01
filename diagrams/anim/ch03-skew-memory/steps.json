@@ -1,0 +1,120 @@
+{
+  "name": "ch03-skew-memory",
+  "steps": [
+    {
+      "t": "the whole heuristic is one subtraction",
+      "line": [
+        29,
+        30
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "fast = ...",
+            "deflt = ...",
+            "justOff = ...",
+            "right = ..."
+          ]
+        },
+        {
+          "name": "evaluate",
+          "locals": [
+            "lag = 0",
+            "c = ...",
+            "ids = @0x100",
+            "bad = []",
+            "i = 3"
+          ]
+        },
+        {
+          "name": "closesAt",
+          "locals": [
+            "winStart = 0",
+            "lag = 0",
+            "i = 3"
+          ]
+        },
+        {
+          "name": "watermarkAt",
+          "locals": [
+            "i = 3",
+            "lag = 0"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "\"late\" is a verdict about the WINDOW, not about the event",
+      "line": [
+        45,
+        48,
+        59
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "fast = @0x100",
+            "deflt = @0x200",
+            "justOff = ...",
+            "right = ..."
+          ]
+        },
+        {
+          "name": "evaluate",
+          "locals": [
+            "lag = 60",
+            "c = 4",
+            "ids = @0x200",
+            "bad = []",
+            "i = 7"
+          ]
+        },
+        {
+          "name": "isLate",
+          "locals": [
+            "e = EVENTS[7]",
+            "i = 7",
+            "lag = 60",
+            "c = 4"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "one second below the threshold is still wrong",
+      "line": [
+        68
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "fast = @0x100",
+            "deflt = @0x200",
+            "justOff = lag 140, published 15",
+            "right = ..."
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and at the threshold, nothing is late at all",
+      "line": [
+        69
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "fast = @0x100",
+            "deflt = @0x200",
+            "justOff = lag 140, published 15",
+            "right = @0x300"
+          ]
+        }
+      ]
+    }
+  ]
+}

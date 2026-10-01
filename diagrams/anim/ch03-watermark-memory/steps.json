@@ -1,0 +1,110 @@
+{
+  "name": "ch03-watermark-memory",
+  "steps": [
+    {
+      "t": "the max is what makes the watermark monotonic",
+      "line": [
+        25,
+        30,
+        31
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "h = ...",
+            "p = ...",
+            "priceSeconds = ..."
+          ]
+        },
+        {
+          "name": "heuristic",
+          "locals": [
+            "events = EVENTS",
+            "out = (6 values so far)",
+            "seen = 260",
+            "e = EVENTS[6]"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "the perfect watermark reads the FUTURE, which is the catch",
+      "line": [
+        39,
+        43
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "h = ...",
+            "p = ...",
+            "priceSeconds = ..."
+          ]
+        },
+        {
+          "name": "perfect",
+          "locals": [
+            "events = EVENTS",
+            "out = (2 values so far)",
+            "i = 1",
+            "smallest = 50",
+            "j = 7"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "so the perfect watermark is stuck at 50 for 6 events",
+      "line": [
+        44
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "h = @0x100",
+            "p = ...",
+            "priceSeconds = ..."
+          ]
+        },
+        {
+          "name": "perfect",
+          "locals": [
+            "events = EVENTS",
+            "out = (6 values so far)",
+            "i = 5",
+            "smallest = 50",
+            "j = 7"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and the window's answer differs by 4",
+      "line": [
+        55,
+        59
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "h = @0x100",
+            "p = @0x200",
+            "priceSeconds = 34"
+          ]
+        },
+        {
+          "name": "closeW0",
+          "locals": [
+            "wm = perfect(EVENTS)",
+            "ids = @0x300",
+            "i = 7"
+          ]
+        }
+      ]
+    }
+  ]
+}
