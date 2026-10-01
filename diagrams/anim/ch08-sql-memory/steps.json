@@ -1,0 +1,112 @@
+{
+  "name": "ch08-sql-memory",
+  "steps": [
+    {
+      "t": "a filter produces facts, which nothing can revise",
+      "line": [
+        28,
+        31
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "facts = ...",
+            "byEvent = ...",
+            "byProc = ...",
+            "diff = ...",
+            "needs = ..."
+          ]
+        },
+        {
+          "name": "runFilter",
+          "locals": [
+            "out = @0x100",
+            "e = EVENTS[8]"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "the clock is a PARAMETER, not a second code path",
+      "line": [
+        40,
+        43
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "facts = @0x100",
+            "byEvent = @0x200",
+            "byProc = ...",
+            "diff = ...",
+            "needs = ..."
+          ]
+        },
+        {
+          "name": "runTumble",
+          "locals": [
+            "clock = \"pt\"",
+            "out = @0x300",
+            "e = EVENTS[7]",
+            "b = 240"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "so 3 of the 4 buckets hold different sums",
+      "line": [
+        52,
+        55
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "facts = @0x100",
+            "byEvent = @0x200",
+            "byProc = @0x300",
+            "diff = [0, 120, 240]",
+            "needs = ..."
+          ]
+        },
+        {
+          "name": "disagree",
+          "locals": [
+            "a = @0x200",
+            "b = @0x300",
+            "out = [0, 120, 240]",
+            "k = 240"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and the mode decides what the sink must support",
+      "line": [
+        62,
+        63
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "facts = @0x100",
+            "byEvent = @0x200",
+            "byProc = @0x300",
+            "diff = [0, 120, 240]",
+            "needs = \"UPSERT\""
+          ]
+        },
+        {
+          "name": "sinkNeeds",
+          "locals": [
+            "r = @0x200"
+          ]
+        }
+      ]
+    }
+  ]
+}

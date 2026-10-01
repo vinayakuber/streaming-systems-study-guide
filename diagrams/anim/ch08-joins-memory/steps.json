@@ -1,0 +1,102 @@
+{
+  "name": "ch08-joins-memory",
+  "steps": [
+    {
+      "t": "a side that has produced nothing blocks the claim",
+      "line": [
+        41,
+        45
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "early = ...",
+            "claim = ...",
+            "byEt = ...",
+            "byPt = ..."
+          ]
+        },
+        {
+          "name": "joinWatermark",
+          "locals": [
+            "i = 0",
+            "lowest = NONE",
+            "k = \"b\"",
+            "w = NONE"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and the claim is the lower of the two, never the higher",
+      "line": [
+        46
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "early = NONE",
+            "claim = ...",
+            "byEt = ...",
+            "byPt = ..."
+          ]
+        },
+        {
+          "name": "joinWatermark",
+          "locals": [
+            "i = 8",
+            "lowest = 200",
+            "k = \"b\"",
+            "w = 200"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "the clock decides WHICH ROWS ARE PAIRED",
+      "line": [
+        55,
+        59
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "early = NONE",
+            "claim = 200",
+            "byEt = ...",
+            "byPt = ..."
+          ]
+        },
+        {
+          "name": "matches",
+          "locals": [
+            "clock = \"et\"",
+            "out = @0x100",
+            "l = (id 0, et 1)",
+            "r = (id 7, et 50)"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "so the same join on pt pairs a different set of rows",
+      "line": [
+        70
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "early = NONE",
+            "claim = 200",
+            "byEt = @0x100",
+            "byPt = @0x200"
+          ]
+        }
+      ]
+    }
+  ]
+}

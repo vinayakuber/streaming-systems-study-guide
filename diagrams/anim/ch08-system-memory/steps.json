@@ -1,0 +1,124 @@
+{
+  "name": "ch08-system-memory",
+  "steps": [
+    {
+      "t": "the bucket is read off the et column, and nothing else",
+      "line": [
+        48,
+        53
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "good = ...",
+            "bad = ..."
+          ]
+        },
+        {
+          "name": "run",
+          "locals": [
+            "canUpsert = true",
+            "sink = @0x100",
+            "ids = [0,1,2]",
+            "fired = false",
+            "i = 3"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "the watermark decides the moment, and the engine emits",
+      "line": [
+        55
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "good = ...",
+            "bad = ..."
+          ]
+        },
+        {
+          "name": "run",
+          "locals": [
+            "canUpsert = true",
+            "sink = @0x100",
+            "ids = [0,1,2]",
+            "fired = false",
+            "i = 4"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "id 7 arrives and the SAME row is written again",
+      "line": [
+        29,
+        30
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "good = @0x100",
+            "bad = ..."
+          ]
+        },
+        {
+          "name": "run",
+          "locals": [
+            "canUpsert = true",
+            "sink = @0x100",
+            "ids = [0,1,2,7]",
+            "fired = true",
+            "i = 7"
+          ]
+        },
+        {
+          "name": "upsert",
+          "locals": [
+            "sink = @0x100",
+            "bucket = 0",
+            "value = 19"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and an INSERT-only sink reads the two writes as two facts",
+      "line": [
+        38,
+        40
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "good = @0x100",
+            "bad = @0x200"
+          ]
+        },
+        {
+          "name": "run",
+          "locals": [
+            "canUpsert = false",
+            "sink = @0x200",
+            "ids = [0,1,2,7]",
+            "fired = true",
+            "i = 7"
+          ]
+        },
+        {
+          "name": "insertOnly",
+          "locals": [
+            "sink = @0x200",
+            "bucket = 0",
+            "value = 19"
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,124 @@
+{
+  "name": "ch08-windows-memory",
+  "steps": [
+    {
+      "t": "TUMBLE returns one bucket; HOP returns a list",
+      "line": [
+        34,
+        36
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "tum = @0x100",
+            "hop = ...",
+            "sesA = ...",
+            "sesB = ...",
+            "silent = ..."
+          ]
+        },
+        {
+          "name": "rowCount",
+          "locals": [
+            "shape = \"HOP\"",
+            "buckets = (a list)",
+            "total = 78",
+            "e = EVENTS[4]",
+            "b = 240"
+          ]
+        },
+        {
+          "name": "assign",
+          "locals": [
+            "shape = \"HOP\"",
+            "row = EVENTS[4]"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "so one shape partitions the data and the other does not",
+      "line": [
+        45,
+        51
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "tum = @0x100",
+            "hop = @0x200",
+            "sesA = ...",
+            "sesB = ...",
+            "silent = ..."
+          ]
+        },
+        {
+          "name": "rowCount",
+          "locals": [
+            "shape = \"HOP\"",
+            "buckets = (a list)",
+            "total = 78",
+            "e = EVENTS[8]",
+            "b = 540"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "SESSION needs its own pass, and its row count is data-dependent",
+      "line": [
+        59,
+        64
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "tum = @0x100",
+            "hop = @0x200",
+            "sesA = 3",
+            "sesB = 2",
+            "silent = ..."
+          ]
+        },
+        {
+          "name": "sessionRows",
+          "locals": [
+            "key = \"a\"",
+            "n = 3",
+            "last = 540",
+            "e = (et 540)"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and one output row is never produced at all",
+      "line": [
+        73,
+        77
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "tum = @0x100",
+            "hop = @0x200",
+            "sesA = 3",
+            "sesB = 2",
+            "silent = NONE"
+          ]
+        },
+        {
+          "name": "emitsAt",
+          "locals": [
+            "bucket = 480",
+            "i = 8"
+          ]
+        }
+      ]
+    }
+  ]
+}

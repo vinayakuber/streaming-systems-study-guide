@@ -9,6 +9,7 @@ registerChapter({
   flow: [
     {
       section: 'SQL as a stream language',
+      walkthroughs: ['ch08-sql', 'ch08-sql-memory'],
       color: 'cyan',
       motivation: `Declarative SQL lowers the barrier to stream processing, but the relational model must be adapted to time, so this section shows how familiar SQL maps onto a stream.`,
       steps: [
@@ -17,48 +18,10 @@ registerChapter({
         { num: 3, title: 'Time becomes a first-class column', detail: 'A stream table has a <strong>time attribute</strong> (event time or processing time) that windows and joins use. <strong>Batch SQL has no notion of event time; streaming SQL does.</strong>' },
         { num: 4, title: 'Append-only vs updating streams', detail: 'Some query results are <strong>append-only</strong> (each row is a new fact); others are <strong>updating</strong> (a key\'s value changes, requiring a retraction of the old row). The table\'s update mode matters for sinks.' }
       ],
-      program: `// QUERY SIDE — a continuous GROUP BY updates a total as clicks arrive
-// DEF: continuous query — a query that runs forever and emits updated results = "SELECT campaign, COUNT(*) FROM clicks GROUP BY campaign"
-// DEF: result — the updating output table = { "C1": 3 }
-// DEF: retraction — the engine signals the old row is replaced by the new row = { "C1": 3 }
-// STATE (before):
-//    result : { "C1": 3 }
-// ======================================================================
-// offset 0: {campaign: "C1", click: true}
-// offset 1: {campaign: "C1", click: true}
-// ======================================================================
-// BUILD PHASE · run once when the continuous query starts
-// step 0 · initialize the result table register -> result : none -> { "C1": 3 }
-//    -> input  : the updating output table = { "C1": 3 }
-//    <- output : result = { "C1": 3 }   BECAUSE the query opens with the current count
-// QUERY PHASE · per arriving row
-// step 1 · the WHERE keeps the row -> filtered : 1 -> 1 row passes
-//    -> input  : row = {campaign: "C1", click: true}, predicate = campaign = "C1"
-//    <- output : filtered = 1 row passes   BECAUSE the row matches the predicate
-// step 2 · the GROUP BY updates the key -> result["C1"] : 3 -> 4
-//    -> input  : row = {campaign: "C1"}, result = { "C1": 3 }
-//    <- output : result["C1"] = 4   BECAUSE COUNT folds the new row in
-// step 3 · the engine emits a retraction of the old row -> sink : { "C1": 3 } -> { "C1": 4 }
-//    -> input  : result = { "C1": 4 }, old row = { "C1": 3 }, retraction = { "C1": 3 }
-//    <- output : sink = { "C1": 4 }   BECAUSE the old row is removed then the new row is added
-// ======================================================================
-// TRACE (one click for campaign C1):
-//    phase      | result["C1"] | sink
-//    WHERE pass | 3            | 3
-//    GROUP BY   | 4            | 3
-//    retract    | 4            | 4
-// CORRECTNESS (count-invariant lemma): COUNT folds each matching row once — result goes 3 -> 4 for one click — and the
-//    engine retracts (C1, 3) before adding (C1, 4), so the sink stores 4, not 3 + 4 = 7.
-// VARIANTS (when to pick which):
-//    updating result + retract -> one count update + one retraction, correct for changing keys (use for GROUP BY counts)   <- THIS ONE
-//    append-only result        -> one count update, no retraction (use when rows only add new facts)
-//    materialized view         -> one stored count per key, pays storage (use for fast reads)
-// ======================================================================
-// downstream : click -> WHERE pass -> GROUP BY 3 -> 4 -> sink stores 4   BECAUSE the retraction replaced the old value, not added to it
-//    derivation : new count = 3 + 1 = 4`
     },
     {
       section: 'Windows in SQL',
+      walkthroughs: ['ch08-windows', 'ch08-windows-memory'],
       color: 'orange',
       motivation: `The key adaptation of SQL to streams is explicit windowing — batch SQL groups whole tables, while streaming SQL must say over which time slice each aggregate is computed, so this section covers the window constructs.`,
       steps: [
@@ -67,57 +30,10 @@ registerChapter({
         { num: 3, title: 'SESSION — session windows', detail: '<strong>SESSION(gap)</strong> is a session window: a burst of activity closed by a gap of inactivity. The query engine merges sessions as data arrives.' },
         { num: 4, title: 'The watermark drives emission', detail: 'A windowed aggregate emits when the <strong>watermark passes the window end</strong>. The time attribute (event time) plus the watermark is what makes SQL results correct under out-of-order data.' }
       ],
-      program: `// WINDOWED SQL SIDE — the same clicks bucketed by TUMBLE vs HOP give different row counts
-// GOAL (what this is FOR): answer "for one click at 12:04:00, how many rows does the SQL engine emit — the 1 of TUMBLE or the 3 of HOP?"
-//    THE NAIVE WAY (why the window sizes are explicit): aggregate over the whole stream with no time slice — then every click lands in one
-//    ever-growing bucket and a moving average is impossible. We replace the boundaryless GROUP BY with explicit window spans so the same
-//    click lands in 1 fixed span (TUMBLE) or 3 overlapping spans (HOP), and the count differs by construction.
-// DEF: TUMBLE — a 5-min fixed window over event time = [12:00, 12:05)
-//    WHO chose the 5-min TUMBLE size: the query author, not the data. 5 min here only so one click at 12:04:00 lands in exactly one span;
-//    production TUMBLE sizes run from 1 min to 1 hour, matching the reporting cadence.
-// DEF: HOP — a 10-min window sliding every 2 min = [12:00, 12:10)
-//    WHO chose the 10-min/2-min HOP: the query author, not the data. 10 min over 2 min here only so the 5 spans start at 12:00, 12:02, 12:04,
-//    12:06, 12:08 and exactly 3 of them (12:00, 12:02, 12:04) contain 12:04:00; production HOP windows size the slide to the reporting
-//    interval (e.g. 1 hour over 5 min).
-// DEF: click — the event = { event_time: "12:04:00", campaign: "C1" }
-// STATE (before):
-//    tumble_rows : 0
-// ======================================================================
-// offset 0: {event_time: "12:04:00", campaign: "C1"}
-// offset 1: {event_time: "12:04:00", campaign: "C1", shape: "same click"}
-// ======================================================================
-// BUILD PHASE · run once when the query starts
-// step 0 · initialize the per-window row counters -> tumble_rows : none -> 0, hop_rows : none -> 0
-//    -> input  : window definitions = TUMBLE 5-min, HOP 10-min every 2 min
-//    <- output : tumble_rows = 0, hop_rows = 0   BECAUSE no click has been assigned yet
-// QUERY PHASE · per arriving click
-// step 1 · TUMBLE assigns the click -> tumble_rows : 0 -> 1
-//    -> input  : click.event_time = "12:04:00", TUMBLE span = [12:00, 12:05)
-//    <- output : tumble_rows = 1   BECAUSE 12:04:00 falls only in [12:00, 12:05)
-// step 2 · HOP assigns the click -> hop_rows : 0 -> 3
-//    -> input  : click.event_time = "12:04:00", HOP windows = [12:00,12:10), [12:02,12:12), [12:04,12:14)
-//    <- output : hop_rows = 3   BECAUSE it overlaps [12:00,12:10), [12:02,12:12), and [12:04,12:14)
-// step 3 · the watermark at 12:06:30 closes the TUMBLE window -> emitted : {} -> { "[12:00,12:05)": 1 }
-//    -> input  : watermark = "12:06:30", window = "[12:00,12:05)", tumble_rows = 1
-//    <- output : emitted = { "[12:00,12:05)": 1 }   BECAUSE the window end is crossed
-// ======================================================================
-// TRACE (click 12:04:00):
-//    window | spans                                     | rows
-//    TUMBLE | [12:00, 12:05)                            | 1
-//    HOP    | [12:00,12:10),[12:02,12:12),[12:04,12:14) | 3
-// CORRECTNESS (assignment-invariant lemma): the click lands in every span whose range contains 12:04:00 — one TUMBLE
-//    span and three HOP spans — so the TUMBLE count is 1 and the HOP count is 3 for the same underlying event, and the
-//    watermark at 12:06:30 emits the TUMBLE window exactly once.
-// VARIANTS (when to pick which):
-//    TUMBLE  -> one window assignment, non-overlapping (use for periodic totals)   <- THIS ONE
-//    HOP     -> one assignment per overlapping span, overlapping (use for moving averages)
-//    SESSION -> one merge per gap close, data-driven span (use for bursts of activity)
-// ======================================================================
-// downstream : click 12:04:00 -> TUMBLE 1 row -> HOP 3 rows -> watermark emits 1   BECAUSE HOP windows overlap
-//    derivation : HOP rows per event = 5 - 2 = 3   BECAUSE 5 possible 10-min windows minus the 2 that end before 12:04`
     },
     {
       section: 'Joins and time in SQL',
+      walkthroughs: ['ch08-joins', 'ch08-joins-memory'],
       color: 'green',
       motivation: `Joins are where streaming SQL gets subtle — two streams never align in time the way two batch tables do — so this section covers windowed joins and the time semantics that make them correct.`,
       steps: [
@@ -126,54 +42,6 @@ registerChapter({
         { num: 3, title: 'Time attributes pick event or processing time', detail: 'Queries declare whether windows use <strong>event time</strong> (correct, can be late) or <strong>processing time</strong> (simple, no late data). Event time is the right default for correctness.' },
         { num: 4, title: 'SQL hides the mechanics, not the semantics', detail: 'Streaming SQL still obeys the Beam model underneath — <strong>the watermark, triggers, and accumulation are configured by the engine</strong>, but the user still chooses the window and time attribute.' }
       ],
-      program: `// JOIN SQL SIDE — a windowed join waits for both watermarks before emitting a match
-// GOAL (what this is FOR): answer "when does the (click 12:03, impression 12:02) match emit — the moment both rows arrive, or only after both watermarks pass 12:05:00?"
-//    THE NAIVE WAY (why the join is watermark-gated): emit on first match — then a late impression still inside [12:00,12:05) is missed
-//    and the attribution is wrong. We replace "emit on first match" with "hold until both watermarks pass the window end", so the match
-//    waits for the slower stream.
-// DEF: windowed join — match clicks and impressions whose event times are within 5 min = [12:00, 12:05)
-//    WHO chose the 5-min window: the query author, not the data. 5 min here only so click 12:03 and impression 12:02 fall inside one span;
-//    production join windows are the attribution horizon (e.g. 30 min or 24 h for click-to-conversion).
-// DEF: watermark — clicks = "12:06:00", impressions = "12:04:30"
-// DEF: match — a (click, impression) pair in the join window = { "click 12:03", "impression 12:02" }
-// STATE (before):
-//    emitted_rows : 0
-// ======================================================================
-// offset 0: {campaign: "C1", kind: "click", event_time: "12:03:00"}
-// offset 1: {campaign: "C1", kind: "impression", event_time: "12:02:00"}
-// ======================================================================
-// BUILD PHASE · run once when the join opens
-// step 0 · initialize the match register -> match : none -> {}, emitted_rows : none -> 0
-//    -> input  : join window = [12:00, 12:05), clicks watermark = "12:06:00", impressions watermark = "12:04:30"
-//    <- output : match = {}, emitted_rows = 0   BECAUSE no pair has matched yet
-// QUERY PHASE · per arriving row
-// step 1 · both rows fall in the join window -> match : {} -> { "click 12:03", "impression 12:02" }
-//    -> input  : click.event_time = "12:03:00", impression.event_time = "12:02:00", join window = [12:00, 12:05)
-//    <- output : match = { "click 12:03", "impression 12:02" }   BECAUSE both event times are inside [12:00, 12:05)
-// step 2 · the join checks completeness -> clicks_ready : false -> true, impressions_ready : false -> false
-//    -> input  : clicks watermark = "12:06:00", impressions watermark = "12:04:30", window end = "12:05:00"
-//    decode 2a · compare the clicks watermark against the window end -> clicks_ready : false -> true
-//    decode 2b · compare the impressions watermark against the window end -> impressions_ready : false -> false
-//    <- output : clicks_ready = true, impressions_ready = false   BECAUSE clicks watermark 12:06:00 passes but impressions 12:04:30 does not
-// step 3 · the match waits -> emitted_rows : 0 -> 0
-//    -> input  : clicks_ready = true, impressions_ready = false
-//    <- output : emitted_rows = 0   BECAUSE a late impression could still arrive
-// ======================================================================
-// TRACE (click 12:03, impression 12:02, window [12:00, 12:05)):
-//    side        | watermark | passes 12:05:00? | emit
-//    clicks      | 12:06:00  | true             | -
-//    impressions | 12:04:30  | false            | hold
-//    impressions | 12:06:00  | true             | emit 1
-// CORRECTNESS (completeness-invariant lemma): a match emits only when both sides' watermarks pass the join window —
-//    impressions at 12:04:30 is short of 12:05:00 so the match is held, and it emits only after impressions advances
-//    to 12:06:00, so a late impression cannot be missed.
-// VARIANTS (when to pick which):
-//    watermark-gated emit -> one watermark compare per side, correct (use when out-of-order data matters)   <- THIS ONE
-//    immediate emit       -> one emit on first match, lower latency (use when late rows are impossible)
-//    allowed-lateness hold-> one held match until lateness passes, tolerates stragglers (use when late rows are rare)
-// ======================================================================
-// downstream : click 12:03 -> impression 12:02 -> match held -> wait for both watermarks -> emit 1   BECAUSE the join is bounded by the slower stream
-//    derivation : min watermark = 360 - 90 = 270 s   BECAUSE impressions 12:04:30 is 90 s behind clicks 12:06:00, still short of the 300 s window end`
     }
   ],
 
@@ -201,6 +69,7 @@ registerChapter({
     { scenario: "A SQL query joins clicks with impressions, but it emits matches before a late impression could still arrive, producing incomplete rows.", q: "How do you make a stream-stream SQL join correct under out-of-order data?", solution: "Use a windowed (interval) join and let the watermark bound it — the join emits a match only when both sides' watermarks pass the join window.", components: ["Windowed join — interval bound", "Watermark — both sides pass", "Hold — buffer until complete"],  code: "SELECT ...\nFROM clicks c JOIN impressions i\n  ON c.campaign = i.campaign\n  AND i.event_time BETWEEN c.event_time - INTERVAL '5' MINUTE\n                      AND c.event_time + INTERVAL '5' MINUTE\n-- emits when both watermarks pass the window", tieback: "This is exactly the windowed-join material in this chapter.", refs: ["6. Windowed joins", "7. The watermark drives SQL emission"], problems: ["21-ad-click-aggregation"] }
   ],
   systemDesign: {
+    walkthroughs: ['ch08-system', 'ch08-system-memory'],
     question: 'Design a continuous SQL query that keeps a campaign click count current. Premise: the query buckets clicks into a TUMBLE window and updates the result only when the watermark closes the window, so the count stays correct as late clicks arrive.',
     pipeline: 'streams (clicks, impressions) -> SQL engine (continuous query) -> watermark + window -> updating result -> sink',
     decomposition: [
@@ -230,34 +99,6 @@ registerChapter({
         ] }
     ],
     
-    program: `// SYSTEM DESIGN — a continuous SQL query updates a campaign count as the watermark closes a TUMBLE window
-// GOAL (what this is FOR): answer "after a click at 12:04:00 and a late click both fold into campaign C1, does the query show 3 or 4, and only after the watermark closes [12:00,12:05)?"
-//    THE NAIVE WAY (why the query is windowed): COUNT every click into one ever-growing bucket — then the result is correct only at an
-//    arbitrary instant and late clicks have no defined admission. We replace the unbounded COUNT with a TUMBLE window closed by the
-//    watermark, so the count updates to 4 and emits once the window is complete.
-// DEF: continuous query — a query that runs forever = "SELECT campaign, COUNT(*) FROM clicks GROUP BY TUMBLE(event_time, 5 min), campaign"
-//    WHO chose the 5-min TUMBLE size: the query author, not the data. 5 min here only so click 12:04:00 and its late twin land in the same
-//    [12:00,12:05) span; production TUMBLE sizes match the reporting cadence (1 min to 1 hour).
-// DEF: watermark — the completeness signal = "12:06:30"
-// DEF: result — the updating output table = { "C1": 3 }
-// STATE (before):
-//    result_table : { "C1": 3 }
-// ======================================================================
-// offset 0: {campaign: "C1", event_time: "12:04:00"}
-// offset 1: {campaign: "C1", event_time: "12:04:00", role: "late click"}
-// ======================================================================
-// step 1 · the engine folds the row -> result_table["C1"] : 3 -> 4
-//    -> input  : row = {campaign: "C1", event_time: "12:04:00"}, result_table = { "C1": 3 }
-//    <- output : result_table["C1"] = 4   BECAUSE COUNT adds the new row
-// step 2 · the engine retracts the old row -> sink : { "C1": 3 } -> { "C1": 4 }
-//    -> input  : result_table = { "C1": 4 }, old row = { "C1": 3 }, retraction = { "C1": 3 }
-//    <- output : sink = { "C1": 4 }   BECAUSE the value changed
-// step 3 · the watermark passes 12:05:00 -> emitted : {} -> { "[12:00,12:05)": 4 }
-//    -> input  : watermark = "12:06:30", window = "[12:00,12:05)", result_table = { "C1": 4 }
-//    <- output : emitted = { "[12:00,12:05)": 4 }   BECAUSE the window is complete
-// ======================================================================
-// downstream : click 12:04:00 -> COUNT 3 -> 4 -> retract 3 -> emit 4   BECAUSE the updating query replaced the old row
-//    derivation : new count = 3 + 1 = 4`
   },
   quiz: [
     { question: "What is a continuous query?", options: ["A. A query that runs once", "B. A query that runs forever and emits updated results", "C. A batch query", "D. A query with no windows"], answer: 2, explanation: "A continuous query runs forever over the stream, emitting updated results.", conceptRef: "2. Continuous queries" },

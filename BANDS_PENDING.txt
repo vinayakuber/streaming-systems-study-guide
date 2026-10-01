@@ -5,14 +5,6 @@
 # artifact was built. The file can only shrink.
 #
 # format: chNN|<flow section title>|DIAGRAM|PROGRAM
-ch08|SQL as a stream language|DIAGRAM
-ch08|SQL as a stream language|PROGRAM
-ch08|Windows in SQL|DIAGRAM
-ch08|Windows in SQL|PROGRAM
-ch08|Joins and time in SQL|DIAGRAM
-ch08|Joins and time in SQL|PROGRAM
-ch08|systemDesign|DIAGRAM
-ch08|systemDesign|PROGRAM
 ch09|Why joins are hard on streams|DIAGRAM
 ch09|Why joins are hard on streams|PROGRAM
 ch09|Windowed and temporal joins|DIAGRAM
