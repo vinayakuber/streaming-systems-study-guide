@@ -5,64 +5,83 @@
 # artifact was built. The file can only shrink.
 #
 # format: chNN|<flow section title>|DIAGRAM|PROGRAM
-
 ch01|What streaming is — terminology|DIAGRAM
 ch01|What streaming is — terminology|PROGRAM
 ch01|Event time vs processing time|DIAGRAM
 ch01|Event time vs processing time|PROGRAM
 ch01|Three shapes of data|DIAGRAM
 ch01|Three shapes of data|PROGRAM
+ch01|systemDesign|DIAGRAM
+ch01|systemDesign|PROGRAM
 ch02|What and Where — transformations and windowing|DIAGRAM
 ch02|What and Where — transformations and windowing|PROGRAM
 ch02|When — triggers and watermarks|DIAGRAM
 ch02|When — triggers and watermarks|PROGRAM
 ch02|How — accumulation|DIAGRAM
 ch02|How — accumulation|PROGRAM
+ch02|systemDesign|DIAGRAM
+ch02|systemDesign|PROGRAM
 ch03|What a watermark is|DIAGRAM
 ch03|What a watermark is|PROGRAM
 ch03|Heuristic watermarks and skew|DIAGRAM
 ch03|Heuristic watermarks and skew|PROGRAM
 ch03|Propagation and correctness|DIAGRAM
 ch03|Propagation and correctness|PROGRAM
+ch03|systemDesign|DIAGRAM
+ch03|systemDesign|PROGRAM
 ch04|Window shapes — fixed, sliding, session|DIAGRAM
 ch04|Window shapes — fixed, sliding, session|PROGRAM
 ch04|The window lifecycle|DIAGRAM
 ch04|The window lifecycle|PROGRAM
 ch04|Session semantics and pitfalls|DIAGRAM
 ch04|Session semantics and pitfalls|PROGRAM
+ch04|systemDesign|DIAGRAM
+ch04|systemDesign|PROGRAM
 ch05|What exactly-once means|DIAGRAM
 ch05|What exactly-once means|PROGRAM
 ch05|Idempotency and deduplication|DIAGRAM
 ch05|Idempotency and deduplication|PROGRAM
 ch05|Side effects — the hard part|DIAGRAM
 ch05|Side effects — the hard part|PROGRAM
+ch05|systemDesign|DIAGRAM
+ch05|systemDesign|PROGRAM
 ch06|The two faces of data|DIAGRAM
 ch06|The two faces of data|PROGRAM
 ch06|The duality|DIAGRAM
 ch06|The duality|PROGRAM
 ch06|Why the duality matters in practice|DIAGRAM
 ch06|Why the duality matters in practice|PROGRAM
+ch06|systemDesign|DIAGRAM
+ch06|systemDesign|PROGRAM
 ch07|Why state must persist|DIAGRAM
 ch07|Why state must persist|PROGRAM
 ch07|Checkpoints and state stores|DIAGRAM
 ch07|Checkpoints and state stores|PROGRAM
 ch07|Consistency and recovery|DIAGRAM
 ch07|Consistency and recovery|PROGRAM
+ch07|systemDesign|DIAGRAM
+ch07|systemDesign|PROGRAM
 ch08|SQL as a stream language|DIAGRAM
 ch08|SQL as a stream language|PROGRAM
 ch08|Windows in SQL|DIAGRAM
 ch08|Windows in SQL|PROGRAM
 ch08|Joins and time in SQL|DIAGRAM
 ch08|Joins and time in SQL|PROGRAM
+ch08|systemDesign|DIAGRAM
+ch08|systemDesign|PROGRAM
 ch09|Why joins are hard on streams|DIAGRAM
 ch09|Why joins are hard on streams|PROGRAM
 ch09|Windowed and temporal joins|DIAGRAM
 ch09|Windowed and temporal joins|PROGRAM
 ch09|Correctness and state|DIAGRAM
 ch09|Correctness and state|PROGRAM
+ch09|systemDesign|DIAGRAM
+ch09|systemDesign|PROGRAM
 ch10|From MapReduce to streaming|DIAGRAM
 ch10|From MapReduce to streaming|PROGRAM
 ch10|Lambda and Kappa|DIAGRAM
 ch10|Lambda and Kappa|PROGRAM
 ch10|Batch and streaming converge|DIAGRAM
 ch10|Batch and streaming converge|PROGRAM
+ch10|systemDesign|DIAGRAM
+ch10|systemDesign|PROGRAM
