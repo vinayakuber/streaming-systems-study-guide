@@ -660,7 +660,7 @@ _From the 28 problems:_ 20-metrics-monitoring · 21-ad-click-aggregation
 
 ### The Solution
 
-An idempotent operation has the same effect whether run once or many times — SET 42 -> 10 is idempotent, ADD 10 is not.
+An idempotent operation has the same effect whether run once or many times — SET 42 -&gt; 10 is idempotent, ADD 10 is not.
 
 ```java
 // order-99 charge $10
@@ -674,13 +674,13 @@ An idempotent operation has the same effect whether run once or many times — S
 
 | Fact | Detail | In the wild |
 |---|---|---|
-| 2. Idempotency | An idempotent operation has the same effect whether run once or many times — SET 42 -> 10 is idempotent, ADD 10 is not. | HTTP PUT and upserts are idempotent; a naive POST increment is not. |
+| 2. Idempotency | An idempotent operation has the same effect whether run once or many times — SET 42 -&gt; 10 is idempotent, ADD 10 is not. | HTTP PUT and upserts are idempotent; a naive POST increment is not. |
 | 3. Shuffle deduplication | The receiver keeps a set of already-seen record ids and drops duplicates — exactly-once delivery through the shuffle. | Beam's exactly-once shuffle and Flink's checkpoint barrier do this. |
 | 4. Replayable sources | A replayable source exposes a checkpoint (offset) and its records carry stable ids, so re-reading is deduplicable. | Kafka consumer offsets and file offsets are the canonical checkpoints. |
-| 5. End-to-end exactly-once | End-to-end exactly-once composes a replayable source, a deduplicating shuffle, and an idempotent sink. | Kafka -> Flink -> idempotent sink is the reference architecture. |
+| 5. End-to-end exactly-once | End-to-end exactly-once composes a replayable source, a deduplicating shuffle, and an idempotent sink. | Kafka -&gt; Flink -&gt; idempotent sink is the reference architecture. |
 | 6. Side effects | Side effects are the hard part of exactly-once; they need idempotency keys or a two-phase commit. | Stripe's Idempotency-Key header is the production form. |
 | 7. Idempotency key vs two-phase commit | An idempotency key is cheap and robust; a two-phase commit is expensive and fragile. | Payment APIs accept idempotency keys; XA two-phase commit is avoided in stream processing. |
-| 8. Isolate side effects | Keep the main computation pure and push side effects to the very end of the pipeline. | Enrich -> compute -> idempotent upsert is the standard Dataflow shape. |
+| 8. Isolate side effects | Keep the main computation pure and push side effects to the very end of the pipeline. | Enrich -&gt; compute -&gt; idempotent upsert is the standard Dataflow shape. |
 
 
 ### Tradeoffs & When
@@ -714,7 +714,7 @@ An idempotent operation has the same effect whether run once or many times — S
 
 **Why.** If an operation can be replayed without changing the result, retries are harmless.
 
-**Claim.** An idempotent operation has the same effect whether run once or many times — SET 42 -> 10 is idempotent, ADD 10 is not.
+**Claim.** An idempotent operation has the same effect whether run once or many times — SET 42 -&gt; 10 is idempotent, ADD 10 is not.
 
 **Grounding.** Idempotency is the property that makes sinks tolerate retries.
 
@@ -751,7 +751,7 @@ An idempotent operation has the same effect whether run once or many times — S
 
 **Grounding.** Drop any one of the three and the guarantee breaks.
 
-**In the wild.** Kafka -> Flink -> idempotent sink is the reference architecture.
+**In the wild.** Kafka -&gt; Flink -&gt; idempotent sink is the reference architecture.
 
 <a href="../diagrams/d2/card/ch05-4.png"><img src="../diagrams/d2/card/ch05-4.png" alt="5. End-to-end exactly-once" width="367"></a>
 ### Hard part: 6. Side effects
@@ -784,7 +784,7 @@ An idempotent operation has the same effect whether run once or many times — S
 
 **Grounding.** A pure core plus a thin idempotent boundary is the cleanest exactly-once design.
 
-**In the wild.** Enrich -> compute -> idempotent upsert is the standard Dataflow shape.
+**In the wild.** Enrich -&gt; compute -&gt; idempotent upsert is the standard Dataflow shape.
 
 <a href="../diagrams/d2/card/ch05-7.png"><img src="../diagrams/d2/card/ch05-7.png" alt="8. Isolate side effects" width="384"></a>
 

@@ -26,8 +26,22 @@ const fs = require('fs'), path = require('path');
 
 const ATTR = /^\s+[A-Za-z_:][-\w:.]*(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'`=<>]+))?/;
 
-function checkTags(text, label, errs) {
+// Inside a ``` fence GitHub does not interpret HTML at all, so a tag-shaped string
+// there is literal text. checkMarkdown already skips fences; checkTags did not, and
+// reported ch03's RDF triple `<Lucy, livesIn, Idaho>` inside a java block as a
+// malformed tag. Blank the fenced regions first — preserving newlines so reported
+// line numbers stay correct.
+function blankFences(text) {
+  let inFence = false;
+  return text.split('\n').map(ln => {
+    if (/^\s*```/.test(ln)) { inFence = !inFence; return ''; }
+    return inFence ? '' : ln;
+  }).join('\n');
+}
+
+function checkTags(rawText, label, errs) {
   // only real tags: <name ...> or <name/>. Markdown prose with < is left alone.
+  const text = blankFences(rawText);
   for (const m of text.matchAll(/<([A-Za-z][-\w]*)((?:[^<>]|"[^"]*"|'[^']*')*?)\s*\/?>/g)) {
     let rest = m[2];
     while (rest.length) {

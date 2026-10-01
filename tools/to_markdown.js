@@ -54,6 +54,12 @@ function htmlToMd(html) {
   // strip remaining tags EXCEPT table tags (GitHub renders raw HTML tables)
   s = s.replace(/<(?!\/?(?:table|thead|tbody|tr|th|td)\b)[^>]+>/gi, '');
   s = ent(s);
+  // ent() un-escapes &lt; so prose reads naturally — but it runs AFTER the
+  // tag-stripping pass, so a deliberately-escaped angle bracket in the source comes
+  // back as a literal `<` with nothing left to strip it, and GitHub then reads it as
+  // an unknown tag. Re-escape any bare `<`/`>` that is not a table tag we keep.
+  s = s.replace(/<(?!\/?(?:table|thead|tbody|tr|th|td)\b)/g, '&lt;');
+  s = s.replace(/(^|[^"'\w\/])>(?=[^<]*$)/gm, '$1&gt;');
   s = s.replace(/PRE(\d+)/g, (m, i) => pres[+i]); // restore fenced code
   s = s.replace(/\*\*Cue\s+`[^`]*`\.?\*\*\s*/g, ''); // strip video cue markers
   s = s.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();

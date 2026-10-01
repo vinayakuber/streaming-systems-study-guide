@@ -49,36 +49,62 @@ const chNums = before.map(c => c.num);
 for (const w of WANT) {
   const isSD = w.concept === 'systemDesign';
   let anchor;
+  // The KEY and the VALUE may each be quoted four ways, and repos differ: this one
+  // writes `section: 'x'` and that one writes `"section": "x"`. A tool that assumes
+  // one style silently refuses to wire a whole repo, which is how this was found.
+  // Build the pattern instead of guessing the spelling.
+  const qk = (k) => `(?:${k}|'${k}'|"${k}"|\`${k}\`)`;
+  const esc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   if (isSD) {
-    anchor = s.indexOf('systemDesign: {');
-    if (anchor === -1) { console.error(`FATAL: no \`systemDesign: {\` in ${file}`); process.exit(2); }
+    const re = new RegExp(qk('systemDesign') + '\\s*:\\s*\\{');
+    const m = re.exec(s);
+    if (!m) { console.error(`FATAL: no systemDesign object in ${file}`); process.exit(2); }
+    anchor = m.index;
   } else {
-    const lit = `section: '${w.concept.replace(/'/g, "\\'")}'`;
-    anchor = s.indexOf(lit);
-    if (anchor === -1) anchor = s.indexOf(`section: \`${w.concept}\``);
-    if (anchor === -1) { console.error(`FATAL: no flow section literal for ${JSON.stringify(w.concept)}`); process.exit(2); }
+    // the VALUE may use any of the three quote characters too
+    const v = esc(w.concept);
+    const re = new RegExp(qk('section') + `\\s*:\\s*(?:'${v}'|"${v}"|\`${v}\`)`);
+    const m = re.exec(s);
+    if (!m) { console.error(`FATAL: no flow section literal for ${JSON.stringify(w.concept)} in ${file}`); process.exit(2); }
+    anchor = m.index;
   }
   // 1. declare the walkthroughs, immediately after the concept's opening line,
   //    unless this concept already declares exactly these.
   const lineEnd = s.indexOf('\n', anchor) + 1;
-  const already = /^\s*walkthroughs: \[/.test(s.slice(lineEnd, s.indexOf('\n', lineEnd)));
+  const already = /^\s*(?:walkthroughs|'walkthroughs'|"walkthroughs")\s*:\s*\[/.test(s.slice(lineEnd, s.indexOf('\n', lineEnd)));
   if (!already) {
-    const indent = isSD ? '    ' : '      ';
+    // READ the indent off the anchor's own line. A hardcoded indent produces a file
+    // that parses and reads as though it were written by a different tool.
+    const lineStart = s.lastIndexOf('\n', anchor) + 1;
+    const indent = (s.slice(lineStart, anchor).match(/^\s*/) || [''])[0] || '    ';
     s = s.slice(0, lineEnd) + `${indent}walkthroughs: [${w.dirs.map(d => `'${d}'`).join(', ')}],\n` + s.slice(lineEnd);
   }
   // 2. delete the prose program block belonging to THIS concept, bounded by the
   //    next concept's opening line so it can never reach into a neighbour.
-  const reAnchor = isSD ? s.indexOf('systemDesign: {') : s.indexOf(s.slice(anchor, s.indexOf('\n', anchor)));
+  const reAnchor = isSD
+    ? s.search(new RegExp(qk('systemDesign') + '\\s*:\\s*\\{'))
+    : s.indexOf(s.slice(anchor, s.indexOf('\n', anchor)).trim());
   const nextIdx = (() => {
-    const a = s.indexOf('section:', reAnchor + 10);
-    const b = isSD ? -1 : s.indexOf('systemDesign: {', reAnchor + 10);
-    const cands = [a, b].filter(i => i !== -1);
+    const after = s.slice(reAnchor + 10);
+    const a = after.search(new RegExp(qk('section') + '\\s*:'));
+    const b = isSD ? -1 : after.search(new RegExp(qk('systemDesign') + '\\s*:'));
+    const cands = [a, b].filter(i => i !== -1).map(i => i + reAnchor + 10);
     return cands.length ? Math.min(...cands) : s.length;
   })();
-  const pi = s.indexOf('program: `', reAnchor);
-  if (pi !== -1 && pi < nextIdx) {
+  // `program:` may be backtick-quoted (olap, streaming) or double-quoted JSON with
+  // escaped newlines (ddia). Find whichever, and consume the matching closer.
+  const pm = new RegExp(qk('program') + '\\s*:\\s*(`|")').exec(s.slice(reAnchor, nextIdx));
+  if (pm) {
+    const pi = reAnchor + pm.index;
+    const quote = pm[1];
+    const bodyStart = reAnchor + pm.index + pm[0].length;
+    let pj = bodyStart;
+    while (pj < s.length) {
+      if (s[pj] === '\\') { pj += 2; continue; }
+      if (s[pj] === quote) break;
+      pj++;
+    }
     const lineStart = s.lastIndexOf('\n', pi) + 1;
-    const pj = s.indexOf('`', pi + 'program: `'.length);
     let end = pj + 1;
     while (end < s.length && (s[end] === ',' || s[end] === '\n')) end++;
     s = s.slice(0, lineStart) + s.slice(end);
