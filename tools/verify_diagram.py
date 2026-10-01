@@ -24,7 +24,7 @@ CHECKS (all must pass)
     E  per-step    : for a SMIL animation, every step is seeked and checked, not
                      just the first frame
 """
-import argparse, json, os, re, subprocess, sys, tempfile
+import argparse, concurrent.futures as cf, json, os, re, shutil, subprocess, sys, tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 CHROME = next((c for c in ('google-chrome', 'chromium', 'chromium-browser')
@@ -80,10 +80,18 @@ def shoot(html_path, w, h, out, budget=None):
             budget = 4000 if b'<animate' in open(html_path, 'rb').read() else 250
         except OSError:
             budget = 4000
-    subprocess.run([CHROME, '--headless', '--disable-gpu', '--no-sandbox', '--hide-scrollbars',
-                    '--force-device-scale-factor=1', f'--window-size={w},{h}',
-                    f'--virtual-time-budget={budget}', f'--screenshot={out}', f'file://{html_path}'],
-                   capture_output=True, timeout=120)
+    # A UNIQUE profile dir per call. Without it, concurrent Chrome instances contend
+    # for the default profile and some exit without writing a screenshot — which
+    # `shoot` would report as a failed render rather than as contention.
+    prof = tempfile.mkdtemp(prefix='vd-prof-')
+    try:
+        subprocess.run([CHROME, '--headless', '--disable-gpu', '--no-sandbox', '--hide-scrollbars',
+                        f'--user-data-dir={prof}',
+                        '--force-device-scale-factor=1', f'--window-size={w},{h}',
+                        f'--virtual-time-budget={budget}', f'--screenshot={out}', f'file://{html_path}'],
+                       capture_output=True, timeout=180)
+    finally:
+        shutil.rmtree(prof, ignore_errors=True)
     return os.path.exists(out)
 
 _DEFICIT = {}
@@ -206,14 +214,23 @@ def check_pixels(svg_path, W, H, guard, margin, seek=None, keep=None, union=Fals
     corners = [(2, 2), (GW-4, 2), (2, GH-4), (GW-4, GH-4)]
     if not all(is_guard(rgb(x, y)) or is_trip(rgb(x, y)) for x, y in corners):
         errs.append('guard-band: sentinel missing at a guard corner — the capture cannot be trusted')
-    # B — ANY non-sentinel pixel in the guard band means content escaped the canvas
+    # B — ANY non-sentinel pixel in the guard band means content escaped the canvas.
+    # Walk the four band STRIPS rather than the whole guard area with a `continue`
+    # for the inside: the old form iterated W*H pixels per frame purely to skip them,
+    # which on a 1140x700 canvas is 798k wasted iterations out of 983k. The pixels
+    # EXAMINED are identical, so the check is unchanged — it is the same set, reached
+    # without walking the middle.
+    YH, XW = min(h, GH), min(w, GW)
     bleed = []
-    for y in range(0, min(h, GH)):
-        for x in range(0, min(w, GW)):
-            inside = guard <= x < guard+W and guard <= y < guard+H
-            if inside: continue
-            px = rgb(x, y)
-            if not is_guard(px) and not is_trip(px): bleed.append((x-guard, y-guard))
+    def scan(xr, yr):
+        for y in yr:
+            for x in xr:
+                px = rgb(x, y)
+                if not is_guard(px) and not is_trip(px): bleed.append((x-guard, y-guard))
+    scan(range(0, XW), range(0, min(guard, YH)))                      # top strip
+    scan(range(0, XW), range(min(guard+H, YH), YH))                   # bottom strip
+    scan(range(0, min(guard, XW)), range(min(guard, YH), min(guard+H, YH)))        # left
+    scan(range(min(guard+W, XW), XW), range(min(guard, YH), min(guard+H, YH)))     # right
     if bleed:
         xs = [b[0] for b in bleed]; ys = [b[1] for b in bleed]
         errs.append(f'guard-band: {len(bleed)} px of CLIPPED content outside the canvas '
@@ -234,6 +251,36 @@ def check_pixels(svg_path, W, H, guard, margin, seek=None, keep=None, union=Fals
         errs.append(f'margin-ring: ink reaches [{x0},{y0}]..[{x1},{y1}], violating the {margin}px margin')
     return errs, (x0, y0, x1, y1)
 
+
+# ---- parallel workers (module level so they can be pickled into a process pool) --
+# Each job is one file, measured exactly as a serial run measures it. Nothing is
+# shared and nothing is batched into a single page: see canvas_of() for why batching
+# the RENDER would change what is checked.
+def _frame_job(args):
+    svg, cw, chh, guard, margin, union, keep = args
+    label = os.path.basename(svg) + (' [union of all steps]' if union else '')
+    e1, n = check_engine_bbox(svg, cw, chh, margin, None, union)
+    e2, bbox = check_pixels(svg, cw, chh, guard, margin, None, keep, union)
+    return label, e1 + e2, bbox, n
+
+def _fallback_job(args):
+    anim, frame1, cw, chh, guard, margin = args
+    raw = open(anim, encoding='utf-8').read()
+    stripped = re.sub(r'<animate[^>]*/>', '', raw)
+    tmp = tempfile.mktemp(suffix='.svg'); open(tmp, 'w', encoding='utf-8').write(stripped)
+    e_s, bb_s = check_pixels(tmp, cw, chh, guard, margin)
+    e_f, bb_f = check_pixels(frame1, cw, chh, guard, margin)
+    os.unlink(tmp)
+    errs = e_s + e_f
+    if bb_s is None:
+        errs.append('fallback: with <animate> stripped the file renders BLANK \u2014 it has no static form')
+    elif bb_f is None:
+        errs.append('fallback: frame 1 renders blank')
+    elif bb_s != bb_f:
+        errs.append(f'fallback: static rendering {bb_s} != frame 1 {bb_f} \u2014 the animation does not '
+                    f'degrade to a single valid frame (it is compositing steps)')
+    return errs, bb_s
+
 # --------------------------------------------------------------- main ----
 def main():
     ap = argparse.ArgumentParser()
@@ -243,10 +290,17 @@ def main():
                          'size in a caller silently goes stale the moment a generator resizes.')
     ap.add_argument('--guard', type=int, default=48)
     ap.add_argument('--margin', type=int, default=4)
-    ap.add_argument('--fallback', metavar='FRAME1_SVG',
+    ap.add_argument('--fallback', metavar='FRAME1_SVG', nargs='?', const=True,
                     help='animated SVG: strip <animate> and assert the static rendering equals '
                          'FRAME1_SVG. Without this, an animation with every group opacity=0 has NO '
-                         'valid static form: it renders blank, or composites every step at once.')
+                         'valid static form: it renders blank, or composites every step at once. '
+                         'Given with NO value, the positional arguments are read as alternating '
+                         'ANIM FRAME1 pairs, so many walkthroughs check in one invocation.')
+    ap.add_argument('--jobs', type=int, default=min(8, (os.cpu_count() or 4)),
+                    help='how many files to render CONCURRENTLY. Each render is independent and '
+                         'gets its own Chrome and its own profile dir, so this changes nothing '
+                         'about what is measured — only the wall clock. At 174 walkthroughs a '
+                         'serial run is almost entirely Chrome startup.')
     ap.add_argument('--union', action='store_true',
                     help='animated SVG: force every group visible and verify the UNION of all '
                          'steps. Opacity cannot move geometry, so union superset of every step.')
@@ -265,26 +319,47 @@ def main():
         W, H = int(m.group(1)), int(m.group(2))
         print(f'canvas read from the file: {W}x{H}')
     if a.save_dir: os.makedirs(a.save_dir, exist_ok=True)
+    def canvas_of_file(svg):
+        # PER PAIR, read from the animated file. A canvas read once and applied to
+        # every pair is the defect canvas_of() records below, in a new costume.
+        if a.canvas: return W, H
+        head = open(svg, encoding='utf-8').read(400)
+        m = (re.search(r'viewBox="0 0 (\d+) (\d+)"', head)
+             or re.search(r'width="(\d+)"\s+height="(\d+)"', head))
+        return (int(m.group(1)), int(m.group(2))) if m else (None, None)
+
     if a.fallback:
-        import tempfile as _tf
-        raw = open(a.svgs[0], encoding='utf-8').read()
-        stripped = re.sub(r'<animate[^>]*/>', '', raw)
-        tmp = _tf.mktemp(suffix='.svg'); open(tmp, 'w', encoding='utf-8').write(stripped)
-        e_s, bb_s = check_pixels(tmp, W, H, a.guard, a.margin)
-        e_f, bb_f = check_pixels(a.fallback, W, H, a.guard, a.margin)
-        os.unlink(tmp)
-        errs = e_s + e_f
-        if bb_s is None:
-            errs.append('fallback: with <animate> stripped the file renders BLANK — it has no static form')
-        elif bb_f is None:
-            errs.append('fallback: frame 1 renders blank')
-        elif bb_s != bb_f:
-            errs.append(f'fallback: static rendering {bb_s} != frame 1 {bb_f} — the animation does not '
-                        f'degrade to a single valid frame (it is compositing steps)')
-        if errs:
-            print('FAIL static-fallback'); [print('     ' + m) for m in errs]; return 1
-        print(f'PASS static-fallback  (strips to exactly frame 1, ink bbox {bb_s})')
-        return 0
+        # Two call shapes. ONE pair: `anim.svg --fallback frame1.svg`. MANY pairs:
+        # `--fallback anim1 frame1 anim2 frame2 ...` \u2014 the positional list is read as
+        # alternating (animated, frame-1) pairs, each with its OWN canvas.
+        if a.fallback is True:
+            if len(a.svgs) % 2:
+                print('FATAL: --fallback with no value expects an even number of files '
+                      '(ANIM FRAME1 ANIM FRAME1 ...), got', len(a.svgs)); return 2
+            pairs = [(a.svgs[i], a.svgs[i + 1]) for i in range(0, len(a.svgs), 2)]
+        else:
+            pairs = [(a.svgs[0], a.fallback)]
+        jobs, bad0 = [], []
+        for anim, f1 in pairs:
+            cw, chh = canvas_of_file(anim)
+            if cw is None: bad0.append(anim)
+            jobs.append((anim, f1, cw or 0, chh or 0, a.guard, a.margin))
+        if bad0:
+            print('FATAL: cannot read the canvas size from', ', '.join(bad0)); return 2
+        results = [None] * len(pairs)
+        with cf.ProcessPoolExecutor(max_workers=max(1, a.jobs)) as ex:
+            futs = {ex.submit(_fallback_job, j): i for i, j in enumerate(jobs)}
+            for fut in cf.as_completed(futs): results[futs[fut]] = fut.result()
+        bad = 0
+        for (anim, _f1), (errs, bb) in zip(pairs, results):
+            name = os.path.basename(anim)
+            if errs:
+                bad += 1; print(f'FAIL static-fallback {name}'); [print('     ' + m) for m in errs]
+            else:
+                print(f'PASS static-fallback {name}  (strips to exactly frame 1, ink bbox {bb})')
+        print(f'\n{len(pairs) - bad}/{len(pairs)} static fallbacks pass'
+              f'{"" if not bad else f" \u2014 {bad} FAILED"}')
+        return 1 if bad else 0
 
     def canvas_of(svg):
         # PER FILE, not once. Batching many SVGs into one invocation was a 2.3x
@@ -300,24 +375,33 @@ def main():
         if not m: return None, None
         return int(m.group(1)), int(m.group(2))
 
-    total, failed = 0, 0
+    # CONCURRENT, not batched. Rendering several SVGs into ONE page would change what
+    # is measured (shared canvas, shared guard band) — the defect canvas_of() exists to
+    # prevent. Running the SAME per-file check in parallel changes nothing about the
+    # measurement, and results are printed in input order so output stays deterministic.
+    jobs, results = [], []
     for svg in a.svgs:
         cw, chh = canvas_of(svg)
-        if cw is None:
-            print(f'FAIL {os.path.basename(svg)}'); print('     cannot read its canvas size'); failed += 1; total += 1; continue
-        jobs = [(None, os.path.basename(svg) + (' [union of all steps]' if a.union else ''))]
-        for seek, label in jobs:
-            total += 1
-            keep = os.path.join(a.save_dir, label.replace('/', '_').replace('@', '_') + '.png') if a.save_dir else None
-            e1, n = check_engine_bbox(svg, cw, chh, a.margin, seek, a.union)
-            e2, bbox = check_pixels(svg, cw, chh, a.guard, a.margin, seek, keep, a.union)
-            errs = e1 + e2
-            if errs:
-                failed += 1
-                print(f'FAIL {label}')
-                for m in errs: print(f'     {m}')
-            else:
-                print(f'PASS {label}  ({n} elements measured, ink bbox {bbox}, guard band clean)')
+        label = os.path.basename(svg) + (' [union of all steps]' if a.union else '')
+        keep = os.path.join(a.save_dir, label.replace('/', '_').replace('@', '_') + '.png') if a.save_dir else None
+        jobs.append((svg, cw, chh, a.guard, a.margin, a.union, keep) if cw is not None else None)
+    results = [None] * len(jobs)
+    todo = {i: j for i, j in enumerate(jobs) if j is not None}
+    for i, j in enumerate(jobs):
+        if j is None:
+            results[i] = (os.path.basename(a.svgs[i]), ['cannot read its canvas size'], None, 0)
+    with cf.ProcessPoolExecutor(max_workers=max(1, a.jobs)) as ex:
+        futs = {ex.submit(_frame_job, j): i for i, j in todo.items()}
+        for fut in cf.as_completed(futs): results[futs[fut]] = fut.result()
+    total, failed = 0, 0
+    for label, errs, bbox, n in results:
+        total += 1
+        if errs:
+            failed += 1
+            print(f'FAIL {label}')
+            for m in errs: print(f'     {m}')
+        else:
+            print(f'PASS {label}  ({n} elements measured, ink bbox {bbox}, guard band clean)')
     print(f'\n{total - failed}/{total} checks passed'
           f'{"" if not failed else f" — {failed} FAILED"}')
     return 1 if failed else 0

@@ -1,0 +1,102 @@
+{
+  "name": "ch06-practice-memory",
+  "steps": [
+    {
+      "t": "one fold function, bounded by an index, gives any past table",
+      "line": [
+        22,
+        25
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "past = ...",
+            "now = ...",
+            "eager = ...",
+            "lazy = ...",
+            "canDrift = ..."
+          ]
+        },
+        {
+          "name": "foldTo",
+          "locals": [
+            "events = EVENTS",
+            "upto = 4",
+            "tbl = @0x100",
+            "e = EVENTS[5]"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and the same call with no bound gives the present",
+      "line": [
+        56
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "past = @0x100",
+            "now = @0x200",
+            "eager = ...",
+            "lazy = ...",
+            "canDrift = ..."
+          ]
+        }
+      ]
+    },
+    {
+      "t": "eager folds once; lazy folds per query",
+      "line": [
+        40,
+        41
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "past = @0x100",
+            "now = @0x200",
+            "eager = Cost(9, 2)",
+            "lazy = Cost(90, 0)",
+            "canDrift = ..."
+          ]
+        },
+        {
+          "name": "lazyCost",
+          "locals": [
+            "queries = 10"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and drift is a property of having two writers",
+      "line": [
+        48,
+        49
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "past = @0x100",
+            "now = @0x200",
+            "eager = Cost(9, 2)",
+            "lazy = Cost(90, 0)",
+            "canDrift = true"
+          ]
+        },
+        {
+          "name": "drifts",
+          "locals": [
+            "sourceIsStream = true",
+            "bothWritten = true"
+          ]
+        }
+      ]
+    }
+  ]
+}

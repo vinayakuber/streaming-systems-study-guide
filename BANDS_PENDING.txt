@@ -5,14 +5,6 @@
 # artifact was built. The file can only shrink.
 #
 # format: chNN|<flow section title>|DIAGRAM|PROGRAM
-ch06|The two faces of data|DIAGRAM
-ch06|The two faces of data|PROGRAM
-ch06|The duality|DIAGRAM
-ch06|The duality|PROGRAM
-ch06|Why the duality matters in practice|DIAGRAM
-ch06|Why the duality matters in practice|PROGRAM
-ch06|systemDesign|DIAGRAM
-ch06|systemDesign|PROGRAM
 ch07|Why state must persist|DIAGRAM
 ch07|Why state must persist|PROGRAM
 ch07|Checkpoints and state stores|DIAGRAM

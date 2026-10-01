@@ -1,0 +1,123 @@
+{
+  "name": "ch06-system-memory",
+  "steps": [
+    {
+      "t": "the application writes the table; CDC writes the log",
+      "line": [
+        20,
+        24
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "healthy = ...",
+            "gap = ..."
+          ]
+        },
+        {
+          "name": "run",
+          "locals": [
+            "captureEvery = true",
+            "tbl = (a Table)",
+            "log = (a Record list)",
+            "e = EVENTS[0]",
+            "last = false"
+          ]
+        },
+        {
+          "name": "applyWrite",
+          "locals": [
+            "tbl = (a Table)",
+            "log = (a Record list)",
+            "e = EVENTS[0]",
+            "captureOn = true",
+            "before = 0"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "re-folding the log reconstructs the table",
+      "line": [
+        30,
+        32
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "healthy = ...",
+            "gap = ..."
+          ]
+        },
+        {
+          "name": "audit",
+          "locals": [
+            "tbl = (a Table)",
+            "log = (a Record list)",
+            "derived = (a Table)"
+          ]
+        },
+        {
+          "name": "foldLog",
+          "locals": [
+            "log = (a Record list)",
+            "tbl = (a Table)",
+            "r = Record(\"a\", 16, 24)"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "the audit compares the two, and agrees",
+      "line": [
+        50,
+        52
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "healthy = @0x100",
+            "gap = ..."
+          ]
+        },
+        {
+          "name": "audit",
+          "locals": [
+            "tbl = (a Table)",
+            "log = (a Record list)",
+            "derived = (a Table)"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and one missed capture makes it disagree",
+      "line": [
+        58,
+        63
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "healthy = @0x100",
+            "gap = @0x200"
+          ]
+        },
+        {
+          "name": "run",
+          "locals": [
+            "captureEvery = false",
+            "tbl = (a Table)",
+            "log = (a Record list)",
+            "e = EVENTS[8]",
+            "last = true"
+          ]
+        }
+      ]
+    }
+  ]
+}

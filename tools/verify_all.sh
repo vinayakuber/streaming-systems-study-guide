@@ -48,10 +48,17 @@ echo; echo "THE GEOMETRY"
 # startup. The static-form check needs a PAIR per walkthrough and still loops,
 # but it is 1 frame each rather than all of them.
 run "all frames"           python3 tools/verify_diagram.py diagrams/anim/*/frames/step-*.svg
+# ONE invocation for every static-fallback PAIR, rendered concurrently. The loop
+# launched two Chrome instances per walkthrough serially; at 80 walkthroughs that was
+# almost all of the wall clock. Each pair still gets its own canvas, read from its own
+# animated file, so the check is unchanged — proven by diffing the ink bboxes against
+# the per-pair runs.
+PAIRS=()
 for d in diagrams/anim/*/; do
   w=$(basename "$d")
-  run "$w static"    python3 tools/verify_diagram.py --fallback "$d"frames/step-01.svg "$d$w.svg"
+  PAIRS+=("$d$w.svg" "$d"frames/step-01.svg)
 done
+run "static fallbacks"     python3 tools/verify_diagram.py "${PAIRS[@]}" --fallback
 
 echo; echo "THEY ALL AGREE"
 run "band honesty"         node tools/check_band_honesty.js

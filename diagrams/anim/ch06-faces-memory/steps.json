@@ -1,0 +1,111 @@
+{
+  "name": "ch06-faces-memory",
+  "steps": [
+    {
+      "t": "the stream is read start to finish, one change at a time",
+      "line": [
+        17,
+        19
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "sTotal = ...",
+            "tbl = ...",
+            "tTotal = ...",
+            "wasIt = ..."
+          ]
+        },
+        {
+          "name": "streamTotal",
+          "locals": [
+            "events = EVENTS",
+            "t = 45",
+            "e = EVENTS[8]"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "the fold collapses it to one row per key",
+      "line": [
+        26,
+        30
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "sTotal = 45",
+            "tbl = ...",
+            "tTotal = ...",
+            "wasIt = ..."
+          ]
+        },
+        {
+          "name": "toTable",
+          "locals": [
+            "events = EVENTS",
+            "tbl = @0x100",
+            "e = EVENTS[8]"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and the two totals agree, which IS the duality",
+      "line": [
+        37,
+        39
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "sTotal = 45",
+            "tbl = @0x100",
+            "tTotal = 45",
+            "wasIt = ..."
+          ]
+        },
+        {
+          "name": "tableTotal",
+          "locals": [
+            "tbl = @0x100",
+            "t = 45",
+            "k = \"b\""
+          ]
+        }
+      ]
+    },
+    {
+      "t": "but only one of them can answer a question about history",
+      "line": [
+        46,
+        51
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "sTotal = 45",
+            "tbl = @0x100",
+            "tTotal = 45",
+            "wasIt = true"
+          ]
+        },
+        {
+          "name": "everWas",
+          "locals": [
+            "events = EVENTS",
+            "key = \"a\"",
+            "value = 8",
+            "acc = 8",
+            "e = EVENTS[1]"
+          ]
+        }
+      ]
+    }
+  ]
+}

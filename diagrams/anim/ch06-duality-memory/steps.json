@@ -1,0 +1,117 @@
+{
+  "name": "ch06-duality-memory",
+  "steps": [
+    {
+      "t": "every changelog record carries the OLD value",
+      "line": [
+        22,
+        30
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "sumLog = ...",
+            "maxLog = ...",
+            "sumBack = ...",
+            "maxBack = ...",
+            "howMany = ..."
+          ]
+        },
+        {
+          "name": "capture",
+          "locals": [
+            "key = \"a\"",
+            "agg = \"sum\"",
+            "out = @0x100",
+            "e = EVENTS[1]",
+            "before = 5",
+            "acc = 8"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "folding back works for ANY aggregate — each record names the result",
+      "line": [
+        38,
+        40
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "sumLog = @0x100",
+            "maxLog = @0x200",
+            "sumBack = ...",
+            "maxBack = ...",
+            "howMany = ..."
+          ]
+        },
+        {
+          "name": "foldBack",
+          "locals": [
+            "log = @0x200",
+            "cur = 8",
+            "r = Record(8, 6, 8)"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "differencing recovers the events — for the SUM",
+      "line": [
+        48,
+        53
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "sumLog = @0x100",
+            "maxLog = @0x200",
+            "sumBack = [5, 3, 2, 6, 8]",
+            "maxBack = ...",
+            "howMany = ..."
+          ]
+        },
+        {
+          "name": "recoverEvents",
+          "locals": [
+            "log = @0x100",
+            "out = [5, 3, 2, 6, 8]",
+            "r = Record(8, 16, 24)",
+            "before = 16"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and the SAME function on the max log loses 2 events",
+      "line": [
+        61,
+        64
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "sumLog = @0x100",
+            "maxLog = @0x200",
+            "sumBack = [5, 3, 2, 6, 8]",
+            "maxBack = [5, 0, 0, 1, 2]",
+            "howMany = 36"
+          ]
+        },
+        {
+          "name": "ambiguity",
+          "locals": [
+            "log = @0x200",
+            "n = 36",
+            "r = Record(1, 5, 5)"
+          ]
+        }
+      ]
+    }
+  ]
+}
