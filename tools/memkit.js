@@ -139,6 +139,11 @@ function buildMemoryWalkthrough(spec) {
     let s = panel(P.stk, 'STACK  (grows downward)', 'stk');
     let y = P.stk.y + 14;
     frames.forEach((f, fi) => {
+      // Same rule as the heap items below: a field the renderer never reads is a
+      // typo that ships silently, so only the two it reads are allowed.
+      for (const k of Object.keys(f))
+        if (!['name', 'locals'].includes(k))
+          throw new Error(`[${name}] stack frame "${f.name}" has unknown field "${k}" — a frame carries only {name, locals}.`);
       const h = 26 + f.locals.length * 18;
       s += cv.rect('frm' + fi, P.stk.x + 10, y, P.stk.w - 20, h, { fill: C.stack, stroke: C.stackEdge, sw: fi === frames.length - 1 ? 2 : 1 });
       s += cv.text(P.stk.x + 20, y + 17, f.name, { size: 12, weight: 700, band: 'frm' + fi });
@@ -154,6 +159,16 @@ function buildMemoryWalkthrough(spec) {
     items.forEach((it, i) => {
       const o = HEAP[it.key];
       if (!o) throw new Error(`[${name}] step references heap key "${it.key}" which is not declared`);
+      // A MISSPELT STATE KEY IS SILENT, AND THAT IS THE DANGEROUS KIND.
+      //   The state selector is `st`. Writing `val: 0` instead (the name used in the
+      //   HEAP DECLARATION, which is why the slip is natural) leaves `it.st`
+      //   undefined, so val() returns the FULL value while the caption next to it
+      //   says the array is empty. Nothing crashes, no gate looks at pixels against
+      //   prose, and the frame ships lying. The only cheap defence is to refuse any
+      //   key the renderer does not read, so the typo fails loudly at build time.
+      for (const k of Object.keys(it))
+        if (!['key', 'st', 'hot'].includes(k))
+          throw new Error(`[${name}] heap step item {key:"${it.key}"} has unknown field "${k}" — the state selector is "st" (hot is the only other field). A field the renderer ignores would silently show the wrong state.`);
       // A heap value's width is data-dependent, so the box height must be too.
       const lines = cv.wrap(o.val(it.st), inner, 10, true);
       const h = 27 + lines.length * 14;
