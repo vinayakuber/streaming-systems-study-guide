@@ -208,7 +208,15 @@ def shortest_two_pointer(counts, k):
     non-decreasing, so shrinking the window can only lower it.  Feed it signed data -- net
     connections opened minus closed, a queue depth delta -- and it is wrong, because
     dropping a negative value RAISES the total and the left edge stops too early.  The
-    assumption is in the data, not in the code, which is why it survives review."""
+    assumption is in the data, not in the code, which is why it survives review.
+
+    IT ALSO NEEDS K >= 1, which the sentence above does not say and the examples table found.
+    At K = 0 the left edge is allowed to pass the right one, so it reports the EMPTY run and
+    returns 0, where the deque and the pair scan both return 1 -- a window of one second
+    already reaches a target of zero.  The random sweep in main() draws k from 1 upward, so
+    no amount of running it could have reached this; a boundary only an examples table asks
+    about.  Left as it is rather than patched, because the whole point of this function is
+    that its preconditions live in the caller's data."""
     best, total, left = None, 0, 0
     for right, c in enumerate(counts):
         total += c

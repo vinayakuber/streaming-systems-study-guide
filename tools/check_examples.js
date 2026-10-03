@@ -29,15 +29,25 @@ for (const f of files) {
   const src = fs.readFileSync(path.join(progDir, f), 'utf8');
   const m = src.match(/^EXAMPLES\s*=\s*\[([\s\S]*?)^\]/m);
   if (!m) { findings.push(`${f}: no module-level EXAMPLES table — the reader gets a statement and a solution with nothing worked`); continue; }
-  const rows = (m[1].match(/^\s*\(/gm) || []).length;
-  if (rows < MIN) { findings.push(`${f}: EXAMPLES has ${rows} row(s), needs at least ${MIN} — the happy path alone is not a worked example set`); continue; }
+  // The row COUNT is taken from the program, not parsed out of the source. Counting
+  // `/^\s*\(/` lines over-counts: a row whose expected value is a tuple long enough to wrap
+  // puts a second `(` at the start of its own line, which read as an extra row and reported
+  // "declares 23 and reports 22" against a file that is perfectly correct. The printed
+  // number is authoritative BECAUSE the gate also requires it to be printed as
+  // `len(EXAMPLES)` — a literal there could be anything, an interpolation cannot.
   const loop = src.match(/for [^\n]*\bin EXAMPLES\b[\s\S]*?(?=\n(?:def |class |if __name__))/);
   if (!loop || !/\n\s+assert /.test(loop[0])) { findings.push(`${f}: the EXAMPLES rows are never asserted — a printed table can be wrong, an asserted one cannot`); continue; }
+  if (!/all \{len\(EXAMPLES\)\} examples/.test(src))
+    { findings.push(`${f}: the examples count is not printed as \`{len(EXAMPLES)}\` — a literal there can disagree with the table, an interpolation cannot`); continue; }
   const out = path.join(progDir, f.replace(/\.py$/, '.out'));
   if (fs.existsSync(out)) {
     const printed = fs.readFileSync(out, 'utf8').match(/all (\d+) examples/);
-    if (!printed) findings.push(`${f}: the output never states how many examples ran — print "all N examples ..." so the table and the run agree`);
-    else if (+printed[1] !== rows) { findings.push(`${f}: declares ${rows} examples and reports ${printed[1]} — the table and the output disagree`); continue; }
+    // `continue` matters: without it this finding was pushed AND the file still counted as
+    // ok, so the summary read "54/54 ship an asserted table" directly above two findings
+    // saying otherwise. A gate whose count contradicts its own findings teaches the reader
+    // to trust the count and ignore the list.
+    if (!printed) { findings.push(`${f}: the output never states how many examples ran — print "all N examples ..." so the table and the run agree`); continue; }
+    else if (+printed[1] < MIN) { findings.push(`${f}: ran ${printed[1]} example(s), needs at least ${MIN} — the happy path alone is not a worked example set`); continue; }
   }
   ok++;
 }
