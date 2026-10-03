@@ -1,0 +1,42 @@
+REQUESTS (minutes from 09:00, half-open):
+    1..31   ACCEPTED
+    3..33   REJECTED  clashes with [(1, 31)]
+   90..130  ACCEPTED
+  130..160  ACCEPTED
+  245..275  ACCEPTED
+  260..290  REJECTED  clashes with [(245, 275)]
+  220..250  REJECTED  clashes with [(245, 275)]
+   50..80   ACCEPTED
+  540..570  ACCEPTED
+
+  held      : [(1, 31), (50, 80), (90, 130), (130, 160), (245, 275), (540, 570)]
+  busy view : [(1, 31), (50, 80), (90, 160), (245, 275), (540, 570)]
+  free gaps : [(0, 1), (31, 50), (80, 90), (160, 245), (275, 540), (570, 600)]
+
+  the 90..130 and 130..160 pair abuts exactly: no clash, and the busy view shows
+  them as ONE block 90..160, which is what a person wants to read.
+  per-minute grid: 190 minutes busy + 410 free = 600 in the day.
+
+  cancel the meeting starting at 90 (which ran to 130):
+    members   -> busy [(1, 31), (50, 80), (130, 160), (245, 275), (540, 570)]
+    merged/drop -> busy [(1, 31), (50, 80), (245, 275), (540, 570)]
+    merged/keep -> busy [(1, 31), (50, 80), (90, 160), (245, 275), (540, 570)]
+    drop loses [(130, 160)] from the busy view -- a meeting that was never cancelled is
+    now bookable, so two parties are sent to one room.
+    keep never offers [(80, 130)] -- the freed 50 minutes are unbookable forever.
+    booking 95..125 afterwards: members ACCEPT, merged/keep REJECTS,
+    merged/drop accepts -- and accepts it on top of the meeting it lost.
+  before the cancellation all three states agree exactly, so it is the cancel --
+  not the booking -- that the merged shape cannot represent.
+
+  from the single run (90, 160) there is no way to tell whether the meeting at 90
+  ends at 130 or at 160: the two bookings are [(90, 130), (130, 160)], and
+  that boundary is the fact the merge deleted.
+
+  600 random book/cancel sequences: the member state always matches a per-minute
+  grid.  Of the 492 sequences containing a cancellation, the merged state is
+  wrong on 35 with 'drop' and 492 with 'keep'.
+  on 300 append-only sequences it is never wrong at all, which is exactly the
+  condition the chapter's state shape was built under.
+
+all assertions passed

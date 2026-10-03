@@ -1,0 +1,32 @@
+LOG  = a=5  a=8  b=7  a=10  a=16  b=8  b=17  b=21  a=24    (9 entries)
+LIVE = a=30    (arrives during start-up)
+snapshot at version 7 = [('a', 16), ('b', 17)]   (2 entries for 7 changes)
+the table, truth = {'a': 30, 'b': 21}
+
+  cold start, from entry 0        -> {'a': 30, 'b': 21}   10 entries read
+  warm, subscribe from v=7        -> {'a': 30, 'b': 21}   5 entries read   (slack 0)
+  warm, subscribe from NOW (v=9)  -> {'a': 30, 'b': 17}   3 entries read   (slack -2: a gap)
+  warm, subscribe from v=5        -> {'a': 30, 'b': 21}   7 entries read   (slack 2: an overlap)
+
+  the gap lost ('b', 21) and the cache then served b=17 forever: a wrong answer
+  that no read can distinguish from a right one.  The overlap cost 2
+  extra entries and changed nothing -- so the safe direction is backwards.
+  with a delete inside the gap: truth {'a': 24}, the cache {'a': 16, 'b': 17} -- it serves a
+  deleted record, which is the same bug wearing its worst clothes.
+
+  snapshot built by keeping the last entry per key      -> {'a': 24}  (correct)
+  snapshot built by keeping the last NON-tombstone entry -> {'a': 24, 'b': 21}  (b is back)
+  the delete was a FACT; dropping it as an absence resurrects the key at restart.
+
+  snapshot at version 0 (none yet) and at version 9 (fully caught up) both
+  reproduce the table, so the handover needs no special case at either end.
+
+  59360 random gaps: the table is wrong in exactly the 32849 cases the
+  predicate calls harmful, and right in the other 26511 -- 44.7% of gaps leave
+  no trace at all, so a restart-and-compare test passes about half the time.
+
+  at 20,000 changes over 50 keys: cold start reads 20,000 entries,
+  a compacted snapshot reads 50 -- 400x less, and the ratio is the
+  change count over the KEY count, so it grows for as long as the service runs.
+
+all assertions passed

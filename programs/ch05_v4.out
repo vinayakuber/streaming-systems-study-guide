@@ -1,0 +1,47 @@
+ITEMS = [0, 1, 2, 3, 4, 5, 6, 7, 8], values [5, 3, 7, 2, 6, 1, 9, 4, 8]
+  with no crash, all four orderings send exactly [0, 1, 2, 3, 4, 5, 6, 7, 8]
+
+  crash during item 3:
+    effect then position : [0, 1, 2, 3, 3, 4, 5, 6, 7, 8]   -> ([3], [])
+    position then effect : [0, 1, 2, 4, 5, 6, 7, 8]   -> ([], [3])
+
+  at all 9 crash points: effect-first duplicates exactly the straddling item and
+  loses nothing; position-first loses exactly it and duplicates nothing.  Neither
+  ever gets both right, and no crash point escapes either way.
+  crashed at every item in one run: 9 duplicates and 0 losses one way,
+  0 duplicates and 9 losses the other -- 9 of 9 either way.
+
+  'just remember what you already sent': the dedupe set is itself a write, so the
+  same two instants come back one level down.  Measured over all 9 crash points, the
+  phone receives an IDENTICAL sequence:
+    send-then-remember == effect-then-position on 9/9 crash points
+    remember-then-send == position-then-effect on 9/9 crash points
+  so it is not a third option: it is the same choice with the record moved, which is
+  what 'the problem is the instant between two writes' means in practice.
+
+  give the push service an idempotency key and effect-first becomes exact at all 9
+  crash points, and at every item at once.  The missing feature is the problem; no
+  arrangement of the worker's two writes substitutes for it.
+  note it only rescues the at-least-once side: a key cannot un-skip an item that was
+  recorded as handled and never sent, so position-first still loses item 3.
+
+  expected cost of one crash, averaged over all 9 crash points:
+                     message   dup  loss   at-least-once   at-most-once  best
+     your parcel has arrived     1    20             1.0           20.0  at-least-once
+       you have been charged    50     2            50.0            2.0  at-most-once
+  the same nine items, the same two programs, and the better design is opposite for
+  the two messages.  Nothing in the code decides it, which is why the answer to this
+  question is a question.
+  holding the cost of a loss at 20, at-least-once stops winning the moment a
+  duplicate costs 21 -- the crossover is exactly where the two costs cross,
+  because each design fails on exactly one item per crash.
+
+  boundaries: an empty queue sends nothing under either design; a one-item queue
+  crashed on its only item sends it twice one way and never the other -- there is no
+  stream short enough for the problem to disappear.
+
+  300 random queues x every crash point: effect-first duplicates exactly one item
+  and loses none, position-first the mirror image, the two dedupe variants are
+  byte-identical to them, and a far-end key makes effect-first exact every time.
+
+all assertions passed

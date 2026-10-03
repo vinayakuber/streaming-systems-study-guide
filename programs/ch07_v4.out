@@ -1,0 +1,55 @@
+SIGNALS = a@1:+5  a@3:+3  b@50:+4  b@90:+7  a@130:+2  b@220:+9  a@245:+6  b@260:+1  a@540:+8
+  true lifetime scores {'a': 24, 'b': 21};  account 'a' is dormant for 295 days
+
+  in memory forever   : {'a': 24, 'b': 21}   (2 scores held, grows forever)
+  with a 294-day expiry : {'b': 21, 'a': 8}   (2 held, 1 restart)   WRONG
+  in a store          : {'a': 24, 'b': 21}   (0 held between events, 18 store ops)
+  store + 1-slot cache: {'a': 24, 'b': 21}   (1 held, 7 reads, 7 writes)
+
+  the expiry lost 16 of account 'a''s 24 points because it was quiet for 295
+  days and the allowance was 294.  The store holds 0 scores between events, so its
+  memory does not depend on the account count at all -- the question is dissolved,
+  not answered, and the price is 18 store operations for 9 events.
+
+  and the direction matters: a score can only come out too LOW.  An account that
+  earns 20 points, waits 295 days and earns 4 more scores 4 at a 294-day allowance
+  and 24 at a 295-day one -- so the allowance is a published schedule for
+  resetting a risk score, which is the one thing a risk score must not have.
+
+  the same bound, on a cache instead of on the state:
+     capacity             scores  held  reads  writes
+            0 {'a': 24, 'b': 21}     0      9       9
+            1 {'a': 24, 'b': 21}     1      7       7
+            2 {'b': 21, 'a': 24}     2      2       2
+            3 {'b': 21, 'a': 24}     2      2       2
+           10 {'b': 21, 'a': 24}     2      2       2
+    every capacity is EXACT, and the reads fall from 9 to 2 as the cache grows.
+    Bounding the cache costs store reads; bounding the state cost the answer.  The
+    difference is one line -- the evicted score is written out instead of deleted.
+
+  account 'a' is evicted from a 1-slot cache repeatedly and still scores 24: its
+  dormancy evicts it from MEMORY and not from the store, which is the distinction
+  the word 'expire' was hiding.
+
+  boundaries: an empty stream gives no scores and no store operations; a ttl of 0
+  reduces the expiring version to {'a': 8}, i.e. the last event only, while a
+  zero-capacity cache is a write-through store and is still exact.
+
+  400 random signal streams: the store and every cache capacity from 0 to 6 returned
+  the true lifetime score every single time, with reads falling monotonically as the
+  cache grew.  The expiring version was right in 481 of 1,600 runs and too low in 1,119,
+  never once too high -- so it is not noisy, it is biased, and biased the way an
+  attacker would choose.
+
+  at 2,000 accounts seen once plus one regular, on day 2000:
+    in memory forever : 2,001 scores held
+    with a 100-day expiry: 102 held, 0 restarts -- and every score still in
+      memory is CORRECT, while 1,899 accounts' scores are simply gone
+    in a store        : 0 held between events, 4,400 store operations
+    64-slot cache     : 64 held, 2,001 reads, 2,001 writes
+    the expiry restarts nothing HERE, because a one-visit account cannot be restarted
+    and the regular one never goes quiet -- the scale that justifies the bound is the
+    scale at which its cost is invisible.  The cache holds 64 and is exact for all
+    2,001 accounts, trading 2,001 store reads for the 1,937 scores it does not hold.
+
+all assertions passed

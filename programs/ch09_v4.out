@@ -1,0 +1,59 @@
+BUSY   = [(1, 3), (130, 245), (540, 540)]
+window = 0..600
+  one pass        : [(0, 0), (4, 129), (246, 539), (541, 600)]
+  per-minute walk : [(0, 0), (4, 129), (246, 539), (541, 600)]   (601 minutes examined)
+  481 free minutes + 120 busy minutes = 601, the whole window -- the two
+  lists partition it, which is the only check that catches an off-by-one at BOTH
+  ends at once, since a one-minute error moves a minute from one total to the other.
+
+  the gaps, in the order the pass emits them:
+    (0, 0)      before the first busy span, and one minute long
+    (4, 129)    between two busy spans
+    (246, 539)  between two busy spans
+    (541, 600)  after the last busy span, emitted outside the loop
+
+  a meeting nested inside a longer one, [(0, 100), (10, 20)], window 0..120:
+    max(cursor, e + 1) : [(101, 120)]   (correct)
+    cursor = e + 1     : [(21, 120)]   WRONG
+    the cursor moved backwards from 101 to 21, so 80 minutes the person is busy for
+    are offered as free.  The error is one-directional: a broken complement over-
+    reports availability, which is the failure a calendar cannot afford.
+
+  the same spans arriving out of order, [(130, 245), (1, 3), (540, 540)]:
+    with the sort    : [(0, 0), (4, 129), (246, 539), (541, 600)]   (correct)
+    without the sort : [(0, 129), (246, 539), (541, 600)]   WRONG
+    the span at 1..3 arrives after the cursor has passed it and is skipped, so its 3
+    busy minutes are offered as free -- and the rest of the day is still correct,
+    which is exactly why a missing sort survives a review of the output.
+
+  boundaries:
+    []                 0..10 -> [(0, 10)]              no meetings: the whole window
+    [(0, 10)]          0..10 -> []                     busy throughout: nothing free, and NOT a one-span answer
+    [(0, 5)]           0..10 -> [(6, 10)]              busy at the start
+    [(5, 10)]          0..10 -> [(0, 4)]               busy at the end
+    [(-5, 20)]         0..10 -> []                     a span covering the window from outside it
+    [(-5, 3)]          0..10 -> [(4, 10)]              a span starting before the window
+    [(8, 20)]          0..10 -> [(0, 7)]               a span ending after the window
+    [(20, 30)]         0..10 -> [(0, 10)]              a span entirely after the window
+    [(-30, -20)]       0..10 -> [(0, 10)]              a span entirely before it
+    [(0, 3), (4, 7)]   0..10 -> [(8, 10)]              adjacent spans leave NO gap between them
+    [(0, 3), (5, 7)]   0..10 -> [(4, 4), (8, 10)]      one minute between them does
+    [(5, 5)]           0..10 -> [(0, 4), (6, 10)]      a zero-length meeting still splits the day
+    [(0, 10)]          5..5 -> []                     a one-minute window, busy
+    [(0, 1)]           5..5 -> [(5, 5)]               a one-minute window, free
+    []                 10..5 -> []                     start after end: empty, not an error
+
+  600 random calendars (354 of them with overlapping or nested spans): the one
+  pass matched the per-minute walk every single time, and free plus busy always came
+  to the whole window.  The forward-cursor version was wrong on 98 and the unsorted
+  version on 267, and NEITHER was ever wrong in the safe direction -- every failure
+  reported more free time than there was.
+
+  a year of 525,600 minutes with 2,000 meetings in it:
+    one pass        : 2,001 free spans from 2,000 busy spans
+    per-minute walk : would ask 525,601 questions for the same answer
+    262x the work, and the gap grows with the CALENDAR'S RANGE while the
+    pass grows with the number of MEETINGS -- which is the only reason the complement
+    is computed from the spans at all.
+
+all assertions passed

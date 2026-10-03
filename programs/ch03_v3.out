@@ -1,0 +1,42 @@
+TEMPS = 0:5  1:3  2:7  3:2  4:6  5:1  6:9  7:4  8:8
+  naive  : [2, 1, 4, 1, 2, 1, 0, 1, 0]   (14 forward comparisons)
+  stack  : [2, 1, 4, 1, 2, 1, 0, 1, 0]   (9 pushes + 7 pops = 16 steps -- the stack LOSES at this size)
+  the 2 days never resolved are [6, 8] (temps [9, 8]), which is
+  the stack at the end -- and it is cooling downward, as it was all along.
+
+  the biggest single eviction was 3 days at once: day 6 (9C) is the
+  answer for days [2, 4, 5] simultaneously.
+
+  TIED = [5, 5, 5, 6]: [3, 2, 1, 0]
+  the three equal days all wait for day 3 (6C) -- an equal day is not warmer,
+  so `<` is what keeps them waiting.  With `<=` each would resolve to its neighbour:
+    `<=` gives [1, 1, 1, 0], which claims tomorrow is warmer when tomorrow is identical
+
+  the sliding-window reflex: with a lookahead of L days,
+    L = 1: [0, 1, 0, 1, 0, 1, 0, 1, 0]   wrong on days [0, 2, 4]
+    L = 2: [2, 1, 0, 1, 2, 1, 0, 1, 0]   wrong on days [2]
+    L = 3: [2, 1, 0, 1, 2, 1, 0, 1, 0]   wrong on days [2]
+    L = 4: [2, 1, 4, 1, 2, 1, 0, 1, 0]   wrong on days []
+    L = 8: [2, 1, 4, 1, 2, 1, 0, 1, 0]   wrong on days []
+  the smallest safe lookahead here is 4, and every too-small one fails the
+  same way: it reports 0, which is indistinguishable from a true 'never warmer'.
+  on [10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 99] the answer for day 0 is 10 days, so no fixed lookahead
+  short of the whole series is safe -- the window size is a property of the data.
+
+  a cooling run [9, 7, 5, 3, 1] -> [0, 0, 0, 0, 0]: nothing is ever resolved and the stack holds all 5,
+  which is where the stack costs O(n) space (a flat run does the same).  A warming run -> [1, 1, 1, 1, 0]:
+  every day is resolved by the next, one at a time, and the stack never exceeds 1.
+  a flat run [4, 4, 4, 4] -> all zeros, and all four stay unresolved: strictness again.
+
+  at 100,000 days: 100,000 pushes + 99,877 pops = 199,877 steps, biggest
+  single eviction 15 days, 123 days never resolved.
+  the forward scan on the first 2,000 days alone made 14,446 comparisons.
+  the crossover on this series is at 16 days (28 steps against 30 comparisons);
+  below that the forward scan is genuinely the better program.
+  and the unresolved days are exactly those matching or beating every later day
+  -- 123 of 100,000, which with ties is more than the strict record highs.
+
+  600 random series (with ties, since the range repeats): the stack equals the
+  forward scan every time, and pushes + unresolved always accounts for every day.
+
+all assertions passed

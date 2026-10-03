@@ -1,0 +1,33 @@
+READINGS = 0:5  1:3  2:7  3:2  4:6  5:1  6:9  7:4  8:8    L = 6
+  naive  : 6 seconds from second 0   (33 runs measured)
+  deques : 6 seconds from second 0 -> [5, 3, 7, 2, 6, 1], spread 6 <= 6
+           (18 pushes, 13 back-pops, 1 front-pops, 6 left-edge steps)
+  adding second 6 (9) takes the spread to 8, so the stretch
+  ends exactly where it does -- the answer sits on the = in 'at most 6'.
+
+  6 left-edge steps produced only 1 front-pops: most steps drop from one
+  deque and not the other, which is precisely what a single shared `if` gets wrong.
+
+  popping both fronts   : 8 seconds (truth 6) -- over by 2
+  expiring at i - best  : 7 seconds (truth 6) -- over by 1
+  over 3000 random series: popping-both over-reports 2040 times, the fixed
+  offset 3000 times, and NEITHER ever under-reports (0 cases) -- the error
+  always claims more stability than the line actually had.
+
+  L =  0 -> 1 seconds from second 0: [5]
+  L =  1 -> 1 seconds from second 0: [5]
+  L =  2 -> 2 seconds from second 0: [5, 3]
+  L =  4 -> 3 seconds from second 0: [5, 3, 7]
+  L =  6 -> 6 seconds from second 0: [5, 3, 7, 2, 6, 1]
+  L =  8 -> 9 seconds from second 0: [5, 3, 7, 2, 6, 1, 9, 4, 8]
+  L = 99 -> 9 seconds from second 0: [5, 3, 7, 2, 6, 1, 9, 4, 8]
+  L = 0 on a flat run [4, 4, 4, 4, 4] -> 5 seconds, so L = 0 is not
+  trivially 1: it asks for the longest CONSTANT stretch, which is a real question.
+
+  at 100,000 seconds with L = 20: longest steady stretch 10 seconds from second 63,915,
+  found with 200,000 pushes, 199,997 pops and 99,998 left-edge steps --
+  every index enters each deque once and leaves at most once, and the left edge
+  only ever moves forward, so all three are bounded by the stream length.
+  the naive scan over the first 1,500 seconds alone measured 3,823 runs.
+
+all assertions passed

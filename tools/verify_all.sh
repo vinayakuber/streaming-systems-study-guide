@@ -66,6 +66,10 @@ run "block shape"          node tools/check_block_shape.js diagrams/anim/*/embed
 run "html well-formed"     node tools/html_gate.js
 run "embeds present"       node tools/check_embeds.js
 run "diagrams"             node tools/validate_diagrams.js
+# A program listed in a chapter is a claim that it runs and prints that. This re-RUNS
+# every one and diffs the output against what the page shows, so a listing cannot drift
+# from the thing it documents.
+run "programs run"         node tools/check_programs.js
 
 rm -f "$CAPS"
 echo

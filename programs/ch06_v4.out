@@ -1,0 +1,43 @@
+DELTAS = errors+5  errors+3  hits+7  errors+2  errors+6  hits+1  hits+9  hits+4  errors+8    (9 entries)
+  fold with +            -> {'errors': 24, 'hits': 21}
+  compact_last(deltas)   -> [('errors', 8), ('hits', 4)]  folds to {'errors': 8, 'hits': 4}   WRONG
+  compact_sum(deltas)    -> [('errors', 24), ('hits', 21)]  folds to {'errors': 24, 'hits': 21}   right
+  to_states = fold+emit  -> [('errors', 24), ('hits', 21)]  folds to {'errors': 24, 'hits': 21}   right
+
+  keeping the last increment understates by {'errors': 16, 'hits': 17} -- the dropped entries were
+  not superseded, they were summands, so the error is the size of the history.
+
+  compact_sum and to_states produce the same entries, [('errors', 24), ('hits', 21)],
+  and they are not the same log: one is 'add 24' and the other is 'it is 24'.
+  replayed twice: as deltas {'errors': 48, 'hits': 42}, as states {'errors': 24, 'hits': 21}
+  so a consumer that re-reads the log double-counts the delta log and is unharmed
+  by the state log.  Compaction and replay-safety are the same property.
+
+  a delta log may be shuffled freely (still {'hits': 21, 'errors': 24}); a state log may
+  not -- reordering [('errors', 5), ('errors', 24), ('errors', 8)] gives
+  {'errors': 8}.  Each format is robust to exactly what the
+  other is not: deltas to order, states to duplication.
+
+  increments that cancel: [('retries', 5), ('retries', -5), ('errors', 1)]
+  compact_sum keeps [('errors', 1), ('retries', 0)]; dropping the zero as a no-op gives
+  {'errors': 1} and loses the fact that the counter EXISTS -- 'retries = 0'
+  and 'no retries counter' are different dashboards.
+
+  with a delete for 'hits': {'errors': 24}; a compactor that sums only the
+  non-tombstone entries -- i.e. reads the delete as an absence -- brings it back as
+  {'errors': 24, 'hits': 21}.  The delete is a fact, not a gap in the data.
+
+  1500 random delta logs: summing the increments and converting to states both
+  always reproduce the totals.  Keeping the last increment agreed in 238 cases and
+  broke in 1262, and it agreed in EXACTLY the logs where every counter's earlier
+  increments sum to zero -- 223 of those had one entry per counter (nothing to
+  compact) and the other 15 cancelled out by luck, which is the worse case:
+  a test built from short logs can pass for both reasons.
+
+  at 20,000 increments over 50 counters:
+    compact_sum  -> 50 entries, totals exact (400x smaller)
+    compact_last -> 50 entries, worst counter off by 798
+    both logs are the same SIZE, so the saving was never the thing in question --
+    the question was what the entries mean.
+
+all assertions passed

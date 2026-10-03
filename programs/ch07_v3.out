@@ -1,0 +1,58 @@
+ADDITIONS = a@1:5  a@3:3  b@50:4  b@90:7  a@130:2  b@220:9  a@245:6  b@260:1  a@540:8
+  true carts {'a': [5, 3, 2, 6, 8], 'b': [4, 7, 9, 1]}, values {'a': 24, 'b': 21}
+  longest silence per shopper {'a': 295, 'b': 130}, allowance 168 hours (a week)
+
+  never expire          : {'a': [5, 3, 2, 6, 8], 'b': [4, 7, 9, 1]}   (2 carts held)
+  expire by deleting    : {'a': [8]}   (2 carts held)
+  expire by writing out : {'a': [5, 3, 2, 6, 8], 'b': [4, 7, 9, 1]}   (2 carts held, 1 reload)
+
+  shopper 'a' was silent 295 hours, 127 past the allowance, so they return to a
+  cart holding 8 instead of 24: 4 items worth 16 silently gone.
+  shopper 'b''s longest silence is only 130 hours and the cart is lost anyway: by the
+  time a's hour-540 addition triggers a sweep, b has been quiet 280 hours, so b's
+  whole cart is erased with nothing to come back to.  Two different losses -- a
+  restart and an erasure -- and only the first one looks like the chapter's.
+
+  what survives is always a SUFFIX of the true cart -- the items added since the
+  drop -- so the error is one-directional: a cart can only ever be too small.
+  with a store, every allowance from 0 to never is exact; at ttl = 0 memory holds
+  1 cart at a time and the answer is still right after 7 reloads.
+
+  boundary: ttl = 295 (the silence itself) keeps every cart; ttl = 294 loses one.
+  The comparison is `now - last > ttl`, so a silence EQUAL to the allowance is
+  inside it -- one hour decides whether a shopper's cart exists.  At 294 hours only
+  'a' is lost: {'b': [4, 7, 9, 1], 'a': [8]}, with 'b' kept because 280 hours of
+  quiet is inside a 294-hour allowance and outside a 168-hour one.
+
+  carts the allowance saves, as a maximum over every hour:
+       allowance   up to hour 540   up to hour 710
+             168                2                2
+             294                0                1
+  at the chapter's 294-hour allowance the saving is 0 for every hour up to the last
+  addition -- the chapter's own figure -- so the correctness cost arrives before any
+  memory benefit.  At the week-long allowance it is 2, reached at hour 429, and the hour
+  is the whole story: shopper 'a' expired at 413 and 'b' at 428, so the two carts the
+  bound has stopped holding are precisely the two the shoppers no longer have.  A
+  saving visible only after the data is gone is the damage, measured from the other
+  side.  The real case for the bound is asymptotic, and the honest thing is to go
+  and measure it there.
+
+  at 2,000 one-visit shoppers plus one regular, observed at hour 2000:
+    never expire : 2,001 carts in memory
+    ttl = 100    : 102 carts in memory  (1,899 saved, 5.1% of the state)
+    with a store the carts are exact (0 reloads); by deleting they are not.
+
+  and the price: the store now holds 1,899 carts while memory holds 102.
+  Memory is bounded by ACTIVE shoppers; durable storage is bounded by nothing at
+  all, because every shopper who ever visited is still in it.  The fix did not
+  shrink the data, it moved the growth to the place where growth is affordable --
+  and a store that is never pruned is the next version of this same conversation.
+
+  400 random streams at six allowances each: the store reproduced the true cart
+  every single time; plain expiry was exact in 677 of 2,400 runs and in the other
+  1,723 it returned a strict suffix -- never a wrong item, never an extra one, only
+  a shorter cart.  At an allowance equal to the longest silence no cart was ever
+  restarted: every cart still in memory held its whole history, and the ones missing
+  were missing entirely.
+
+all assertions passed

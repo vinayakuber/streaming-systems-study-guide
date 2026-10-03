@@ -75,6 +75,12 @@ function buildInterviewSection(spec) {
     md.push('> ' + v.statement.join('\n> '), '');
     md.push(`**Why it is not obvious.** ${v.whyHard}`, '');
     md.push(`**Where it lands.** ${v.maps}`, '');
+    // Each variation carries its OWN runnable program, collapsed a second level down so the
+    // statement stays readable and the code is one click away. No walkthrough and no
+    // animation here: a variation earns its place by being recognisable, and the thing worth
+    // showing is a file that runs. Same contract as the chapter program — it is executed by
+    // tools/run_programs.sh and the output below is what it printed, not what it should print.
+    md.push(...variationProgram(name, i + 2, v));
     md.push('</details>');
   });
   md.push('');
@@ -117,3 +123,24 @@ function buildInterviewSection(spec) {
 }
 
 module.exports = { buildInterviewSection };
+
+// ---- a variation's own program ---------------------------------------------------
+// programs/<base>_v<N>.py, where N matches the "Variation N" label the reader sees, so a
+// file is findable from the page without a mapping table. The .out beside it is REQUIRED
+// when the .py exists: shipping a program with no captured output would mean the page
+// prints results nobody produced, which is the whole failure this part exists to prevent.
+function variationProgram(name, n, v) {
+  const base = name.replace(/-interview-memory$/, '');
+  const py = path.join(__dirname, '..', 'programs', `${base}_v${n}.py`);
+  const out = path.join(__dirname, '..', 'programs', `${base}_v${n}.out`);
+  if (!fs.existsSync(py)) return [];
+  if (!fs.existsSync(out))
+    throw new Error(`interviewkit: programs/${base}_v${n}.py exists but programs/${base}_v${n}.out does not — run tools/run_programs.sh so the output shown is the output it produced`);
+  return ['', '<details>',
+    `<summary><b>The whole program</b> for this variation — runnable, no animation</summary>`, '',
+    `This is **${v.name}** solved on its own: a complete file, every helper included, asserting its own results. It is run on every build.`, '',
+    '```python', fs.readFileSync(py, 'utf8').replace(/\s+$/, ''), '```', '',
+    'Running it prints:', '',
+    '```', fs.readFileSync(out, 'utf8').replace(/\s+$/, ''), '```', '',
+    '</details>', ''];
+}

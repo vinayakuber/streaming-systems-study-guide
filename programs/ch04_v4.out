@@ -1,0 +1,64 @@
+FIRINGS = [1, 3, 90, 130, 245, 260, 220, 50, 540]   (sorted: [1, 3, 50, 90, 130, 220, 245, 260, 540])
+CLOSE_AFTER = 47, PAGE_AFTER = 2
+
+  incidents, in the morning : [(1, 130), (220, 260), (540, 540)]
+  pages actually sent       : [1, 90, 245] (triggered by firings [3, 130, 260])
+  double pages              : 1
+
+  so three pages were sent for three incidents, and the mapping is still wrong:
+    incident (1, 130) woke somebody TWICE, at 1 and at 90, because
+    firing 50 arrived last and bridged two incidents that had each already paged;
+    incident (540, 540) woke nobody at all, because it is a single firing and
+    spans 0 < PAGE_AFTER = 2.
+  page latency as the pager measured it   : [2, 40, 15] (mean 19.0)
+  page latency against the TRUE start     : [2, 129, 40] (mean 57.0)
+  the middle page looked like a 40-minute wait and was really 129: firing 50 arrived
+  afterwards and moved that incident's start from 90 back to 1.  A pager cannot
+  measure its own lateness, because the start it measures from is still moving.
+  the second page named 'the incident starting at 90'.  No such incident exists by
+  morning -- it is inside (1, 130) -- so the start is not a usable page identity.
+
+  at CLOSE_AFTER = 120 (the chapter's other gap): incidents [(1, 260), (540, 540)],
+  pages [1], double pages 0 -- nothing bridges, so
+  nothing is paged twice.  The price is the other direction: 1 of 2 incidents
+  paged, and (1, 130) and (220, 260) are now reported as ONE, which is a different lie.
+
+  PAGE_AFTER against CLOSE_AFTER, on the same nine firings:
+     close   page  incidents  pages  doubles  uncovered  mean lat
+        47      0          3      4        1          0      28.5
+        47      2          3      3        1          1      57.0
+        47      3          3      2        0          1      84.5
+        47     20          3      2        0          1      64.5
+        47    100          3      1        0          2      49.0
+        47   1000          3      0        0          3       0.0
+       120      0          2      2        0          0       0.0
+       120      2          2      1        0          1       2.0
+       120      3          2      1        0          1      89.0
+       120     20          2      1        0          1      89.0
+       120    100          2      1        0          1     129.0
+       120   1000          2      0        0          2       0.0
+  at PAGE_AFTER = 1000 nothing pages at all: zero double pages, and an alerting
+  system that never alerts.  That is the degenerate end of the same dial.
+
+  swept 4,961 (CLOSE_AFTER, PAGE_AFTER) pairs looking for one that gives the
+  right incidents, pages every one, and pages none of them twice:
+    3 pairs work: [(87, 0), (88, 0), (89, 0)]
+  at CLOSE_AFTER = 87 the firing at 90 is within 87 of the firing at 3, so when 90
+  arrives it joins the open incident instead of starting a second one -- and then
+  there are never two paged incidents for 50 to bridge.  The window has to be wide
+  enough to swallow the gap the late firing was going to land in.
+  the band is 3 wide out of 121: it opens at 90 - 3 = 87, where the bridge stops
+  forming, and closes at 220 - 130 = 90, where two real incidents start merging into
+  one.  And it only works for THIS arrival order:
+    reorder the same nine firings to [90, 220, 1, 3, 260, 245, 130, 540, 50]
+    and (87, 0) double-pages 1 time(s) again.  So the pair that worked was fitted to
+    an arrival order nobody controls -- which is the honest answer to the question:
+    the two numbers are a product decision about which failure you prefer, and no
+    sweep can hand you a pair that has neither.
+
+  600 random firing streams: the incidents always equal the sorted sweep, and they
+  are identical under re-ordering -- but the PAGES differ on 192 of them, because the
+  pager has to act before the order is known.  22 streams double-paged and
+  578 did not, so the failure is real and not universal.
+
+all assertions passed

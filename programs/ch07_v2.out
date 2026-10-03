@@ -1,0 +1,56 @@
+VIEWS = a@1  a@3  b@50  b@90  a@130  b@220  a@245  b@260  a@540    (9 views)
+  distinct visitors      : 2   (2 slots held)
+  +1 per event           : 9   (1 slot held -- and the wrong question)
+  the chapter's accumulator inflates the answer 4.5x here, and the
+  factor is the average views per visitor -- a number nobody reports, so the error
+  is not visible in the output at all.
+
+  ttl = 295 (the longest silence) : 2 distinct, 0 recounts  (correct)
+  ttl = 294                      : 3 distinct, 1 recount   OVERSTATED
+  the chapter's tight allowance made a TOTAL too low by what it dropped; here it
+  makes a COUNT too high by what it dropped, because the dropped thing was the
+  evidence that the visitor was not new.
+
+  visitors saved by a day-long ttl, at any moment in this example: 0
+  which is the real objection: the question says DISTINCT TODAY, so every visitor
+  seen today is still needed today.  The only thing that frees the state is the
+  day boundary, and that is a property of the question, not a bound you chose.
+
+  three days of [800, 1800, 600] views: per-day states [400, 900, 300],
+  so the exact answer needs 900 slots at a time and not 1600 -- the window
+  bounds the state, and it bounds it at the busiest day's cardinality.
+
+  k-minimum-values sketch, k = 256:
+     distinct  exact slots  estimate  sketch slots   error
+           50           50        50            50   0.0%
+          255          255       255           255   0.0%
+          256          256       257           256   0.4%
+        1,000        1,000       983           256   1.7%
+        4,000        4,000     3,721           256   7.0%
+       20,000       20,000    20,004           256   0.0%
+    the exact state grows 78x across these rows and the sketch state does not
+    grow at all; the worst error over the rows at or above k is 7.0%, against the
+    sketch's own standard error of 1/sqrt(256) = 6.25%.
+
+  boundaries: at 255 distinct the sketch holds every hash and is EXACT (255); at
+  256 it is full, the estimator takes over, and it already disagrees (257) -- so the
+  exactness ends one visitor before the memory does.
+  an empty day gives 0 and a thousand views from one visitor give 1, in both the
+  exact set and the sketch -- repeats hash to a value already held, so a repeat
+  costs nothing and needs no lookup against the past.
+
+  20 random days from 300 to 1,200 visitors: the sketch held 256 slots every time,
+  mean error 3.43% against the predicted 6.25%, worst 8.54%.
+  the expiring exact counter overstated on 19 of 20 days and understated on 0;
+  on the other 1 the allowance exceeded every silence in that day, so it dropped
+  nobody -- the bound is only ever as safe as the quietest visitor, and widening it
+  until it is safe is the same as not bounding it.
+
+  at 30,000,000 distinct visitors a day:
+    exact  : 0.48 GB of visitor ids, per counter, per day
+    sketch : 2,048 bytes, whatever the cardinality
+    234,375x, and the sketch's cost does not depend on the answer --
+    which is the property the chapter's one-number accumulator had and the exact
+    distinct count never did.
+
+all assertions passed

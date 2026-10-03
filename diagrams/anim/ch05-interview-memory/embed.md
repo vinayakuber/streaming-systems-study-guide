@@ -41,6 +41,352 @@ case the appealing first answer is to materialise a sequence you cannot afford.
 
 **Where it lands.** `together` with the rename playing `commit`, and no `pos` at all — the file's existence is the position.
 
+
+<details>
+<summary><b>The whole program</b> for this variation — runnable, no animation</summary>
+
+This is **the file that is half uploaded** solved on its own: a complete file, every helper included, asserting its own results. It is run on every build.
+
+```python
+#!/usr/bin/env python3
+"""Variation 2 — the file that is half uploaded (looks like backups). Standalone and runnable.
+
+  A nightly job uploads a large file to object storage and then records that the backup
+  succeeded.  It is killed partway through the upload.  No restore may ever read a partial
+  file, and no record may ever claim a backup that is not there.
+
+The same two writes, and the chapter's transaction is unavailable because the file store and
+the record live in different systems.  What makes it tractable is a property the queue problem
+lacked: the DESTINATION NAME is under your control.  Write to a temporary name and RENAME on
+completion, and the appearance of the file itself becomes the atomic commit -- the rename is
+the one durable write, a partial upload is invisible because nothing looks at the temporary
+name, and there is no position to keep at all, because the file's existence IS the position.
+You can often manufacture an atomic step instead of needing a transaction.  What it costs, and
+where it stops working, are both measured below.
+
+Run it:  python3 programs/ch05_v2.py
+"""
+
+import random
+
+# Nine chunks whose lengths are the chapter's nine item values, so the finished file is 45
+# bytes -- the same 45 the chapter's worker has to add up.  Each chunk is a DISTINCT repeated
+# letter, for the chapter's reason: a chunk that looked like its neighbour would let a
+# truncated or doubled upload pass a content check.
+CHUNKS = ["aaaaa", "bbb", "ccccccc", "dd", "eeeeee", "f", "ggggggggg", "hhhh", "iiiiiiii"]
+COMPLETE = "".join(CHUNKS)
+SIZE = len(COMPLETE)
+
+# The real and temporary names in the one store.  "backup" is what a restore reads; nothing
+# ever reads "backup.tmp", which is the entire reason the trick works.
+FINAL, TEMP = "backup", "backup.tmp"
+
+# An older file left in the staging slot by a previous night's crash.  It is the boundary case
+# that makes resuming dangerous, and it is a real thing to find in a bucket.
+STALE_TEMP = "XXXXXXXXXXXXXXX"
+
+N = len(CHUNKS)
+
+
+def attempt(chunks, policy, crash_at, store, record, resume=False):
+    """One run of the nightly job against a mutable `store` and `record`.
+
+    `crash_at` is a chunk index to die just before writing, or N to die after the last chunk
+    but before the commit step, or None to survive.  Returns the bytes transferred, so that
+    the price of each policy is a measurement.
+
+    policy:
+      "rename"       -- append to TEMP, then rename TEMP to FINAL.  The rename is the commit.
+      "direct"       -- append straight to FINAL, then set the record.  A reader can see a
+                        half file, and the record can be missing for a complete one.
+      "record_first" -- set the record, then upload.  A crash in between leaves a record
+                        claiming a backup that does not exist, which is the only one of the
+                        three failures nobody notices until a restore is attempted.
+    `resume` continues from whatever is already in TEMP instead of starting over.  It saves
+    the bytes and it is only safe if that content is known to belong to THIS attempt."""
+    moved = 0
+    if policy == "record_first":
+        record["ok"] = True
+        if crash_at == 0:
+            return moved
+    name = TEMP if policy == "rename" else FINAL
+    if resume:
+        done = len(store.get(name, ""))
+        start = 0
+        while start < len(chunks) and done >= len(chunks[start]):
+            done -= len(chunks[start])
+            start += 1
+    else:
+        store.pop(name, None)
+        start = 0
+    if policy == "rename":
+        # the staging file is CREATED before any bytes are written, not when the first chunk
+        # lands.  Without this a zero-byte backup has nothing to rename, so "the file exists"
+        # could not express an empty backup -- the encoding would have a hole in it.
+        store.setdefault(name, "")
+    for i in range(start, len(chunks)):
+        if crash_at == i:
+            return moved
+        store[name] = store.get(name, "") + chunks[i]
+        moved += len(chunks[i])
+    if crash_at == len(chunks):
+        return moved
+    if policy == "rename":
+        store[FINAL] = store.pop(TEMP)          # the one durable write: the commit
+    else:
+        record["ok"] = True
+    return moved
+
+
+def visible(store):
+    """What a restore would read: whatever is under the real name, or None if there is
+    nothing there.  Deliberately blind to TEMP, because a restore is."""
+    return store.get(FINAL)
+
+
+def one_night(policy, crash_at, resume=False, seed_temp=None):
+    """A fresh store, one attempt, and what is left behind.  Returns
+    (visible, record_ok, bytes_moved, temp_contents)."""
+    store, record = {}, {"ok": False}
+    if seed_temp is not None:
+        store[TEMP] = seed_temp
+    moved = attempt(CHUNKS, policy, crash_at, store, record, resume=resume)
+    return visible(store), record["ok"], moved, store.get(TEMP)
+
+
+def until_done(policy, crash_points, resume=False):
+    """Restart the job after each crash until it finally completes, which is what a scheduler
+    does.  Returns (visible, attempts, total_bytes_moved) -- the bytes are the point: with no
+    resume, every crash throws away everything transferred so far."""
+    store, record = {}, {"ok": False}
+    total, attempts = 0, 0
+    for c in list(crash_points) + [None]:
+        attempts += 1
+        total += attempt(CHUNKS, policy, c, store, record, resume=resume)
+        if visible(store) is not None and (policy == "rename" or record["ok"]):
+            break
+    return visible(store), attempts, total
+
+
+def cross_store(chunks, crash_at):
+    """The same trick attempted across TWO systems -- staging bucket to archive bucket.
+
+    There is no rename between stores, only copy-then-delete, and the copy is not one durable
+    write: a crash inside it leaves a partial object under the real name in the archive, which
+    is exactly the failure the rename was adopted to prevent.  Returns the archive's view."""
+    staging, archive = {TEMP: "".join(chunks)}, {}
+    for i, c in enumerate(chunks):
+        if crash_at == i:
+            return archive.get(FINAL)
+        archive[FINAL] = archive.get(FINAL, "") + c      # copying, chunk by chunk
+    del staging[TEMP]
+    return archive.get(FINAL)
+
+
+def main():
+    print(f"CHUNKS = {CHUNKS}")
+    print(f"the finished file is {SIZE} bytes: {COMPLETE!r}\n")
+
+    # ---- every crash point, every policy
+    print(f"  {'crash':>7}  {'rename':>18}  {'direct':>18}  {'record_first':>18}")
+    rows = {}
+    for c in list(range(N + 1)) + [None]:
+        row = {}
+        for policy in ("rename", "direct", "record_first"):
+            vis, ok, moved, tmp = one_night(policy, c)
+            row[policy] = (vis, ok)
+        rows[c] = row
+        label = "none" if c is None else (f"after all {N}" if c == N else f"chunk {c}")
+
+        def show(pair):
+            v, ok = pair
+            if v is None:
+                return f"absent, rec={ok}"
+            if v == COMPLETE:
+                return f"COMPLETE, rec={ok}"
+            return f"{len(v)}/{SIZE} bytes, rec={ok}"
+        print(f"  {label:>7}  {show(row['rename']):>18}  {show(row['direct']):>18}  "
+              f"{show(row['record_first']):>18}")
+
+    # the rename: at EVERY crash point the visible file is absent or complete, never partial
+    for c, row in rows.items():
+        vis, ok = row["rename"]
+        assert vis in (None, COMPLETE), (c, vis)
+        assert ok is False, "the rename policy keeps no record at all; the file is the record"
+    assert rows[None]["rename"][0] == COMPLETE
+    assert all(rows[c]["rename"][0] is None for c in range(N + 1))
+    print(f"\n  rename: at all {N + 2} crash points the visible file is absent or the full {SIZE} bytes.")
+    print(f"  Nothing is ever half visible, and there is no record to disagree with it.")
+
+    # the direct write: partials ARE visible, and the count is every chunk after the first
+    partial = [c for c in rows if rows[c]["direct"][0] not in (None, COMPLETE)]
+    assert partial == list(range(1, N)), partial
+    assert rows[0]["direct"] == (None, False)
+    assert rows[N]["direct"] == (COMPLETE, False), rows[N]["direct"]
+    print(f"\n  direct: {len(partial)} of the {N + 2} crash points leave a partial file under the real")
+    print(f"  name -- a restore from it silently produces a truncated database.  And crashing")
+    print(f"  after the last chunk leaves a COMPLETE file with the record still saying failed,")
+    print(f"  which is the harmless half of the same split.")
+
+    # record_first: the record can claim a backup that is not there, which is the bad one
+    lying = [c for c in rows if rows[c]["record_first"][1] and rows[c]["record_first"][0] != COMPLETE]
+    # CORRECTED: N, not N+1.  Crashing AFTER the last chunk but before the commit step leaves
+    # record_first with both the record set and the file complete, so it is not lying there --
+    # its window of dishonesty is exactly the upload itself, which is still every crash point
+    # that matters, because the upload is where all the time goes.
+    assert lying == list(range(N)), lying
+    assert rows[N]["record_first"] == (COMPLETE, True), rows[N]["record_first"]
+    print(f"\n  record_first: {len(lying)} of the {N + 2} crash points leave the record saying SUCCESS with")
+    print(f"  no complete file behind it -- every point during the upload, which is where all")
+    print(f"  the time goes.  Nobody finds out until a restore is attempted, which is why this")
+    print(f"  ordering is the one that loses data rather than merely wasting work.")
+
+    # ---- what the rename costs: no resume, so every crash throws the transfer away
+    crashes = [3, 3, 3]
+    vis, attempts, moved = until_done("rename", crashes)
+    assert vis == COMPLETE
+    print(f"\n  killed at chunk 3 three nights running, then succeeding: {attempts} attempts and")
+    print(f"  {moved} bytes transferred for a {SIZE}-byte file.")
+    assert attempts == 4 and moved == 3 * len("".join(CHUNKS[:3])) + SIZE, (attempts, moved)
+    vis_r, attempts_r, moved_r = until_done("rename", crashes, resume=True)
+    assert vis_r == COMPLETE and attempts_r == attempts
+    print(f"  resuming from the temporary file instead: {moved_r} bytes -- the saving is real,")
+    print(f"  and it is exactly the {moved - moved_r} bytes the restarts re-sent.")
+    assert moved_r < moved, (moved_r, moved)
+    assert moved_r == SIZE, moved_r
+
+    # ---- and what resuming costs: a stale temporary file from a previous night
+    vis_s, ok_s, moved_s, tmp_s = one_night("rename", None, resume=True, seed_temp=STALE_TEMP)
+    vis_f, ok_f, moved_f, tmp_f = one_night("rename", None, resume=False, seed_temp=STALE_TEMP)
+    print(f"\n  a {len(STALE_TEMP)}-byte file left in {TEMP!r} by an earlier crash of a DIFFERENT upload:")
+    print(f"    resuming  -> {len(vis_s)} bytes, {'correct' if vis_s == COMPLETE else 'CORRUPT'}: {vis_s!r}")
+    print(f"    from scratch -> {len(vis_f)} bytes, {'correct' if vis_f == COMPLETE else 'CORRUPT'}")
+    assert vis_f == COMPLETE, vis_f
+    assert vis_s != COMPLETE, "the stale resume must be caught producing the wrong file"
+    assert len(vis_s) == SIZE, (
+        "and it must be the SAME LENGTH as a good file, which is what makes it dangerous")
+    assert vis_s.startswith(STALE_TEMP), vis_s[:len(STALE_TEMP)]
+    print(f"    the corrupt one is {len(vis_s)} bytes, the same size as a good backup, so a length")
+    print(f"    check passes.  Resuming is only safe if the temporary name is unique per")
+    print(f"    attempt -- which means the atomic commit needs a NAME nobody else will reuse.")
+
+    # ---- where the trick stops working: two stores
+    partial_cross = [c for c in range(N + 1) if cross_store(CHUNKS, c) not in (None, COMPLETE)]
+    assert cross_store(CHUNKS, None) == COMPLETE
+    assert partial_cross == list(range(1, N)), partial_cross
+    print(f"\n  staging bucket to archive bucket, where a rename is really a copy and a delete:")
+    print(f"  {len(partial_cross)} crash points again leave a partial object under the real name.  The")
+    print(f"  rename is atomic WITHIN one store and nowhere else, so the manufactured commit")
+    print(f"  is a property of the store, not of the idea.")
+
+    # ---- boundaries
+    empty_store, empty_rec = {}, {"ok": False}
+    attempt([], "rename", None, empty_store, empty_rec)
+    assert visible(empty_store) == "", "a zero-byte backup must still commit, as an empty file"
+    assert visible(empty_store) is not None, (
+        "and 'exists but empty' must be distinguishable from 'absent', or the file cannot be "
+        "the position")
+    one_store, one_rec = {}, {"ok": False}
+    attempt(["z"], "rename", 0, one_store, one_rec)
+    assert visible(one_store) is None and one_store.get(TEMP) == "", one_store
+    print(f"\n  boundaries: an empty backup commits as a zero-byte file -- {visible(empty_store)!r} is not")
+    print(f"  None, which is what lets 'the file exists' be the position.  A single-chunk upload")
+    print(f"  killed before its only chunk leaves an empty STAGING file and nothing under the")
+    print(f"  real name, which is the state a restore must read as 'no backup'.")
+
+    # ---- many files, every crash point
+    rng = random.Random(20260303)
+    for _ in range(300):
+        n = rng.randint(0, 10)
+        chunks = ["%s" % chr(97 + i) * rng.randint(1, 6) for i in range(n)]
+        whole = "".join(chunks)
+        for c in list(range(n + 1)) + [None]:
+            store, record = {}, {"ok": False}
+            attempt(chunks, "rename", c, store, record)
+            got = visible(store)
+            assert got in (None, whole), (chunks, c, got)
+            assert (got == whole) == (c is None), (chunks, c, got)
+            store2, record2 = {}, {"ok": False}
+            attempt(chunks, "record_first", c, store2, record2)
+            assert record2["ok"] is True, "the record is written first, so it is always set"
+            # the file is complete exactly when the job either survived or was killed after
+            # the last chunk; and with no chunks at all record_first never creates the file,
+            # so there the record is set and nothing exists under the real name at any point.
+            assert (visible(store2) == whole) == ((c is None or c == n) and n > 0), (chunks, c)
+    print(f"\n  300 random files x every crash point: the rename leaves the real name absent or")
+    print(f"  complete, and complete exactly when the job was not killed.  record_first always")
+    print(f"  sets the record, and the file matches it only when nothing went wrong.")
+
+    print("\nall assertions passed")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+Running it prints:
+
+```
+CHUNKS = ['aaaaa', 'bbb', 'ccccccc', 'dd', 'eeeeee', 'f', 'ggggggggg', 'hhhh', 'iiiiiiii']
+the finished file is 45 bytes: 'aaaaabbbcccccccddeeeeeefggggggggghhhhiiiiiiii'
+
+    crash              rename              direct        record_first
+  chunk 0   absent, rec=False   absent, rec=False    absent, rec=True
+  chunk 1   absent, rec=False  5/45 bytes, rec=False  5/45 bytes, rec=True
+  chunk 2   absent, rec=False  8/45 bytes, rec=False  8/45 bytes, rec=True
+  chunk 3   absent, rec=False  15/45 bytes, rec=False  15/45 bytes, rec=True
+  chunk 4   absent, rec=False  17/45 bytes, rec=False  17/45 bytes, rec=True
+  chunk 5   absent, rec=False  23/45 bytes, rec=False  23/45 bytes, rec=True
+  chunk 6   absent, rec=False  24/45 bytes, rec=False  24/45 bytes, rec=True
+  chunk 7   absent, rec=False  33/45 bytes, rec=False  33/45 bytes, rec=True
+  chunk 8   absent, rec=False  37/45 bytes, rec=False  37/45 bytes, rec=True
+  after all 9   absent, rec=False  COMPLETE, rec=False  COMPLETE, rec=True
+     none  COMPLETE, rec=False  COMPLETE, rec=True  COMPLETE, rec=True
+
+  rename: at all 11 crash points the visible file is absent or the full 45 bytes.
+  Nothing is ever half visible, and there is no record to disagree with it.
+
+  direct: 8 of the 11 crash points leave a partial file under the real
+  name -- a restore from it silently produces a truncated database.  And crashing
+  after the last chunk leaves a COMPLETE file with the record still saying failed,
+  which is the harmless half of the same split.
+
+  record_first: 9 of the 11 crash points leave the record saying SUCCESS with
+  no complete file behind it -- every point during the upload, which is where all
+  the time goes.  Nobody finds out until a restore is attempted, which is why this
+  ordering is the one that loses data rather than merely wasting work.
+
+  killed at chunk 3 three nights running, then succeeding: 4 attempts and
+  90 bytes transferred for a 45-byte file.
+  resuming from the temporary file instead: 45 bytes -- the saving is real,
+  and it is exactly the 45 bytes the restarts re-sent.
+
+  a 15-byte file left in 'backup.tmp' by an earlier crash of a DIFFERENT upload:
+    resuming  -> 45 bytes, CORRUPT: 'XXXXXXXXXXXXXXXddeeeeeefggggggggghhhhiiiiiiii'
+    from scratch -> 45 bytes, correct
+    the corrupt one is 45 bytes, the same size as a good backup, so a length
+    check passes.  Resuming is only safe if the temporary name is unique per
+    attempt -- which means the atomic commit needs a NAME nobody else will reuse.
+
+  staging bucket to archive bucket, where a rename is really a copy and a delete:
+  8 crash points again leave a partial object under the real name.  The
+  rename is atomic WITHIN one store and nowhere else, so the manufactured commit
+  is a property of the store, not of the idea.
+
+  boundaries: an empty backup commits as a zero-byte file -- '' is not
+  None, which is what lets 'the file exists' be the position.  A single-chunk upload
+  killed before its only chunk leaves an empty STAGING file and nothing under the
+  real name, which is the state a restore must read as 'no backup'.
+
+  300 random files x every crash point: the rename leaves the real name absent or
+  complete, and complete exactly when the job was not killed.  record_first always
+  sets the record, and the file matches it only when nothing went wrong.
+
+all assertions passed
+```
+
+</details>
+
 </details>
 <details>
 <summary><b>Variation 3</b> — the counter in two places <i>(looks like analytics)</i></summary>
@@ -51,6 +397,329 @@ case the appealing first answer is to materialise a sequence you cannot afford.
 
 **Where it lands.** No change to the program; the point is that `together` has no store to be together IN, which is the condition the model's last paragraph names.
 
+
+<details>
+<summary><b>The whole program</b> for this variation — runnable, no animation</summary>
+
+This is **the counter in two places** solved on its own: a complete file, every helper included, asserting its own results. It is run on every build.
+
+```python
+#!/usr/bin/env python3
+"""Variation 3 — the counter in two places (looks like analytics). Standalone and runnable.
+
+  Every event increments a counter in a fast store, for the live dashboard, and appends a row
+  to a warehouse, for the monthly report.  BOTH MUST AGREE.
+
+Two outputs rather than one output and a position, so there is no store the bookkeeping can
+live in and the chapter's transaction is genuinely unavailable -- `together` has nothing to be
+together IN.  The honest answer is that it cannot be made exact, and the useful answer is to
+pick one store as the source of truth and DERIVE the other from it: the fast counter becomes a
+cache rebuilt from the warehouse rather than a second authority, so disagreement becomes
+STALENESS instead of INCONSISTENCY.  The difference is made precise below -- a dual-written
+pair can land in a state that corresponds to no moment in the event stream at all, while a
+derived pair always corresponds to some earlier moment.  The skill is noticing that "both must
+agree" is a request to have two sources of truth, and declining it.
+
+Run it:  python3 programs/ch05_v3.py
+"""
+
+import random
+
+# The chapter's nine items, unchanged.  All values DISTINCT and none zero, for the chapter's
+# reason: an event with no effect would make a disagreement invisible, and two equal values
+# would stop a wrong total from identifying which event was lost.  A zero IS injected further
+# down, precisely to show what it hides.
+ITEMS = [(0, 5), (1, 3), (2, 7), (3, 2), (4, 6), (5, 1), (6, 9), (7, 4), (8, 8)]
+CORRECT = sum(v for _, v in ITEMS)          # 45, the chapter's total
+N = len(ITEMS)
+
+# How many events between cache rebuilds, for the derived design.  3 is small enough to trace
+# and large enough that the cache is visibly behind.
+REBUILD_EVERY = 3
+
+
+def prefixes(items):
+    """Every total the stream legitimately passes through, in order.  A pair of stores is
+    CONSISTENT only if both hold one of these, and the SAME one; it is stale if they hold two
+    different ones, and impossible if either holds something not in this list."""
+    out, run = [0], 0
+    for _, v in items:
+        run += v
+        out.append(run)
+    return out
+
+
+def dual_write(items, crash_at, counter_first=True):
+    """Two writes per event to two different systems, with no transaction available.
+
+    `crash_at` kills the process between the two writes of that event, which is the only
+    instant that matters.  Returns (counter, warehouse_total, rows).  Whichever store is
+    written first ends up ahead, so the ORDER chooses which store lies, and nothing chooses
+    whether one does."""
+    counter, rows = 0, []
+    for i, (eid, v) in enumerate(items):
+        if counter_first:
+            counter += v
+            if i == crash_at:
+                break
+            rows.append((eid, v))
+        else:
+            rows.append((eid, v))
+            if i == crash_at:
+                break
+            counter += v
+    return counter, sum(v for _, v in rows), rows
+
+
+def rebuild(rows):
+    """The cache, computed from the warehouse.  This is the whole of the derived design: one
+    function, no state of its own, and nothing it can disagree with."""
+    return sum(v for _, v in rows)
+
+
+def derived(items, crash_at, rebuild_every=REBUILD_EVERY):
+    """One durable write per event -- the warehouse row -- and a counter REBUILT from it.
+
+    There is no second authority to fall out of step, so a crash cannot split anything: the
+    counter either shows the current total or an earlier one.  Returns (counter, rows, lag),
+    where lag is how many events the counter is behind at the end."""
+    rows, counter, since = [], 0, 0
+    for i, (eid, v) in enumerate(items):
+        if i == crash_at:
+            break
+        rows.append((eid, v))                  # the one durable write
+        since += 1
+        if since >= rebuild_every:
+            counter = rebuild(rows)            # the cache catches up
+            since = 0
+    return counter, rows, since
+
+
+def retry_until_written(items, crash_at, attempts=2):
+    """The appealing fix: if the second write fails, RETRY it.
+
+    It closes the gap whenever the process survives long enough to retry, and it does nothing
+    for a crash, because a crash is not a failed call -- there is nobody left to retry.
+    `attempts` replays the increment, which is where the asymmetry shows: incrementing twice
+    counts twice, while appending a keyed row twice is the same row."""
+    counter, rows = 0, []
+    for i, (eid, v) in enumerate(items):
+        for _ in range(attempts if i == crash_at else 1):
+            counter += v                       # NOT idempotent: each retry moves the balance
+        for _ in range(attempts if i == crash_at else 1):
+            rows = [r for r in rows if r[0] != eid] + [(eid, v)]   # keyed: idempotent
+    return counter, sum(v for _, v in rows), rows
+
+
+def reconcile(counter, rows, direction):
+    """A repair pass over a split pair.  Returns (counter, reported_warehouse_total, rows).
+
+    "from_warehouse" recomputes the counter from the rows: the pair agrees AND the reported
+    total still equals the sum of the detail.
+    "from_counter" writes the counter's value into the warehouse's reported total and leaves
+    the rows alone.  The pair agrees too -- and the warehouse's own total no longer matches its
+    own rows, which is a worse condition than being behind, because nothing downstream can
+    detect it by comparing stores.  Both are one line, and one of them is the derived design
+    with extra steps."""
+    if direction == "from_warehouse":
+        return rebuild(rows), rebuild(rows), rows
+    return counter, counter, rows
+
+
+def main():
+    legal = prefixes(ITEMS)
+    print("ITEMS =", "  ".join(f"{e}:{v}" for e, v in ITEMS), f"  total {CORRECT}")
+    print(f"the {len(legal)} totals the stream legitimately passes through: {legal}\n")
+
+    # ---- the dual write, at every crash point and in both orders
+    print(f"  {'crash':>5}  {'counter-first':>22}  {'warehouse-first':>22}")
+    split_c, split_w = [], []
+    for c in range(N):
+        cc, wc, _ = dual_write(ITEMS, c, counter_first=True)
+        cw, ww, _ = dual_write(ITEMS, c, counter_first=False)
+        split_c.append((cc, wc))
+        split_w.append((cw, ww))
+        print(f"  {c:>5}  counter {cc:>3}  wh {wc:>3} ({cc - wc:+d})  "
+              f"counter {cw:>3}  wh {ww:>3} ({cw - ww:+d})")
+    assert all(a - b == ITEMS[c][1] for c, (a, b) in enumerate(split_c)), split_c
+    assert all(b - a == ITEMS[c][1] for c, (a, b) in enumerate(split_w)), split_w
+    print(f"\n  the gap is always exactly the straddling event's value, and its SIGN is the write")
+    print(f"  order: counter-first leaves the dashboard high, warehouse-first leaves it low.")
+    # and no crash point escapes, in either order
+    assert not any(a == b for a, b in split_c) and not any(a == b for a, b in split_w)
+    assert max(a - b for a, b in split_c) == 9 == max(v for _, v in ITEMS)
+
+    # ---- the precise difference between inconsistency and staleness
+    impossible = [(c, p) for c, p in enumerate(split_c) if p[0] != p[1]]
+    not_a_moment = [(c, p) for c, p in enumerate(split_c)
+                    if not any(p[0] == t and p[1] == t for t in legal)]
+    print(f"\n  of the {N} dual-write crash states, {len(not_a_moment)} correspond to NO moment in the")
+    print(f"  stream: the pair (counter, warehouse) is not (T, T) for any legal total T.")
+    assert len(not_a_moment) == N and len(impossible) == N
+    # the derived design: every crash state is a PAST moment, which is the whole claim
+    lags = []
+    for c in range(N + 1):
+        cnt, rows, lag = derived(ITEMS, c if c < N else None)
+        wh = rebuild(rows)
+        assert cnt in legal and wh in legal, (c, cnt, wh)
+        assert cnt <= wh, (c, cnt, wh)
+        assert legal.index(cnt) == legal.index(wh) - lag, (c, cnt, wh, lag)
+        lags.append(lag)
+    print(f"  of the {N + 1} derived crash states, ALL are a legal total paired with an earlier legal")
+    print(f"  total -- the counter is behind by {min(lags)} to {max(lags)} events and never wrong.")
+    assert max(lags) == REBUILD_EVERY - 1, (lags, REBUILD_EVERY)
+    assert min(lags) == 0, lags
+    print(f"  the lag is bounded by the rebuild interval ({REBUILD_EVERY}), so it is a number you choose,")
+    print(f"  not a number you discover after an incident.")
+    # the bound is the parameter, measured across several intervals
+    for every in (1, 2, 3, 5, 9, 20):
+        worst = max(derived(ITEMS, c, every)[2] for c in range(N + 1))
+        assert worst == min(every - 1, N), (every, worst)
+    print(f"  rebuild every 1,2,3,5,9,20 events -> worst lag 0,1,2,4,8,{min(20 - 1, N)} events: exactly the")
+    print(f"  interval minus one, until the interval exceeds the stream.")
+
+    # ---- the retry, which is the fix everybody reaches for
+    r_counter, r_wh, r_rows = retry_until_written(ITEMS, crash_at=4, attempts=2)
+    print(f"\n  retrying the writes for event 4 twice: counter {r_counter}, warehouse {r_wh}")
+    assert r_wh == CORRECT, r_wh
+    assert r_counter == CORRECT + ITEMS[4][1], (r_counter, CORRECT)
+    print(f"  the warehouse is still {r_wh} because its row is keyed by event id, so writing it")
+    print(f"  twice is writing it once.  The counter is {r_counter}, high by {r_counter - CORRECT} -- an increment")
+    print(f"  has no key, so a retry is a second event.  THAT asymmetry is what decides which")
+    print(f"  store can be the source of truth: the one whose write can be repeated safely.")
+    for c in range(N):
+        assert retry_until_written(ITEMS, c, attempts=2)[1] == CORRECT, c
+        assert retry_until_written(ITEMS, c, attempts=3)[1] == CORRECT, c
+        assert retry_until_written(ITEMS, c, attempts=3)[0] == CORRECT + 2 * ITEMS[c][1], c
+    print(f"  at every crash point and for 2 or 3 attempts: the warehouse is always {CORRECT}, and the")
+    print(f"  counter is high by one or two copies of the retried event.")
+
+    # ---- reconciliation, and which direction it has to run
+    for c in range(N):
+        cc, wc, rows = dual_write(ITEMS, c, counter_first=True)
+        g_cnt, g_total, g_rows = reconcile(cc, rows, "from_warehouse")
+        b_cnt, b_total, b_rows = reconcile(cc, rows, "from_counter")
+        assert g_cnt == g_total == rebuild(g_rows) and g_total in legal, (c, g_total)
+        assert b_cnt == b_total, "writing the counter into the warehouse does make them agree"
+        # CORRECTED.  The expectation was that this lands on a total the stream never had.  It
+        # does not: counter-first leaves the counter holding prefix total c+1, which IS a legal
+        # total -- what was illegal was the PAIR, not either number.  The real damage is one
+        # level down: the warehouse's reported total no longer equals the sum of its own rows,
+        # so the corruption is invisible to any check that compares the two stores.
+        assert b_total in legal, (c, b_total)
+        assert b_total != rebuild(b_rows), (c, b_total, rebuild(b_rows))
+        assert b_total - rebuild(b_rows) == ITEMS[c][1], (c, b_total)
+    print(f"\n  repairing the {N} split pairs: recomputing the counter FROM the warehouse makes the")
+    print(f"  pair agree and leaves the warehouse's total equal to the sum of its own rows.")
+    print(f"  Copying the counter INTO the warehouse also makes the pair agree, on a total that")
+    print(f"  is even a legal one -- but the warehouse's total is then high by the missing row's")
+    print(f"  value at every crash point, so comparing the two stores can no longer detect it.")
+    print(f"  and note what the working repair reads: the warehouse.  It was the source of")
+    print(f"  truth all along, and the reconcile job is the derived design with extra steps.")
+
+    # ---- the boundary a zero-valued event creates
+    with_zero = ITEMS[:4] + [(99, 0)] + ITEMS[4:]
+    zc, zw, _ = dual_write(with_zero, 4, counter_first=True)
+    print(f"\n  inject one event with value 0 and crash on it: counter {zc}, warehouse {zw} -- they")
+    print(f"  AGREE, and the process still died between two writes.")
+    assert zc == zw, (zc, zw)
+    assert dual_write(with_zero, 4)[0] == dual_write(with_zero, 4)[1]
+    # ...and the agreement is not consistency: the row is missing from the warehouse
+    _, _, zrows = dual_write(with_zero, 4, counter_first=True)
+    assert (99, 0) not in zrows, zrows
+    assert len(zrows) == 4, zrows
+    print(f"  the row {(99, 0)} is missing from the warehouse all the same, so the row COUNT is")
+    print(f"  wrong while the total is right.  Equal totals are evidence of nothing, which is")
+    print(f"  why the chapter's items are all non-zero and distinct.")
+
+    # ---- many streams, every crash point, both designs
+    rng = random.Random(20260303)
+    for _ in range(400):
+        n = rng.randint(1, 12)
+        items = [(i, rng.randint(1, 40)) for i in range(n)]
+        legal_i = prefixes(items)
+        for c in range(n):
+            cc, wc, _ = dual_write(items, c, counter_first=True)
+            cw, ww, _ = dual_write(items, c, counter_first=False)
+            assert cc - wc == items[c][1] and ww - cw == items[c][1], (items, c)
+            assert not (cc == wc) and not (cw == ww), (items, c)
+        for c in range(n + 1):
+            every = rng.randint(1, 6)
+            cnt, rows, lag = derived(items, c if c < n else None, every)
+            wh = rebuild(rows)
+            assert cnt in legal_i and wh in legal_i, (items, c, every)
+            assert legal_i.index(wh) - legal_i.index(cnt) == lag <= every - 1, (items, c, every)
+    print(f"\n  400 random streams x every crash point: the dual write is split by exactly the")
+    print(f"  straddling value in the direction the write order chooses, and never agrees; the")
+    print(f"  derived pair is always two legal totals a bounded number of events apart.")
+
+    print("\nall assertions passed")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+Running it prints:
+
+```
+ITEMS = 0:5  1:3  2:7  3:2  4:6  5:1  6:9  7:4  8:8   total 45
+the 10 totals the stream legitimately passes through: [0, 5, 8, 15, 17, 23, 24, 33, 37, 45]
+
+  crash           counter-first         warehouse-first
+      0  counter   5  wh   0 (+5)  counter   0  wh   5 (-5)
+      1  counter   8  wh   5 (+3)  counter   5  wh   8 (-3)
+      2  counter  15  wh   8 (+7)  counter   8  wh  15 (-7)
+      3  counter  17  wh  15 (+2)  counter  15  wh  17 (-2)
+      4  counter  23  wh  17 (+6)  counter  17  wh  23 (-6)
+      5  counter  24  wh  23 (+1)  counter  23  wh  24 (-1)
+      6  counter  33  wh  24 (+9)  counter  24  wh  33 (-9)
+      7  counter  37  wh  33 (+4)  counter  33  wh  37 (-4)
+      8  counter  45  wh  37 (+8)  counter  37  wh  45 (-8)
+
+  the gap is always exactly the straddling event's value, and its SIGN is the write
+  order: counter-first leaves the dashboard high, warehouse-first leaves it low.
+
+  of the 9 dual-write crash states, 9 correspond to NO moment in the
+  stream: the pair (counter, warehouse) is not (T, T) for any legal total T.
+  of the 10 derived crash states, ALL are a legal total paired with an earlier legal
+  total -- the counter is behind by 0 to 2 events and never wrong.
+  the lag is bounded by the rebuild interval (3), so it is a number you choose,
+  not a number you discover after an incident.
+  rebuild every 1,2,3,5,9,20 events -> worst lag 0,1,2,4,8,9 events: exactly the
+  interval minus one, until the interval exceeds the stream.
+
+  retrying the writes for event 4 twice: counter 51, warehouse 45
+  the warehouse is still 45 because its row is keyed by event id, so writing it
+  twice is writing it once.  The counter is 51, high by 6 -- an increment
+  has no key, so a retry is a second event.  THAT asymmetry is what decides which
+  store can be the source of truth: the one whose write can be repeated safely.
+  at every crash point and for 2 or 3 attempts: the warehouse is always 45, and the
+  counter is high by one or two copies of the retried event.
+
+  repairing the 9 split pairs: recomputing the counter FROM the warehouse makes the
+  pair agree and leaves the warehouse's total equal to the sum of its own rows.
+  Copying the counter INTO the warehouse also makes the pair agree, on a total that
+  is even a legal one -- but the warehouse's total is then high by the missing row's
+  value at every crash point, so comparing the two stores can no longer detect it.
+  and note what the working repair reads: the warehouse.  It was the source of
+  truth all along, and the reconcile job is the derived design with extra steps.
+
+  inject one event with value 0 and crash on it: counter 17, warehouse 17 -- they
+  AGREE, and the process still died between two writes.
+  the row (99, 0) is missing from the warehouse all the same, so the row COUNT is
+  wrong while the total is right.  Equal totals are evidence of nothing, which is
+  why the chapter's items are all non-zero and distinct.
+
+  400 random streams x every crash point: the dual write is split by exactly the
+  straddling value in the direction the write order chooses, and never agrees; the
+  derived pair is always two legal totals a bounded number of events apart.
+
+all assertions passed
+```
+
+</details>
+
 </details>
 <details>
 <summary><b>Variation 4</b> — the retry that must not re-send <i>(looks like notifications)</i></summary>
@@ -60,6 +729,338 @@ case the appealing first answer is to materialise a sequence you cannot afford.
 **Why it is not obvious.** Every tool above is gone: no transaction, no idempotency at the far end, and the effect is visible to a human so a duplicate is not harmless. So the question is which guarantee to give up, and the answer depends on the notification rather than on the code — for a "your parcel has arrived" message a duplicate is mild and a loss is bad, so at-least-once; for "you have been charged" the reverse, so at-most-once with a record written *before* sending. Arriving at "there is no correct answer without knowing what the message is" is the answer, and it is the opposite of what the first reading of the question invites.
 
 **Where it lands.** `effectThenPosition` and `positionThenEffect` as the two available designs, chosen deliberately rather than by accident — which is what the traced measurements let you do.
+
+
+<details>
+<summary><b>The whole program</b> for this variation — runnable, no animation</summary>
+
+This is **the retry that must not re-send** solved on its own: a complete file, every helper included, asserting its own results. It is run on every build.
+
+```python
+#!/usr/bin/env python3
+"""Variation 4 — the retry that must not re-send (looks like notifications). Standalone and
+runnable.
+
+  A worker reads items from a queue and sends one push notification per item.  A crash must
+  not send it twice.  The push service has NO transaction and NO idempotency key, and a person
+  reads the notification, so a duplicate is not harmless.
+
+Every tool the chapter had is gone: no transaction, no idempotency at the far end, and an
+effect that cannot be made invisible.  So the question is not how to avoid the choice but WHICH
+GUARANTEE TO GIVE UP, and the answer depends on the message rather than on the code -- for "your
+parcel has arrived" a duplicate is mild and a loss is bad, so at-least-once; for "you have been
+charged" the reverse, so at-most-once with the record written BEFORE sending.  Arriving at
+"there is no correct answer without knowing what the message is" is the answer, and it is the
+opposite of what the first reading of the question invites.  The local dedupe set that looks
+like a third option is measured below and shown to be the same two orderings renamed.
+
+Run it:  python3 programs/ch05_v4.py
+"""
+
+import random
+from collections import Counter
+
+# The chapter's nine items, unchanged.  Values DISTINCT and non-zero for the chapter's reason:
+# here the value is the notification's content, so two identical messages would make a
+# duplicate unattributable.
+ITEMS = [(0, 5), (1, 3), (2, 7), (3, 2), (4, 6), (5, 1), (6, 9), (7, 4), (8, 8)]
+N = len(ITEMS)
+C = 3                                       # the crash point the printed trace follows
+
+# What a duplicate and a loss are WORTH, for two real messages.  These are the only numbers in
+# this file that are not derived from the data, and that is the point: they come from the
+# product, not from the code, and they are what decides the design.
+PROFILES = {
+    "your parcel has arrived": {"duplicate": 1, "loss": 20},
+    "you have been charged":   {"duplicate": 50, "loss": 2},
+}
+
+
+def run(items, order, crash_at, far_end_key=False):
+    """Run the worker, crash it at the listed items, restart it, and return what the PHONE
+    received -- a list of item ids in send order, which is what a person sees.
+
+    order:
+      "effect_then_position" -- push, then record the position.  A crash in between has sent
+          the notification with no record of it, so the restart sends it again: at-least-once.
+      "position_then_effect" -- record the position, then push.  A crash in between has
+          recorded the item as handled without sending it, and nothing will ever notice:
+          at-most-once.
+      "dedupe_then_send"     -- remember the id in a durable set first, then push.
+      "send_then_dedupe"     -- push, then remember the id.
+    The last two are the local-dedupe idea, which looks like a third option.
+
+    `far_end_key` models the feature the question says is absent: the push service itself
+    dropping a repeat of a key it has already seen.  It is here to show that what fixes this is
+    a property of the far end and not a cleverer worker.
+    """
+    pos, sent, marks, fired = 0, [], set(), set()
+    seen_at_far_end = set()
+
+    def push(eid, value):
+        if far_end_key and eid in seen_at_far_end:
+            return                            # the far end swallows the repeat
+        seen_at_far_end.add(eid)
+        sent.append(eid)
+
+    while pos < len(items):
+        crashed = False
+        for i in range(pos, len(items)):
+            eid, v = items[i]
+            die = i in crash_at and i not in fired
+            if order == "effect_then_position":
+                push(eid, v)
+                if die:
+                    fired.add(i)
+                    crashed = True
+                    break
+                pos = i + 1
+            elif order == "position_then_effect":
+                pos = i + 1
+                if die:
+                    fired.add(i)
+                    crashed = True
+                    break
+                push(eid, v)
+            elif order == "send_then_dedupe":
+                if eid not in marks:
+                    push(eid, v)
+                if die:
+                    fired.add(i)
+                    crashed = True
+                    break
+                marks.add(eid)
+                pos = i + 1
+            else:                             # dedupe_then_send
+                if eid in marks:
+                    pos = i + 1
+                    continue
+                marks.add(eid)
+                if die:
+                    fired.add(i)
+                    crashed = True
+                    break
+                push(eid, v)
+                pos = i + 1
+        if not crashed:
+            break
+    return sent
+
+
+def tally(items, sent):
+    """(duplicates, losses) as lists of item ids.  A duplicate is an id a person saw more than
+    once; a loss is one they never saw.  Counted rather than inferred from a total, because a
+    total cannot tell a duplicate of 5 from a loss of 5 plus a duplicate of 10."""
+    counts = Counter(sent)
+    dups = [eid for eid, _ in items if counts[eid] > 1]
+    lost = [eid for eid, _ in items if counts[eid] == 0]
+    return dups, lost
+
+
+def expected_cost(items, order, profile):
+    """The average cost of one crash, over every crash point, for one ordering and one message.
+
+    Averaging over crash points is the honest model: a crash lands where it lands, and the
+    design has to be chosen before knowing where."""
+    total = 0.0
+    for c in range(len(items)):
+        dups, lost = tally(items, run(items, order, {c}))
+        total += len(dups) * profile["duplicate"] + len(lost) * profile["loss"]
+    return total / len(items)
+
+
+def main():
+    clean = {o: run(ITEMS, o, set()) for o in
+             ("effect_then_position", "position_then_effect", "dedupe_then_send", "send_then_dedupe")}
+    want = [eid for eid, _ in ITEMS]
+    for o, s in clean.items():
+        assert s == want, (o, s)
+    print(f"ITEMS = {[eid for eid, _ in ITEMS]}, values {[v for _, v in ITEMS]}")
+    print(f"  with no crash, all four orderings send exactly {want}\n")
+
+    at_least = run(ITEMS, "effect_then_position", {C})
+    at_most = run(ITEMS, "position_then_effect", {C})
+    print(f"  crash during item {C}:")
+    print(f"    effect then position : {at_least}   -> {tally(ITEMS, at_least)}")
+    print(f"    position then effect : {at_most}   -> {tally(ITEMS, at_most)}")
+    assert tally(ITEMS, at_least) == ([C], []), tally(ITEMS, at_least)
+    assert tally(ITEMS, at_most) == ([], [C]), tally(ITEMS, at_most)
+    assert at_least.count(C) == 2 and C not in at_most
+
+    # ---- every crash point, and the two guarantees are exactly complementary
+    for c in range(N):
+        dl, ll = tally(ITEMS, run(ITEMS, "effect_then_position", {c}))
+        dm, lm = tally(ITEMS, run(ITEMS, "position_then_effect", {c}))
+        assert (dl, ll) == ([c], []), (c, dl, ll)
+        assert (dm, lm) == ([], [c]), (c, dm, lm)
+    print(f"\n  at all {N} crash points: effect-first duplicates exactly the straddling item and")
+    print(f"  loses nothing; position-first loses exactly it and duplicates nothing.  Neither")
+    print(f"  ever gets both right, and no crash point escapes either way.")
+    # the opposite outcome is forbidden
+    assert not any(tally(ITEMS, run(ITEMS, "effect_then_position", {c})) == ([], []) for c in range(N))
+    assert not any(tally(ITEMS, run(ITEMS, "position_then_effect", {c})) == ([], []) for c in range(N))
+    # and crashing at EVERY item in one run duplicates or loses every one of them
+    all_dup = tally(ITEMS, run(ITEMS, "effect_then_position", set(range(N))))
+    all_lost = tally(ITEMS, run(ITEMS, "position_then_effect", set(range(N))))
+    assert all_dup == (want, []), all_dup
+    assert all_lost == ([], want), all_lost
+    print(f"  crashed at every item in one run: {len(all_dup[0])} duplicates and 0 losses one way,")
+    print(f"  0 duplicates and {len(all_lost[1])} losses the other -- {N} of {N} either way.")
+
+    # ---- the local dedupe set, which looks like a third option
+    same_a = same_b = 0
+    for c in range(N):
+        a1 = run(ITEMS, "send_then_dedupe", {c})
+        a2 = run(ITEMS, "effect_then_position", {c})
+        b1 = run(ITEMS, "dedupe_then_send", {c})
+        b2 = run(ITEMS, "position_then_effect", {c})
+        assert a1 == a2, (c, a1, a2)
+        assert b1 == b2, (c, b1, b2)
+        same_a += a1 == a2
+        same_b += b1 == b2
+    print(f"\n  'just remember what you already sent': the dedupe set is itself a write, so the")
+    print(f"  same two instants come back one level down.  Measured over all {N} crash points, the")
+    print(f"  phone receives an IDENTICAL sequence:")
+    print(f"    send-then-remember == effect-then-position on {same_a}/{N} crash points")
+    print(f"    remember-then-send == position-then-effect on {same_b}/{N} crash points")
+    assert same_a == same_b == N
+    print(f"  so it is not a third option: it is the same choice with the record moved, which is")
+    print(f"  what 'the problem is the instant between two writes' means in practice.")
+
+    # ---- what WOULD fix it is a property of the far end
+    for c in range(N):
+        fixed = run(ITEMS, "effect_then_position", {c}, far_end_key=True)
+        assert tally(ITEMS, fixed) == ([], []), (c, fixed)
+        assert fixed == want, (c, fixed)
+    assert run(ITEMS, "effect_then_position", set(range(N)), far_end_key=True) == want
+    print(f"\n  give the push service an idempotency key and effect-first becomes exact at all {N}")
+    print(f"  crash points, and at every item at once.  The missing feature is the problem; no")
+    print(f"  arrangement of the worker's two writes substitutes for it.")
+    # and with the key, the ORDER stops mattering at all -- which is the proof it was the fix
+    assert run(ITEMS, "effect_then_position", {C}, far_end_key=True) == want
+    assert tally(ITEMS, run(ITEMS, "position_then_effect", {C}, far_end_key=True)) == ([], [C])
+    print(f"  note it only rescues the at-least-once side: a key cannot un-skip an item that was")
+    print(f"  recorded as handled and never sent, so position-first still loses item {C}.")
+
+    # ---- so the choice is the message's, and the answer flips
+    print(f"\n  expected cost of one crash, averaged over all {N} crash points:")
+    print(f"    {'message':>24}  {'dup':>4} {'loss':>5}  {'at-least-once':>14}  {'at-most-once':>13}  best")
+    best = {}
+    for msg, profile in PROFILES.items():
+        cheap = expected_cost(ITEMS, "effect_then_position", profile)
+        safe = expected_cost(ITEMS, "position_then_effect", profile)
+        best[msg] = "at-least-once" if cheap < safe else "at-most-once"
+        print(f"    {msg:>24}  {profile['duplicate']:>4} {profile['loss']:>5}  {cheap:>14.1f}  "
+              f"{safe:>13.1f}  {best[msg]}")
+    assert best["your parcel has arrived"] == "at-least-once", best
+    assert best["you have been charged"] == "at-most-once", best
+    assert len(set(best.values())) == 2, (
+        "the two messages must choose DIFFERENTLY, or the whole answer collapses")
+    print(f"  the same nine items, the same two programs, and the better design is opposite for")
+    print(f"  the two messages.  Nothing in the code decides it, which is why the answer to this")
+    print(f"  question is a question.")
+    # and the flip happens at the obvious place, measured rather than assumed
+    flip = [d for d in range(1, 60)
+            if expected_cost(ITEMS, "effect_then_position", {"duplicate": d, "loss": 20})
+            > expected_cost(ITEMS, "position_then_effect", {"duplicate": d, "loss": 20})]
+    assert flip and min(flip) == 21, min(flip) if flip else None
+    print(f"  holding the cost of a loss at 20, at-least-once stops winning the moment a")
+    print(f"  duplicate costs {min(flip)} -- the crossover is exactly where the two costs cross,")
+    print(f"  because each design fails on exactly one item per crash.")
+
+    # ---- boundaries
+    assert run([], "effect_then_position", {0}) == []
+    one = [(0, 5)]
+    assert run(one, "effect_then_position", {0}) == [0, 0], run(one, "effect_then_position", {0})
+    assert run(one, "position_then_effect", {0}) == []
+    assert tally(one, run(one, "effect_then_position", {0})) == ([0], [])
+    print(f"\n  boundaries: an empty queue sends nothing under either design; a one-item queue")
+    print(f"  crashed on its only item sends it twice one way and never the other -- there is no")
+    print(f"  stream short enough for the problem to disappear.")
+
+    # ---- many queues, every crash point, all four orderings
+    rng = random.Random(20260303)
+    for _ in range(300):
+        n = rng.randint(1, 10)
+        items = [(i, rng.randint(1, 40)) for i in range(n)]
+        ids = [eid for eid, _ in items]
+        for c in range(n):
+            a = run(items, "effect_then_position", {c})
+            b = run(items, "position_then_effect", {c})
+            assert tally(items, a) == ([c], []), (items, c, a)
+            assert tally(items, b) == ([], [c]), (items, c, b)
+            assert run(items, "send_then_dedupe", {c}) == a, (items, c)
+            assert run(items, "dedupe_then_send", {c}) == b, (items, c)
+            assert run(items, "effect_then_position", {c}, far_end_key=True) == ids
+        # crashed at every item in one run: every id duplicated one way, every id lost the
+        # other.  Written as a tally rather than a sequence, because the send ORDER after
+        # repeated restarts is an implementation detail and the guarantee is not.
+        assert tally(items, run(items, "effect_then_position", set(range(n)))) == (ids, [])
+        assert tally(items, run(items, "position_then_effect", set(range(n)))) == ([], ids)
+    print(f"\n  300 random queues x every crash point: effect-first duplicates exactly one item")
+    print(f"  and loses none, position-first the mirror image, the two dedupe variants are")
+    print(f"  byte-identical to them, and a far-end key makes effect-first exact every time.")
+
+    print("\nall assertions passed")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+Running it prints:
+
+```
+ITEMS = [0, 1, 2, 3, 4, 5, 6, 7, 8], values [5, 3, 7, 2, 6, 1, 9, 4, 8]
+  with no crash, all four orderings send exactly [0, 1, 2, 3, 4, 5, 6, 7, 8]
+
+  crash during item 3:
+    effect then position : [0, 1, 2, 3, 3, 4, 5, 6, 7, 8]   -> ([3], [])
+    position then effect : [0, 1, 2, 4, 5, 6, 7, 8]   -> ([], [3])
+
+  at all 9 crash points: effect-first duplicates exactly the straddling item and
+  loses nothing; position-first loses exactly it and duplicates nothing.  Neither
+  ever gets both right, and no crash point escapes either way.
+  crashed at every item in one run: 9 duplicates and 0 losses one way,
+  0 duplicates and 9 losses the other -- 9 of 9 either way.
+
+  'just remember what you already sent': the dedupe set is itself a write, so the
+  same two instants come back one level down.  Measured over all 9 crash points, the
+  phone receives an IDENTICAL sequence:
+    send-then-remember == effect-then-position on 9/9 crash points
+    remember-then-send == position-then-effect on 9/9 crash points
+  so it is not a third option: it is the same choice with the record moved, which is
+  what 'the problem is the instant between two writes' means in practice.
+
+  give the push service an idempotency key and effect-first becomes exact at all 9
+  crash points, and at every item at once.  The missing feature is the problem; no
+  arrangement of the worker's two writes substitutes for it.
+  note it only rescues the at-least-once side: a key cannot un-skip an item that was
+  recorded as handled and never sent, so position-first still loses item 3.
+
+  expected cost of one crash, averaged over all 9 crash points:
+                     message   dup  loss   at-least-once   at-most-once  best
+     your parcel has arrived     1    20             1.0           20.0  at-least-once
+       you have been charged    50     2            50.0            2.0  at-most-once
+  the same nine items, the same two programs, and the better design is opposite for
+  the two messages.  Nothing in the code decides it, which is why the answer to this
+  question is a question.
+  holding the cost of a loss at 20, at-least-once stops winning the moment a
+  duplicate costs 21 -- the crossover is exactly where the two costs cross,
+  because each design fails on exactly one item per crash.
+
+  boundaries: an empty queue sends nothing under either design; a one-item queue
+  crashed on its only item sends it twice one way and never the other -- there is no
+  stream short enough for the problem to disappear.
+
+  300 random queues x every crash point: effect-first duplicates exactly one item
+  and loses none, position-first the mirror image, the two dedupe variants are
+  byte-identical to them, and a far-end key makes effect-first exact every time.
+
+all assertions passed
+```
+
+</details>
 
 </details>
 

@@ -1,0 +1,53 @@
+ITEMS = 0:5  1:3  2:7  3:2  4:6  5:1  6:9  7:4  8:8   total 45
+the 10 totals the stream legitimately passes through: [0, 5, 8, 15, 17, 23, 24, 33, 37, 45]
+
+  crash           counter-first         warehouse-first
+      0  counter   5  wh   0 (+5)  counter   0  wh   5 (-5)
+      1  counter   8  wh   5 (+3)  counter   5  wh   8 (-3)
+      2  counter  15  wh   8 (+7)  counter   8  wh  15 (-7)
+      3  counter  17  wh  15 (+2)  counter  15  wh  17 (-2)
+      4  counter  23  wh  17 (+6)  counter  17  wh  23 (-6)
+      5  counter  24  wh  23 (+1)  counter  23  wh  24 (-1)
+      6  counter  33  wh  24 (+9)  counter  24  wh  33 (-9)
+      7  counter  37  wh  33 (+4)  counter  33  wh  37 (-4)
+      8  counter  45  wh  37 (+8)  counter  37  wh  45 (-8)
+
+  the gap is always exactly the straddling event's value, and its SIGN is the write
+  order: counter-first leaves the dashboard high, warehouse-first leaves it low.
+
+  of the 9 dual-write crash states, 9 correspond to NO moment in the
+  stream: the pair (counter, warehouse) is not (T, T) for any legal total T.
+  of the 10 derived crash states, ALL are a legal total paired with an earlier legal
+  total -- the counter is behind by 0 to 2 events and never wrong.
+  the lag is bounded by the rebuild interval (3), so it is a number you choose,
+  not a number you discover after an incident.
+  rebuild every 1,2,3,5,9,20 events -> worst lag 0,1,2,4,8,9 events: exactly the
+  interval minus one, until the interval exceeds the stream.
+
+  retrying the writes for event 4 twice: counter 51, warehouse 45
+  the warehouse is still 45 because its row is keyed by event id, so writing it
+  twice is writing it once.  The counter is 51, high by 6 -- an increment
+  has no key, so a retry is a second event.  THAT asymmetry is what decides which
+  store can be the source of truth: the one whose write can be repeated safely.
+  at every crash point and for 2 or 3 attempts: the warehouse is always 45, and the
+  counter is high by one or two copies of the retried event.
+
+  repairing the 9 split pairs: recomputing the counter FROM the warehouse makes the
+  pair agree and leaves the warehouse's total equal to the sum of its own rows.
+  Copying the counter INTO the warehouse also makes the pair agree, on a total that
+  is even a legal one -- but the warehouse's total is then high by the missing row's
+  value at every crash point, so comparing the two stores can no longer detect it.
+  and note what the working repair reads: the warehouse.  It was the source of
+  truth all along, and the reconcile job is the derived design with extra steps.
+
+  inject one event with value 0 and crash on it: counter 17, warehouse 17 -- they
+  AGREE, and the process still died between two writes.
+  the row (99, 0) is missing from the warehouse all the same, so the row COUNT is
+  wrong while the total is right.  Equal totals are evidence of nothing, which is
+  why the chapter's items are all non-zero and distinct.
+
+  400 random streams x every crash point: the dual write is split by exactly the
+  straddling value in the direction the write order chooses, and never agrees; the
+  derived pair is always two legal totals a bounded number of events apart.
+
+all assertions passed

@@ -39,6 +39,289 @@ case the appealing first answer is to materialise a sequence you cannot afford.
 
 **Where it lands.** `fold` over the compacted log, then continuing over live entries — with the handover point being the version the fold reached.
 
+
+<details>
+<summary><b>The whole program</b> for this variation — runnable, no animation</summary>
+
+This is **the cache that must not go stale** solved on its own: a complete file, every helper included, asserting its own results. It is run on every build.
+
+```python
+#!/usr/bin/env python3
+"""Variation 2 -- the cache that must not go stale (looks like web infrastructure).
+Standalone and runnable.
+
+  A service keeps an in-memory copy of a table.  Every change to that table is written
+  to a log, one entry per change, each saying what a key BECAME.  Keep the copy current.
+
+  The service restarts.  It must rebuild the copy and then follow live changes again.
+
+The question sounds like "apply changes as they arrive" and the loop is trivial.  The
+operational content is the START-UP: the copy has to be folded from somewhere, and a
+COMPACTED log -- one entry per key -- is exactly the cheap somewhere.  Then the service
+must switch from reading history to following live changes without a GAP, so the version
+the fold reached is the thing that has to be carried across.  Subscribing from "now"
+instead of from the snapshot's version is the bug, and it is silent: the copy answers
+every read confidently with a value that stopped being true during start-up.
+
+Run it:  python3 programs/ch06_v2.py
+"""
+import random
+
+# The log, from the chapter's changelog: one entry per change, carrying what the key
+# BECAME (not what changed), which is what makes the fold an assignment.  Nine entries,
+# two keys, no two entries identical -- so any entry the start-up skips is visible.
+LOG = [("a", 5), ("a", 8), ("b", 7), ("a", 10), ("a", 16),
+       ("b", 8), ("b", 17), ("b", 21), ("a", 24)]
+LIVE = [("a", 30)]            # what arrives while the service is coming back up
+N = len(LOG)
+TOMBSTONE = None              # the entry that means "this key is gone"
+ABSENT = object()             # not a value: the key is not in the table at all
+
+# The snapshot was taken two changes before the end of the log.  A real snapshot is
+# always behind: it is written periodically, not at the instant of a crash.
+SNAPSHOT_VERSION = 7
+
+
+def fold(entries):
+    """Changes into a table.  Later entries overwrite earlier ones, so the ORDER of the
+    entries is the whole content of the answer.  A TOMBSTONE removes the key, because the
+    fold hears only about entries -- a key removed by absence would never be removed."""
+    t = {}
+    for k, v in entries:
+        if v is TOMBSTONE:
+            t.pop(k, None)
+        else:
+            t[k] = v
+    return t
+
+
+def compact(entries):
+    """Keep the LAST entry per key.  Everything dropped was superseded, so the table the
+    log folds to is unchanged -- which is what makes a compacted log a legal start-up
+    source.  The tombstone is an entry like any other and is KEPT."""
+    last = {}
+    for k, v in entries:
+        last[k] = v
+    return [(k, last[k]) for k in sorted(last)]
+
+
+def compact_dropping_tombstones(entries):
+    """The compaction a careless implementation writes: keep the last NON-tombstone entry
+    per key, i.e. treat a delete as an absence rather than as a fact.  It is the realistic
+    bug, and the damage is visible only after a restart."""
+    last = {}
+    for k, v in entries:
+        if v is not TOMBSTONE:
+            last[k] = v
+    return [(k, last[k]) for k in sorted(last)]
+
+
+def cold_start(log, live):
+    """Rebuild by folding the entire log from the first entry ever written.  Correct, and
+    it reads every entry the table has ever had.  Returns (table, entries_read)."""
+    entries = list(log) + list(live)
+    return fold(entries), len(entries)
+
+
+def warm_start(log, snapshot_version, subscribe_from, live):
+    """Rebuild from the snapshot, then follow the log from `subscribe_from` on.
+
+    The snapshot IS a compacted log: one entry per key as of `snapshot_version`.  Folding
+    it is cheap.  The only decision that matters is `subscribe_from`: the snapshot carries
+    a version, and the subscription has to begin at or before it.  Beginning later leaves
+    a gap; beginning earlier re-applies entries, which for a log of STATES is free,
+    because assigning the same value twice is the same as assigning it once.
+
+    Returns (table, entries_read, overlap_or_gap) where the third value is positive for
+    an overlap and negative for a gap.
+    """
+    snap = compact(log[:snapshot_version])
+    table = fold(snap)
+    tail = list(log[subscribe_from:]) + list(live)
+    for k, v in tail:
+        if v is TOMBSTONE:
+            table.pop(k, None)
+        else:
+            table[k] = v
+    return table, len(snap) + len(tail), snapshot_version - subscribe_from
+
+
+def gap_is_harmful(log, snapshot_version, subscribe_from, live):
+    """Whether skipping log[snapshot_version:subscribe_from] can be detected in the table.
+
+    The mechanism: a skipped entry is harmless when a LATER applied entry for the same key
+    overwrites whatever the skip got wrong.  It is harmful exactly when no later entry for
+    that key is applied AND the snapshot's value for the key differs from the skipped one.
+    That is why gaps are not caught in testing -- most skips are overwritten moments later.
+    """
+    snap_table = fold(compact(log[:snapshot_version]))
+    applied_later = {k for k, _ in list(log[subscribe_from:]) + list(live)}
+    last_skipped = {}
+    for k, v in log[snapshot_version:subscribe_from]:
+        last_skipped[k] = v
+    for k, v in last_skipped.items():
+        if k in applied_later:
+            continue
+        want = ABSENT if v is TOMBSTONE else v
+        if snap_table.get(k, ABSENT) != want:
+            return True
+    return False
+
+
+def main():
+    truth, cold_read = cold_start(LOG, LIVE)
+    snap = compact(LOG[:SNAPSHOT_VERSION])
+    print("LOG  =", "  ".join(f"{k}={v}" for k, v in LOG), f"   ({N} entries)")
+    print("LIVE =", "  ".join(f"{k}={v}" for k, v in LIVE), "   (arrives during start-up)")
+    print(f"snapshot at version {SNAPSHOT_VERSION} = {snap}   "
+          f"({len(snap)} entries for {SNAPSHOT_VERSION} changes)")
+    print(f"the table, truth = {truth}\n")
+
+    good, good_read, good_slack = warm_start(LOG, SNAPSHOT_VERSION, SNAPSHOT_VERSION, LIVE)
+    now, now_read, now_slack = warm_start(LOG, SNAPSHOT_VERSION, N, LIVE)
+    over, over_read, over_slack = warm_start(LOG, SNAPSHOT_VERSION, 5, LIVE)
+    print(f"  cold start, from entry 0        -> {truth}   {cold_read} entries read")
+    print(f"  warm, subscribe from v={SNAPSHOT_VERSION}        -> {good}   {good_read} entries read   "
+          f"(slack {good_slack})")
+    print(f"  warm, subscribe from NOW (v={N})  -> {now}   {now_read} entries read   "
+          f"(slack {now_slack}: a gap)")
+    print(f"  warm, subscribe from v=5        -> {over}   {over_read} entries read   "
+          f"(slack {over_slack}: an overlap)")
+
+    assert truth == {"a": 30, "b": 21}, truth
+    assert good == truth, "the handover version is the whole trick and it must work"
+    assert over == truth, "re-applying entries must be free for a log of states"
+    assert now != truth, "subscribing from now must lose the changes made during start-up"
+    assert now == {"a": 30, "b": 17}, now
+    # the gap is wrong on exactly the key whose last change fell inside it
+    assert [k for k in truth if now.get(k) != truth[k]] == ["b"]
+    assert truth["b"] - now["b"] == 4, "b was 17 at the snapshot and 21 in the log"
+    assert gap_is_harmful(LOG, SNAPSHOT_VERSION, N, LIVE) is True
+    assert gap_is_harmful(LOG, SNAPSHOT_VERSION, SNAPSHOT_VERSION, LIVE) is False
+    print(f"\n  the gap lost ('b', 21) and the cache then served b=17 forever: a wrong answer")
+    print(f"  that no read can distinguish from a right one.  The overlap cost {over_read - good_read}")
+    print(f"  extra entries and changed nothing -- so the safe direction is backwards.")
+
+    # ...and a key dropped during the gap is the sharper case: the entry skipped is the
+    # TOMBSTONE, so the cache keeps serving a record the table no longer has.
+    log_del = LOG + [("b", TOMBSTONE)]
+    t_del, _ = cold_start(log_del, [])
+    g_del, _, _ = warm_start(log_del, SNAPSHOT_VERSION, len(log_del), [])
+    assert t_del == {"a": 24} and "b" in g_del, (t_del, g_del)
+    assert gap_is_harmful(log_del, SNAPSHOT_VERSION, len(log_del), []) is True
+    print(f"  with a delete inside the gap: truth {t_del}, the cache {g_del} -- it serves a")
+    print(f"  deleted record, which is the same bug wearing its worst clothes.")
+
+    # the snapshot's own compaction has to keep the tombstone, or every restart resurrects
+    full = compact(log_del)
+    buggy = compact_dropping_tombstones(log_del)
+    assert fold(full) == t_del, "correct compaction is state-preserving"
+    assert fold(buggy) == {"a": 24, "b": 21} != t_del, fold(buggy)
+    print(f"\n  snapshot built by keeping the last entry per key      -> {fold(full)}  (correct)")
+    print(f"  snapshot built by keeping the last NON-tombstone entry -> {fold(buggy)}  (b is back)")
+    print(f"  the delete was a FACT; dropping it as an absence resurrects the key at restart.")
+
+    # boundaries: a snapshot at version 0 is a cold start, and at N it needs no tail
+    assert warm_start(LOG, 0, 0, LIVE)[0] == truth, "an empty snapshot still has to work"
+    assert warm_start(LOG, N, N, LIVE)[0] == truth, "a snapshot at the tail needs no history"
+    assert warm_start(LOG, N, N, [])[0] == fold(LOG), "and with nothing live, just the log"
+    print(f"\n  snapshot at version 0 (none yet) and at version {N} (fully caught up) both")
+    print(f"  reproduce the table, so the handover needs no special case at either end.")
+
+    # many inputs: the gap is wrong exactly when the predicate says so, never otherwise
+    rng = random.Random(20260303)
+    harmful, harmless, cases = 0, 0, 0
+    for _ in range(1500):
+        n = rng.randint(1, 14)
+        log = []
+        for _ in range(n):
+            k = rng.choice("abcd")
+            log.append((k, TOMBSTONE if rng.random() < 0.12 else rng.randint(0, 9)))
+        live = [(rng.choice("abcd"), rng.randint(0, 9)) for _ in range(rng.randint(0, 3))]
+        want = fold(list(log) + live)
+        for v in range(len(log) + 1):
+            # the correct handover, and an overlap, must both reproduce the table exactly
+            assert warm_start(log, v, v, live)[0] == want, (log, v)
+            for back in range(0, v + 1):
+                assert warm_start(log, v, back, live)[0] == want, (log, v, back)
+            for ahead in range(v + 1, len(log) + 1):
+                got = warm_start(log, v, ahead, live)[0]
+                bad = gap_is_harmful(log, v, ahead, live)
+                assert (got != want) == bad, (log, live, v, ahead, got, want, bad)
+                cases += 1
+                harmful += bad
+                harmless += not bad
+    # CORRECTED CLAIM.  "A gap is usually overwritten within a few entries" was the first
+    # expectation and the measurement refuses it: the harmful cases are the MAJORITY
+    # (32849 vs 26511).  What is true, and is the reason the bug ships, is weaker and
+    # still damning: 44.7% of random gaps leave no trace in the table at all, so a test
+    # that restarts the service and compares the table passes about half the time.
+    share = harmless / cases
+    print(f"\n  {cases} random gaps: the table is wrong in exactly the {harmful} cases the")
+    print(f"  predicate calls harmful, and right in the other {harmless} -- {share:.1%} of gaps leave")
+    print(f"  no trace at all, so a restart-and-compare test passes about half the time.")
+    assert (harmful, harmless) == (32849, 26511), (harmful, harmless)
+    assert harmful > harmless, "the majority of gaps ARE detectable; do not soften this"
+    assert 0.40 < share < 0.50, share
+
+    # the scale that makes a compacted snapshot worth having
+    BIG_KEYS, BIG_CHANGES = 50, 20_000
+    big = [(f"k{i % BIG_KEYS}", i) for i in range(BIG_CHANGES)]
+    big_snap = compact(big)
+    cold_cost = cold_start(big, [])[1]
+    warm_cost = warm_start(big, BIG_CHANGES, BIG_CHANGES, [])[1]
+    print(f"\n  at {BIG_CHANGES:,} changes over {BIG_KEYS} keys: cold start reads {cold_cost:,} entries,")
+    print(f"  a compacted snapshot reads {warm_cost} -- {cold_cost // warm_cost}x less, and the ratio is the")
+    print(f"  change count over the KEY count, so it grows for as long as the service runs.")
+    assert len(big_snap) == BIG_KEYS and warm_cost == BIG_KEYS
+    assert fold(big_snap) == fold(big), "compaction must still be state-preserving at scale"
+    assert cold_cost == BIG_CHANGES and cold_cost // warm_cost == 400
+    print("\nall assertions passed")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+Running it prints:
+
+```
+LOG  = a=5  a=8  b=7  a=10  a=16  b=8  b=17  b=21  a=24    (9 entries)
+LIVE = a=30    (arrives during start-up)
+snapshot at version 7 = [('a', 16), ('b', 17)]   (2 entries for 7 changes)
+the table, truth = {'a': 30, 'b': 21}
+
+  cold start, from entry 0        -> {'a': 30, 'b': 21}   10 entries read
+  warm, subscribe from v=7        -> {'a': 30, 'b': 21}   5 entries read   (slack 0)
+  warm, subscribe from NOW (v=9)  -> {'a': 30, 'b': 17}   3 entries read   (slack -2: a gap)
+  warm, subscribe from v=5        -> {'a': 30, 'b': 21}   7 entries read   (slack 2: an overlap)
+
+  the gap lost ('b', 21) and the cache then served b=17 forever: a wrong answer
+  that no read can distinguish from a right one.  The overlap cost 2
+  extra entries and changed nothing -- so the safe direction is backwards.
+  with a delete inside the gap: truth {'a': 24}, the cache {'a': 16, 'b': 17} -- it serves a
+  deleted record, which is the same bug wearing its worst clothes.
+
+  snapshot built by keeping the last entry per key      -> {'a': 24}  (correct)
+  snapshot built by keeping the last NON-tombstone entry -> {'a': 24, 'b': 21}  (b is back)
+  the delete was a FACT; dropping it as an absence resurrects the key at restart.
+
+  snapshot at version 0 (none yet) and at version 9 (fully caught up) both
+  reproduce the table, so the handover needs no special case at either end.
+
+  59360 random gaps: the table is wrong in exactly the 32849 cases the
+  predicate calls harmful, and right in the other 26511 -- 44.7% of gaps leave
+  no trace at all, so a restart-and-compare test passes about half the time.
+
+  at 20,000 changes over 50 keys: cold start reads 20,000 entries,
+  a compacted snapshot reads 50 -- 400x less, and the ratio is the
+  change count over the KEY count, so it grows for as long as the service runs.
+
+all assertions passed
+```
+
+</details>
+
 </details>
 <details>
 <summary><b>Variation 3</b> — the audit log that was compacted <i>(looks like compliance)</i></summary>
@@ -49,6 +332,345 @@ case the appealing first answer is to materialise a sequence you cannot afford.
 
 **Where it lands.** `valueAfter` returning UNANSWERABLE, which is the traced frame — here with a person on the other end of it.
 
+
+<details>
+<summary><b>The whole program</b> for this variation — runnable, no animation</summary>
+
+This is **the audit log that was compacted** solved on its own: a complete file, every helper included, asserting its own results. It is run on every build.
+
+```python
+#!/usr/bin/env python3
+"""Variation 3 -- the audit log that was compacted (looks like compliance).
+Standalone and runnable.
+
+  Every change to a customer record is written to a log as an entry carrying the record's
+  new value and the date it took effect.  A regulator asks what one record HELD on a date
+  two years ago.
+
+  The log was compacted last year: for everything older than that day, one entry per record
+  was kept and the superseded ones deleted.
+
+The answer is that the question cannot be answered, and the valuable part is that it was
+decided a year ago by somebody reclaiming disk.  The framing that helps separates two logs
+that were conflated: a STATE log, which may be compacted freely because folding it gives
+the same table, and an AUDIT log, which may not, because its whole value is the entries
+compaction calls redundant.  They have different retention, different access patterns and
+usually different storage.  There is no recovery scheme, so "these were never the same log"
+is the answer -- and the second-best outcome is a system that KNOWS it cannot answer rather
+than one that answers from the present and sounds certain.
+
+Run it:  python3 programs/ch06_v3.py
+"""
+import random
+from datetime import date, timedelta
+
+# The record log, from the chapter's changelog: the same two keys and the same nine values,
+# now carried as (record, value, effective_day) with day 0 = 2024-01-01.  The values are
+# the chapter's running totals, so record 'a' passes through 5, 8, 10, 16, 24 and 'b'
+# through 7, 8, 17, 21.
+DAY0 = date(2024, 1, 1)
+RECORD_LOG = [("a", 5, 40), ("a", 8, 190), ("b", 7, 260), ("a", 10, 420),
+              ("a", 16, 500), ("b", 8, 560), ("b", 17, 700), ("b", 21, 760), ("a", 24, 900)]
+COMPACTED_ON = 640            # "last year": the day the retention job ran
+ASKED_RECORD = "a"
+ASKED_DAY = 300               # "two years ago": between record a's 8 and its 10
+TODAY = 1000
+UNANSWERABLE = "UNANSWERABLE"  # not a value: the question cannot be answered
+
+
+def shown(day):
+    """Day offsets as the dates a regulator would actually write in a letter."""
+    return (DAY0 + timedelta(days=day)).isoformat()
+
+
+def fold(log):
+    """The log into the table of current values: later entries overwrite earlier ones."""
+    t = {}
+    for r, v, _ in log:
+        t[r] = v
+    return t
+
+
+def retained(log, cutoff):
+    """The log as the retention job left it: everything older than `cutoff` reduced to the
+    last entry per record, everything newer untouched.
+
+    That is how such a job is really written -- it compacts the closed part of the history
+    and leaves the live tail alone -- and it is why the damage has a visible EDGE.  Each
+    record keeps exactly one entry from before the cutoff, so questions about dates after
+    that entry survive and questions before it do not.
+    """
+    old = [e for e in log if e[2] <= cutoff]
+    new = [e for e in log if e[2] > cutoff]
+    last = {}
+    for r, v, d in old:
+        last[r] = (v, d)
+    kept_old = [(r, last[r][0], last[r][1]) for r in sorted(last)]
+    return kept_old + new
+
+
+def value_as_of(log, record, day):
+    """What `record` held at the end of `day`, from whatever entries the log still has.
+
+    The mechanism is a scan for the LATEST entry for that record whose effective date is at
+    or before the day asked about.  If no such entry survives, the result is UNANSWERABLE
+    rather than a value -- a missing answer, which a regulator can be told about, instead of
+    a confident wrong one, which they cannot.
+    """
+    best, best_day = UNANSWERABLE, None
+    for r, v, d in log:
+        if r == record and d <= day and (best_day is None or d >= best_day):
+            best, best_day = v, d
+    return best
+
+
+def value_as_of_date_blind(log, record, day):
+    """The same lookup written by somebody who trusted the log to be complete: it ignores
+    the effective date and returns the record's last entry.  On the compacted log this is
+    wrong for every past date, and wrong in the worst way -- it hands back today's value
+    dressed as history."""
+    out = UNANSWERABLE
+    for r, v, _ in log:
+        if r == record:
+            out = v
+    return out
+
+
+def answer_from_current_state(log, record, day):
+    """The answer the service can give instantly, because the table is right there.  It is
+    the appealing one: it always returns a number, and the number is always the present."""
+    return fold(log).get(record, UNANSWERABLE)
+
+
+def replay_tables(log, until):
+    """An independent reference: fold the log one day at a time, keeping the table for every
+    day.  Affordable only because this log is nine entries over three years, which is
+    exactly why nobody materialises history this way in production."""
+    tables, t = [], {}
+    for day in range(until + 1):
+        for r, v, d in log:
+            if d == day:
+                t[r] = v
+        tables.append(dict(t))
+    return tables
+
+
+def answerable_questions(log, records, days):
+    """How many (record, date) questions the log can answer at all.  This is the quantity
+    the retention job changed and the quantity nobody measured before running it."""
+    return sum(1 for r in records for d in days if value_as_of(log, r, d) != UNANSWERABLE)
+
+
+def earliest_answerable(log, record):
+    """The edge the cutoff left behind: the record's oldest surviving effective date.  Every
+    question before it is lost and every question after it is intact."""
+    days = [d for r, _, d in log if r == record]
+    return min(days) if days else None
+
+
+def main():
+    records = sorted({r for r, _, _ in RECORD_LOG})
+    audit_log = RECORD_LOG                             # never compacted
+    state_log = retained(RECORD_LOG, COMPACTED_ON)     # compacted on COMPACTED_ON
+    print("RECORD_LOG:")
+    for r, v, d in RECORD_LOG:
+        mark = "  <- deleted by the retention job" if (r, v, d) not in state_log else ""
+        print(f"  {shown(d)}  record {r!r} becomes {v:2d}{mark}")
+    print(f"\nretention job ran on {shown(COMPACTED_ON)}; what is left:")
+    for r, v, d in state_log:
+        print(f"  {shown(d)}  record {r!r} = {v}")
+    print(f"  {len(RECORD_LOG)} entries became {len(state_log)}: "
+          f"{len(RECORD_LOG) - len(state_log)} deleted\n")
+
+    print(f"the regulator asks: what did record {ASKED_RECORD!r} hold on {shown(ASKED_DAY)}?")
+    from_audit = value_as_of(audit_log, ASKED_RECORD, ASKED_DAY)
+    from_state = value_as_of(state_log, ASKED_RECORD, ASKED_DAY)
+    from_present = answer_from_current_state(state_log, ASKED_RECORD, ASKED_DAY)
+    blind = value_as_of_date_blind(state_log, ASKED_RECORD, ASKED_DAY)
+    print(f"  uncompacted audit log  -> {from_audit}")
+    print(f"  compacted state log    -> {from_state}")
+    print(f"  from the current table -> {from_present}   (instant, confident, wrong)")
+    print(f"  date-blind lookup      -> {blind}   (the same wrong answer, differently reached)")
+
+    assert from_audit == 8, from_audit
+    assert from_state == UNANSWERABLE, from_state
+    assert from_present == 24 and blind == 24
+    assert from_present != from_audit, "the present is not the past and must not be served as it"
+    assert from_state != from_present, "a missing answer and a wrong answer are not the same"
+    assert fold(state_log) == fold(audit_log) == {"a": 24, "b": 21}
+    print(f"\n  both logs fold to the same table {fold(state_log)}, which is exactly the")
+    print(f"  argument the retention job was approved on -- and it is true.")
+
+    # what was destroyed, counted rather than described
+    days = list(range(0, TODAY + 1, 10))
+    audit_ans = answerable_questions(audit_log, records, days)
+    state_ans = answerable_questions(state_log, records, days)
+    print(f"\n  of {len(records) * len(days)} (record, date) questions on a 10-day grid:")
+    print(f"    the audit log answers {audit_ans}")
+    print(f"    the state log answers {state_ans}   ({audit_ans - state_ans} destroyed)")
+    assert (audit_ans, state_ans) == (172, 96), (audit_ans, state_ans)
+    assert state_ans < audit_ans, "compaction must actually have destroyed answers"
+    assert state_ans > 0, "and it must NOT have destroyed all of them"
+
+    # the surviving questions are exactly the ones after each record's oldest survivor
+    edges = {r: earliest_answerable(state_log, r) for r in records}
+    for r in records:
+        for d in days:
+            got = value_as_of(state_log, r, d)
+            if d >= edges[r]:
+                assert got == value_as_of(audit_log, r, d) != UNANSWERABLE, (r, d, got)
+            else:
+                assert got == UNANSWERABLE, (r, d, got)
+    print(f"  the edge: record {'a'!r} is answerable from {shown(edges['a'])}, "
+          f"{'b'!r} from {shown(edges['b'])};")
+    print(f"  before those dates nothing, after them everything -- so the loss is not")
+    print(f"  'some history' but a clean cut at the day a disk job happened to run.")
+
+    # the two-log split, priced
+    audit_only = [e for e in audit_log if e not in state_log]
+    print(f"\n  keeping both logs would cost {len(audit_log)} + {len(state_log)} = "
+          f"{len(audit_log) + len(state_log)} entries instead of {len(state_log)},")
+    print(f"  and the {len(audit_only)} entries the state log does not need are precisely the ones the")
+    print(f"  regulator is asking about.")
+    assert len(audit_only) == 4 and all(e[2] <= COMPACTED_ON for e in audit_only)
+    assert value_as_of(audit_only + state_log, ASKED_RECORD, ASKED_DAY) == from_audit
+
+    # boundaries: the effective date is inclusive, the day before is the previous value,
+    # and before a record exists there is nothing to report -- not zero
+    assert value_as_of(audit_log, "a", 190) == 8, "the effective date itself"
+    assert value_as_of(audit_log, "a", 189) == 5, "the day before"
+    assert value_as_of(audit_log, "a", 39) == UNANSWERABLE, "before the record existed"
+    assert value_as_of(audit_log, "a", 39) != 0, "an absent record is not a zero one"
+    assert value_as_of(audit_log, "zz", TODAY) == UNANSWERABLE, "an unknown record"
+    assert value_as_of(audit_log, "a", TODAY) == 24, "and today is still today"
+    assert value_as_of(state_log, "a", TODAY) == 24, "which the compacted log answers too"
+    print(f"\n  boundaries: {shown(190)} -> 8 (inclusive), {shown(189)} -> 5, "
+          f"{shown(39)} -> {UNANSWERABLE} and not 0,")
+    print(f"  because 'no record' and 'a record holding nothing' are different facts about")
+    print(f"  a customer; an unknown record is {UNANSWERABLE} on both logs.")
+
+    # the day-by-day replay is an independent reference for every day, not just the six above
+    tables = replay_tables(audit_log, TODAY)
+    for r in records:
+        for d in range(TODAY + 1):
+            assert value_as_of(audit_log, r, d) == tables[d].get(r, UNANSWERABLE), (r, d)
+    print(f"\n  all {len(records) * (TODAY + 1)} (record, day) pairs agree with a day-by-day replay of the audit")
+    print(f"  log, so the scan and a materialised history are the same answer.")
+
+    # many inputs: the compacted log may lose answers and may never invent one
+    rng = random.Random(20260303)
+    lost_total, kept_total, blind_wrong = 0, 0, 0
+    for _ in range(200):
+        n = rng.randint(1, 12)
+        log = sorted(((rng.choice("abcd"), rng.randint(0, 99), rng.randint(0, 60))
+                      for _ in range(n)), key=lambda e: e[2])
+        cutoff = rng.randint(0, 60)
+        small = retained(log, cutoff)
+        assert fold(small) == fold(log), (log, cutoff)
+        for r in "abcde":
+            edge = earliest_answerable(small, r)
+            for d in range(0, 62):
+                full_ans = value_as_of(log, r, d)
+                small_ans = value_as_of(small, r, d)
+                if small_ans == UNANSWERABLE:
+                    lost_total += full_ans != UNANSWERABLE
+                    assert edge is None or d < edge, (log, cutoff, r, d)
+                else:
+                    assert small_ans == full_ans, (log, cutoff, r, d)   # never wrong
+                    kept_total += 1
+                if value_as_of_date_blind(small, r, d) != full_ans:
+                    blind_wrong += 1
+    print(f"\n  200 random record logs at random cutoffs: the compacted log lost {lost_total:,} answers")
+    print(f"  and never once returned a wrong one ({kept_total:,} kept, all correct), while the")
+    print(f"  date-blind lookup over the same entries was wrong {blind_wrong:,} times -- the DATE on")
+    print(f"  the surviving entry is the whole difference between a refusal and a fabrication.")
+    assert lost_total > 0 and kept_total > 0
+    assert blind_wrong > lost_total, "the date-blind lookup must be worse, not merely different"
+
+    # the scale that gets a retention job approved, and the scale of what it costs
+    BIG_RECORDS, BIG_CHANGES, BIG_DAYS = 50, 5_000, 3_650
+    big = [(f"r{i % BIG_RECORDS}", i, (i * BIG_DAYS) // BIG_CHANGES) for i in range(BIG_CHANGES)]
+    big_small = retained(big, BIG_DAYS)
+    print(f"\n  at {BIG_CHANGES:,} changes to {BIG_RECORDS} records over {BIG_DAYS:,} days:")
+    print(f"    state log {len(big_small)} entries, audit log {len(big):,} -- "
+          f"{len(big) // len(big_small)}x the storage")
+    print(f"    the audit log grows with TIME and the state log grows with RECORDS, which is")
+    print(f"    why the two have different retention and always did.")
+    assert len(big_small) == BIG_RECORDS and fold(big_small) == fold(big)
+    assert len(big) // len(big_small) == 100
+    assert value_as_of(big_small, "r0", BIG_DAYS // 2) == UNANSWERABLE
+    assert value_as_of(big, "r0", BIG_DAYS // 2) != UNANSWERABLE
+    print("\nall assertions passed")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+Running it prints:
+
+```
+RECORD_LOG:
+  2024-02-10  record 'a' becomes  5  <- deleted by the retention job
+  2024-07-09  record 'a' becomes  8  <- deleted by the retention job
+  2024-09-17  record 'b' becomes  7  <- deleted by the retention job
+  2025-02-24  record 'a' becomes 10  <- deleted by the retention job
+  2025-05-15  record 'a' becomes 16
+  2025-07-14  record 'b' becomes  8
+  2025-12-01  record 'b' becomes 17
+  2026-01-30  record 'b' becomes 21
+  2026-06-19  record 'a' becomes 24
+
+retention job ran on 2025-10-02; what is left:
+  2025-05-15  record 'a' = 16
+  2025-07-14  record 'b' = 8
+  2025-12-01  record 'b' = 17
+  2026-01-30  record 'b' = 21
+  2026-06-19  record 'a' = 24
+  9 entries became 5: 4 deleted
+
+the regulator asks: what did record 'a' hold on 2024-10-27?
+  uncompacted audit log  -> 8
+  compacted state log    -> UNANSWERABLE
+  from the current table -> 24   (instant, confident, wrong)
+  date-blind lookup      -> 24   (the same wrong answer, differently reached)
+
+  both logs fold to the same table {'a': 24, 'b': 21}, which is exactly the
+  argument the retention job was approved on -- and it is true.
+
+  of 202 (record, date) questions on a 10-day grid:
+    the audit log answers 172
+    the state log answers 96   (76 destroyed)
+  the edge: record 'a' is answerable from 2025-05-15, 'b' from 2025-07-14;
+  before those dates nothing, after them everything -- so the loss is not
+  'some history' but a clean cut at the day a disk job happened to run.
+
+  keeping both logs would cost 9 + 5 = 14 entries instead of 5,
+  and the 4 entries the state log does not need are precisely the ones the
+  regulator is asking about.
+
+  boundaries: 2024-07-09 -> 8 (inclusive), 2024-07-08 -> 5, 2024-02-09 -> UNANSWERABLE and not 0,
+  because 'no record' and 'a record holding nothing' are different facts about
+  a customer; an unknown record is UNANSWERABLE on both logs.
+
+  all 2002 (record, day) pairs agree with a day-by-day replay of the audit
+  log, so the scan and a materialised history are the same answer.
+
+  200 random record logs at random cutoffs: the compacted log lost 2,333 answers
+  and never once returned a wrong one (21,437 kept, all correct), while the
+  date-blind lookup over the same entries was wrong 22,055 times -- the DATE on
+  the surviving entry is the whole difference between a refusal and a fabrication.
+
+  at 5,000 changes to 50 records over 3,650 days:
+    state log 50 entries, audit log 5,000 -- 100x the storage
+    the audit log grows with TIME and the state log grows with RECORDS, which is
+    why the two have different retention and always did.
+
+all assertions passed
+```
+
+</details>
+
 </details>
 <details>
 <summary><b>Variation 4</b> — the counter changelog <i>(looks like metrics)</i></summary>
@@ -58,6 +680,308 @@ case the appealing first answer is to materialise a sequence you cannot afford.
 **Why it is not obvious.** The fold now needs addition rather than assignment, which still works, and compaction **breaks**: you cannot keep "the last +5" and drop the earlier ones, because every entry contributes. The repair is to convert the log to absolute values first — fold, then emit — which is exactly the chapter's two functions composed, and it reveals why the log's format mattered in the first frame. The general rule is that a log of *deltas* cannot be compacted and a log of *states* can, so the format is a decision about retention and not about convenience.
 
 **Where it lands.** `fold` with `+` in place of `=`, and `compact` becoming invalid until `fold` and `emit` have converted the deltas to states.
+
+
+<details>
+<summary><b>The whole program</b> for this variation — runnable, no animation</summary>
+
+This is **the counter changelog** solved on its own: a complete file, every helper included, asserting its own results. It is run on every build.
+
+```python
+#!/usr/bin/env python3
+"""Variation 4 -- the counter changelog (looks like metrics). Standalone and runnable.
+
+  A service ships counters, and each entry says what CHANGED -- "errors +5" -- rather than
+  what the counter became.  Fold the entries into the current counters.  Then: the log is
+  too long to keep.  Compact it.
+
+The fold needs addition where the chapter's needed assignment, which still works and is
+barely a change.  Compaction BREAKS: you cannot keep "the last +5" and drop the earlier
+ones, because every entry contributes.  The repair is to turn the log into absolute values
+first -- fold, then emit -- which is the chapter's two functions composed, and it shows that
+the log's FORMAT was the first thing stated for a reason.  A log of states can be compacted
+and replayed; a log of deltas can be neither, and both failures are the same fact: an
+assignment is idempotent and an addition is not.
+
+Run it:  python3 programs/ch06_v4.py
+"""
+import random
+
+# The delta log, from the chapter's changelog read as increments: the chapter's entries for
+# 'a' were 5, 8, 10, 16, 24, so the increments are +5, +3, +2, +6, +8, and for 'b' 7, 8, 17,
+# 21 give +7, +1, +9, +4.  Kept in the chapter's own order, so the totals come out at the
+# chapter's 24 and 21 -- the same arithmetic, stated the other way round.
+DELTAS = [("errors", 5), ("errors", 3), ("hits", 7), ("errors", 2), ("errors", 6),
+          ("hits", 1), ("hits", 9), ("hits", 4), ("errors", 8)]
+TRUE = {"errors": 24, "hits": 21}
+N = len(DELTAS)
+TOMBSTONE = None          # the entry that means "this counter is gone"
+
+
+def fold_add(log):
+    """The fold for a DELTA log: + where the chapter had =.  Every entry contributes, so
+    nothing in the log is redundant and a missing entry is a silently wrong total.  Addition
+    commutes, so unlike the chapter's fold this one does not care about order."""
+    t = {}
+    for k, d in log:
+        if d is TOMBSTONE:
+            t.pop(k, None)
+        else:
+            t[k] = t.get(k, 0) + d
+    return t
+
+
+def fold_assign(log):
+    """The chapter's fold, for a log of STATES: later entries overwrite earlier ones.  Order
+    is the whole content of the answer, and applying an entry twice changes nothing."""
+    t = {}
+    for k, v in log:
+        if v is TOMBSTONE:
+            t.pop(k, None)
+        else:
+            t[k] = v
+    return t
+
+
+def emit(table):
+    """The table back out as one entry per key.  For a state log this is a legal log; it is
+    how a delta log becomes a compactable one."""
+    return [(k, table[k]) for k in sorted(table)]
+
+
+def compact_last(log):
+    """Keep the last entry per key -- the chapter's compaction, applied to deltas.
+
+    For a state log every dropped entry was superseded.  For a delta log nothing is ever
+    superseded, so this keeps the last increment and throws away the counter.  It is not a
+    smaller log of the same thing, it is a log of something else.
+    """
+    last = {}
+    for k, d in log:
+        last[k] = d
+    return [(k, last[k]) for k in sorted(last)]
+
+
+def compact_sum(log):
+    """The compaction a delta log actually admits: ADD the increments per key instead of
+    keeping the last one.
+
+    One entry per key, same as the chapter's, and the fold is unchanged -- so delta logs are
+    compactable after all.  What is not preserved is the thing the chapter's compaction kept
+    for free: the result may only ever be applied to an empty state, because re-applying it
+    adds the whole history again.  The entries look identical to `emit`'s and mean something
+    different, which is the trap.
+    """
+    total = {}
+    for k, d in log:
+        if d is TOMBSTONE:
+            total.pop(k, None)
+        else:
+            total[k] = total.get(k, 0) + d
+    return [(k, total[k]) for k in sorted(total)]
+
+
+def to_states(log):
+    """fold, then emit: the two chapter functions composed, which converts a delta log into
+    a state log.  After this the chapter's compaction is legal again, and so is replay."""
+    return emit(fold_add(log))
+
+
+def main():
+    print("DELTAS =", "  ".join(f"{k}{d:+d}" for k, d in DELTAS), f"   ({N} entries)")
+    totals = fold_add(DELTAS)
+    naive = compact_last(DELTAS)
+    summed = compact_sum(DELTAS)
+    states = to_states(DELTAS)
+    print(f"  fold with +            -> {totals}")
+    print(f"  compact_last(deltas)   -> {naive}  folds to {fold_add(naive)}   WRONG")
+    print(f"  compact_sum(deltas)    -> {summed}  folds to {fold_add(summed)}   right")
+    print(f"  to_states = fold+emit  -> {states}  folds to {fold_assign(states)}   right")
+
+    assert totals == TRUE, totals
+    assert fold_add(naive) == {"errors": 8, "hits": 4} != TRUE, fold_add(naive)
+    assert fold_add(summed) == TRUE, "summing the increments must preserve the fold"
+    assert fold_assign(states) == TRUE, "and so must converting to states first"
+    lost = {k: TRUE[k] - fold_add(naive)[k] for k in TRUE}
+    assert lost == {"errors": 16, "hits": 17}, lost
+    assert all(v > 0 for v in lost.values()), "keeping the last delta can only ever understate"
+    print(f"\n  keeping the last increment understates by {lost} -- the dropped entries were")
+    print(f"  not superseded, they were summands, so the error is the size of the history.")
+
+    # the entries of compact_sum and to_states are IDENTICAL bytes and different meanings
+    assert summed == states == [("errors", 24), ("hits", 21)], (summed, states)
+    print(f"\n  compact_sum and to_states produce the same entries, {summed},")
+    print(f"  and they are not the same log: one is 'add 24' and the other is 'it is 24'.")
+    twice_delta = fold_add(summed + summed)
+    twice_state = fold_assign(states + states)
+    print(f"  replayed twice: as deltas {twice_delta}, as states {twice_state}")
+    assert twice_delta == {"errors": 48, "hits": 42} != TRUE, twice_delta
+    assert twice_state == TRUE, "a state log must survive replay, that is the point of one"
+    assert twice_delta != twice_state
+    print(f"  so a consumer that re-reads the log double-counts the delta log and is unharmed")
+    print(f"  by the state log.  Compaction and replay-safety are the same property.")
+
+    # the asymmetry in the other direction: order
+    rng = random.Random(20260303)
+    shuffled = DELTAS[:]
+    rng.shuffle(shuffled)
+    shuffled_states = states[:]
+    rng.shuffle(shuffled_states)
+    assert fold_add(shuffled) == TRUE, "addition commutes, so a delta log may be reordered"
+    reordered_state_log = [("errors", 5), ("errors", 24), ("errors", 8)]
+    assert fold_assign(reordered_state_log) == {"errors": 8} != TRUE
+    print(f"\n  a delta log may be shuffled freely (still {fold_add(shuffled)}); a state log may")
+    print(f"  not -- reordering {reordered_state_log} gives")
+    print(f"  {fold_assign(reordered_state_log)}.  Each format is robust to exactly what the")
+    print(f"  other is not: deltas to order, states to duplication.")
+
+    # boundary: a counter whose increments cancel.  Zero is a VALUE, absence is not.
+    cancels = [("retries", 5), ("retries", -5), ("errors", 1)]
+    zero_sum = compact_sum(cancels)
+    pruned = [(k, v) for k, v in zero_sum if v != 0]        # "drop the no-ops"
+    assert fold_add(cancels) == {"retries": 0, "errors": 1}
+    assert zero_sum == [("errors", 1), ("retries", 0)], zero_sum
+    assert fold_add(pruned) == {"errors": 1} != fold_add(cancels), fold_add(pruned)
+    print(f"\n  increments that cancel: {cancels}")
+    print(f"  compact_sum keeps {zero_sum}; dropping the zero as a no-op gives")
+    print(f"  {fold_add(pruned)} and loses the fact that the counter EXISTS -- 'retries = 0'")
+    print(f"  and 'no retries counter' are different dashboards.")
+
+    # a tombstone is still the one entry no compaction may drop, in either format
+    with_tomb = DELTAS + [("hits", TOMBSTONE)]
+    assert fold_add(with_tomb) == {"errors": 24}, fold_add(with_tomb)
+    assert fold_add(compact_sum(with_tomb)) == fold_add(with_tomb), "the tombstone was dropped"
+    last_live = {}
+    for k, d in with_tomb:
+        if d is not TOMBSTONE:
+            last_live[k] = last_live.get(k, 0) + d
+    resurrecting = [(k, last_live[k]) for k in sorted(last_live)]
+    assert fold_add(resurrecting) == TRUE != fold_add(with_tomb), fold_add(resurrecting)
+    print(f"\n  with a delete for 'hits': {fold_add(with_tomb)}; a compactor that sums only the")
+    print(f"  non-tombstone entries -- i.e. reads the delete as an absence -- brings it back as")
+    print(f"  {fold_add(resurrecting)}.  The delete is a fact, not a gap in the data.")
+
+    # many inputs, and the precise condition under which the naive compaction is harmless
+    def naive_is_harmless(log):
+        """CORRECTED CLAIM.  The first guess was "it agrees exactly when every counter has
+        one entry, i.e. when there was nothing to compact", and a random case refused it:
+        [('drops', 0), ('drops', 5)] has two entries and compacts correctly.  The real
+        condition is that for every counter the increments BEFORE the last one sum to zero
+        -- having only one entry is the common way for that to happen, not the only one.
+        """
+        per = {}
+        for k, d in log:
+            per.setdefault(k, []).append(d)
+        return all(sum(ds[:-1]) == 0 for ds in per.values())
+
+    ok, broken, checked, once = 0, 0, 0, 0
+    for _ in range(1500):
+        n = rng.randint(1, 16)
+        log = [(rng.choice(("errors", "hits", "retries", "drops")),
+                rng.randint(-9, 9)) for _ in range(n)]
+        want = fold_add(log)
+        assert fold_add(compact_sum(log)) == want, log          # always safe
+        assert fold_assign(to_states(log)) == want, log         # always safe
+        assert fold_assign(compact_last(to_states(log))) == want, log
+        once_only = len({k for k, _ in log}) == len(log)
+        agrees = fold_add(compact_last(log)) == want
+        assert agrees == naive_is_harmless(log), (log, agrees)   # the exact condition
+        if once_only:
+            assert agrees, log                                   # one entry per key: trivial
+        checked += 1
+        ok += agrees
+        once += once_only
+        broken += not agrees
+        shuf = log[:]
+        rng.shuffle(shuf)
+        assert fold_add(shuf) == want, log                      # order-free, always
+    print(f"\n  {checked} random delta logs: summing the increments and converting to states both")
+    print(f"  always reproduce the totals.  Keeping the last increment agreed in {ok} cases and")
+    print(f"  broke in {broken}, and it agreed in EXACTLY the logs where every counter's earlier")
+    print(f"  increments sum to zero -- {once} of those had one entry per counter (nothing to")
+    print(f"  compact) and the other {ok - once} cancelled out by luck, which is the worse case:")
+    print(f"  a test built from short logs can pass for both reasons.")
+    assert (ok, broken, once) == (238, 1262, 223), (ok, broken, once)
+    assert broken > ok, "the naive compaction must be wrong on most real logs"
+    assert once < ok, "and some agreements are luck, not triviality"
+
+    # the scale that makes compaction worth doing at all
+    BIG_KEYS, BIG_ENTRIES = 50, 20_000
+    # increments are positive here, as a counter's are: the first attempt used increments
+    # cycling through -3..3, and at 400 entries per counter they summed to exactly zero, so
+    # compact_last came out EXACT at scale and the comparison said nothing.  An accidental
+    # cancellation is the one case where the wrong compaction looks right, and it is easier
+    # to build by accident than it sounds.
+    big = [(f"m{i % BIG_KEYS}", 1 + (i % 3)) for i in range(BIG_ENTRIES)]
+    big_sum = compact_sum(big)
+    big_naive = compact_last(big)
+    big_true = fold_add(big)
+    worst = max(abs(big_true[k] - fold_add(big_naive).get(k, 0)) for k in big_true)
+    print(f"\n  at {BIG_ENTRIES:,} increments over {BIG_KEYS} counters:")
+    print(f"    compact_sum  -> {len(big_sum)} entries, totals exact "
+          f"({len(big) // len(big_sum)}x smaller)")
+    print(f"    compact_last -> {len(big_naive)} entries, worst counter off by {worst}")
+    print(f"    both logs are the same SIZE, so the saving was never the thing in question --")
+    print(f"    the question was what the entries mean.")
+    assert len(big_sum) == len(big_naive) == BIG_KEYS
+    assert fold_add(big_sum) == big_true, "exact at scale"
+    assert worst > 0 and fold_add(big_naive) != big_true
+    print("\nall assertions passed")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+Running it prints:
+
+```
+DELTAS = errors+5  errors+3  hits+7  errors+2  errors+6  hits+1  hits+9  hits+4  errors+8    (9 entries)
+  fold with +            -> {'errors': 24, 'hits': 21}
+  compact_last(deltas)   -> [('errors', 8), ('hits', 4)]  folds to {'errors': 8, 'hits': 4}   WRONG
+  compact_sum(deltas)    -> [('errors', 24), ('hits', 21)]  folds to {'errors': 24, 'hits': 21}   right
+  to_states = fold+emit  -> [('errors', 24), ('hits', 21)]  folds to {'errors': 24, 'hits': 21}   right
+
+  keeping the last increment understates by {'errors': 16, 'hits': 17} -- the dropped entries were
+  not superseded, they were summands, so the error is the size of the history.
+
+  compact_sum and to_states produce the same entries, [('errors', 24), ('hits', 21)],
+  and they are not the same log: one is 'add 24' and the other is 'it is 24'.
+  replayed twice: as deltas {'errors': 48, 'hits': 42}, as states {'errors': 24, 'hits': 21}
+  so a consumer that re-reads the log double-counts the delta log and is unharmed
+  by the state log.  Compaction and replay-safety are the same property.
+
+  a delta log may be shuffled freely (still {'hits': 21, 'errors': 24}); a state log may
+  not -- reordering [('errors', 5), ('errors', 24), ('errors', 8)] gives
+  {'errors': 8}.  Each format is robust to exactly what the
+  other is not: deltas to order, states to duplication.
+
+  increments that cancel: [('retries', 5), ('retries', -5), ('errors', 1)]
+  compact_sum keeps [('errors', 1), ('retries', 0)]; dropping the zero as a no-op gives
+  {'errors': 1} and loses the fact that the counter EXISTS -- 'retries = 0'
+  and 'no retries counter' are different dashboards.
+
+  with a delete for 'hits': {'errors': 24}; a compactor that sums only the
+  non-tombstone entries -- i.e. reads the delete as an absence -- brings it back as
+  {'errors': 24, 'hits': 21}.  The delete is a fact, not a gap in the data.
+
+  1500 random delta logs: summing the increments and converting to states both
+  always reproduce the totals.  Keeping the last increment agreed in 238 cases and
+  broke in 1262, and it agreed in EXACTLY the logs where every counter's earlier
+  increments sum to zero -- 223 of those had one entry per counter (nothing to
+  compact) and the other 15 cancelled out by luck, which is the worse case:
+  a test built from short logs can pass for both reasons.
+
+  at 20,000 increments over 50 counters:
+    compact_sum  -> 50 entries, totals exact (400x smaller)
+    compact_last -> 50 entries, worst counter off by 798
+    both logs are the same SIZE, so the saving was never the thing in question --
+    the question was what the entries mean.
+
+all assertions passed
+```
+
+</details>
 
 </details>
 

@@ -1,0 +1,57 @@
+RECORD_LOG:
+  2024-02-10  record 'a' becomes  5  <- deleted by the retention job
+  2024-07-09  record 'a' becomes  8  <- deleted by the retention job
+  2024-09-17  record 'b' becomes  7  <- deleted by the retention job
+  2025-02-24  record 'a' becomes 10  <- deleted by the retention job
+  2025-05-15  record 'a' becomes 16
+  2025-07-14  record 'b' becomes  8
+  2025-12-01  record 'b' becomes 17
+  2026-01-30  record 'b' becomes 21
+  2026-06-19  record 'a' becomes 24
+
+retention job ran on 2025-10-02; what is left:
+  2025-05-15  record 'a' = 16
+  2025-07-14  record 'b' = 8
+  2025-12-01  record 'b' = 17
+  2026-01-30  record 'b' = 21
+  2026-06-19  record 'a' = 24
+  9 entries became 5: 4 deleted
+
+the regulator asks: what did record 'a' hold on 2024-10-27?
+  uncompacted audit log  -> 8
+  compacted state log    -> UNANSWERABLE
+  from the current table -> 24   (instant, confident, wrong)
+  date-blind lookup      -> 24   (the same wrong answer, differently reached)
+
+  both logs fold to the same table {'a': 24, 'b': 21}, which is exactly the
+  argument the retention job was approved on -- and it is true.
+
+  of 202 (record, date) questions on a 10-day grid:
+    the audit log answers 172
+    the state log answers 96   (76 destroyed)
+  the edge: record 'a' is answerable from 2025-05-15, 'b' from 2025-07-14;
+  before those dates nothing, after them everything -- so the loss is not
+  'some history' but a clean cut at the day a disk job happened to run.
+
+  keeping both logs would cost 9 + 5 = 14 entries instead of 5,
+  and the 4 entries the state log does not need are precisely the ones the
+  regulator is asking about.
+
+  boundaries: 2024-07-09 -> 8 (inclusive), 2024-07-08 -> 5, 2024-02-09 -> UNANSWERABLE and not 0,
+  because 'no record' and 'a record holding nothing' are different facts about
+  a customer; an unknown record is UNANSWERABLE on both logs.
+
+  all 2002 (record, day) pairs agree with a day-by-day replay of the audit
+  log, so the scan and a materialised history are the same answer.
+
+  200 random record logs at random cutoffs: the compacted log lost 2,333 answers
+  and never once returned a wrong one (21,437 kept, all correct), while the
+  date-blind lookup over the same entries was wrong 22,055 times -- the DATE on
+  the surviving entry is the whole difference between a refusal and a fabrication.
+
+  at 5,000 changes to 50 records over 3,650 days:
+    state log 50 entries, audit log 5,000 -- 100x the storage
+    the audit log grows with TIME and the state log grows with RECORDS, which is
+    why the two have different retention and always did.
+
+all assertions passed

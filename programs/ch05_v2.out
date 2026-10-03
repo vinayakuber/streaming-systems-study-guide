@@ -1,0 +1,56 @@
+CHUNKS = ['aaaaa', 'bbb', 'ccccccc', 'dd', 'eeeeee', 'f', 'ggggggggg', 'hhhh', 'iiiiiiii']
+the finished file is 45 bytes: 'aaaaabbbcccccccddeeeeeefggggggggghhhhiiiiiiii'
+
+    crash              rename              direct        record_first
+  chunk 0   absent, rec=False   absent, rec=False    absent, rec=True
+  chunk 1   absent, rec=False  5/45 bytes, rec=False  5/45 bytes, rec=True
+  chunk 2   absent, rec=False  8/45 bytes, rec=False  8/45 bytes, rec=True
+  chunk 3   absent, rec=False  15/45 bytes, rec=False  15/45 bytes, rec=True
+  chunk 4   absent, rec=False  17/45 bytes, rec=False  17/45 bytes, rec=True
+  chunk 5   absent, rec=False  23/45 bytes, rec=False  23/45 bytes, rec=True
+  chunk 6   absent, rec=False  24/45 bytes, rec=False  24/45 bytes, rec=True
+  chunk 7   absent, rec=False  33/45 bytes, rec=False  33/45 bytes, rec=True
+  chunk 8   absent, rec=False  37/45 bytes, rec=False  37/45 bytes, rec=True
+  after all 9   absent, rec=False  COMPLETE, rec=False  COMPLETE, rec=True
+     none  COMPLETE, rec=False  COMPLETE, rec=True  COMPLETE, rec=True
+
+  rename: at all 11 crash points the visible file is absent or the full 45 bytes.
+  Nothing is ever half visible, and there is no record to disagree with it.
+
+  direct: 8 of the 11 crash points leave a partial file under the real
+  name -- a restore from it silently produces a truncated database.  And crashing
+  after the last chunk leaves a COMPLETE file with the record still saying failed,
+  which is the harmless half of the same split.
+
+  record_first: 9 of the 11 crash points leave the record saying SUCCESS with
+  no complete file behind it -- every point during the upload, which is where all
+  the time goes.  Nobody finds out until a restore is attempted, which is why this
+  ordering is the one that loses data rather than merely wasting work.
+
+  killed at chunk 3 three nights running, then succeeding: 4 attempts and
+  90 bytes transferred for a 45-byte file.
+  resuming from the temporary file instead: 45 bytes -- the saving is real,
+  and it is exactly the 45 bytes the restarts re-sent.
+
+  a 15-byte file left in 'backup.tmp' by an earlier crash of a DIFFERENT upload:
+    resuming  -> 45 bytes, CORRUPT: 'XXXXXXXXXXXXXXXddeeeeeefggggggggghhhhiiiiiiii'
+    from scratch -> 45 bytes, correct
+    the corrupt one is 45 bytes, the same size as a good backup, so a length
+    check passes.  Resuming is only safe if the temporary name is unique per
+    attempt -- which means the atomic commit needs a NAME nobody else will reuse.
+
+  staging bucket to archive bucket, where a rename is really a copy and a delete:
+  8 crash points again leave a partial object under the real name.  The
+  rename is atomic WITHIN one store and nowhere else, so the manufactured commit
+  is a property of the store, not of the idea.
+
+  boundaries: an empty backup commits as a zero-byte file -- '' is not
+  None, which is what lets 'the file exists' be the position.  A single-chunk upload
+  killed before its only chunk leaves an empty STAGING file and nothing under the
+  real name, which is the state a restore must read as 'no backup'.
+
+  300 random files x every crash point: the rename leaves the real name absent or
+  complete, and complete exactly when the job was not killed.  record_first always
+  sets the record, and the file matches it only when nothing went wrong.
+
+all assertions passed

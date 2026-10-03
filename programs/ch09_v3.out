@@ -1,0 +1,52 @@
+IMPRESSIONS (shown, arrived) = [(1, 1), (3, 3), (130, 130), (245, 330), (540, 540)]
+CLICKS = [50, 90, 220, 260, 265]
+  W = 60 seconds (the attribution window), measured lateness = 85 seconds
+  answer at once (wait 0)    50->3  90->-  220->-  260->-  265->-   (1 attributed)
+  wait W = 60                50->3  90->-  220->-  260->-  265->-   (1 attributed)
+  wait lateness = 85         50->3  90->-  220->-  260->245  265->-   (2 attributed)
+  offline, all data          50->3  90->-  220->-  260->245  265->-   (2 attributed)
+
+  the click at 260 is attributed to the impression shown at 245 -- but that impression
+  arrives at 330, so a matcher that waits 60 seconds answers at 320 and credits nobody.
+  Waiting W is not a conservative version of waiting the lateness; it is the wrong
+  quantity, and it happens to be smaller here.  Attribution is lost, not approximated.
+
+  the click at 265 also qualifies for the impression at 245 -- on its own it gets it
+  (245) -- and is refused because the click at 260 took it first.  One-to-one makes
+  a click's answer depend on the clicks BEFORE it, which is why the clicks cannot be
+  answered out of order even though each window is independent.
+
+  impressions at 100 and 150, clicks at 160 and 199, W = 60:
+    nearest-first  : [(160, 150), (199, None)]   (1 attributed)
+    best possible  : 2 attributed (160 takes 100, 199 takes 150)
+    the click at 160 takes the nearer impression and strands the click at 199, whose
+    only candidate was the one just taken.  Both answers are defensible and the spec
+    picked the first -- so a report of 'lost' attributions may be the rule working.
+
+  impressions [(31, 31), (109, 109), (115, 155), (132, 172), (199, 199)], clicks [30, 51, 89, 154, 181]:
+    answered at once : [(30, None), (51, 31), (89, None), (154, 109), (181, 132)]   (3 attributed)
+    the right answer : [(30, None), (51, 31), (89, None), (154, 132), (181, None)]   (2 attributed)
+    the click at 154 cannot see the impression shown at 132 yet -- it arrives at 172 --
+    so it takes 109 instead, which leaves 132 free for the click at 181.  Three
+    attributions out of a rule that should have made two, and the extra one breaks
+    the spec: 154's nearest preceding impression was 132, not 109.  So the count of
+    attributions is not a check on the matcher -- a rushed matcher can report more
+    conversions than a correct one, which is the direction nobody audits.
+
+  boundaries: shown at the click's own second -> attributed; exactly 60 before ->
+  attributed; 61 before -> not; shown after the click -> never; two clicks at the
+  same second -> the first takes it, because one-to-one admits no tie-break.
+
+  with clicks answered no earlier than 260, an impression is needed only if it was
+  shown at or after 260 - W - lateness = 115: droppable [(1, 1), (3, 3)]
+  so the state is bounded by W PLUS the lateness allowance -- 60 + 85 = 145 seconds of
+  impressions -- and neither number alone would have been enough to size it.
+
+  600 random stream pairs: waiting the measured lateness equalled the batch answer
+  every single time.  Answering at once attributed FEWER clicks in 133 cases, MORE in
+  2, and the same number in 465 -- and it reproduced the batch answer exactly in only
+  408.  Every attribution at every wait was inside its window and no impression was
+  credited twice.  Nearest-first matched the maximum possible in 579 cases and fewer
+  in 21, so the one-to-one rule leaves money on the table by design, not by bug.
+
+all assertions passed

@@ -1,0 +1,51 @@
+BOOKINGS = [(1, 3), (50, 150), (130, 245), (220, 320), (540, 540)]   (5 bookings, closed spans)
+  marks   = [(1, 1), (4, -1), (50, 1), (130, 1), (151, -1), (220, 1), (246, -1), (321, -1), (540, 1), (541, -1)]
+
+  every pair  : [(1, 2, '130..150'), (2, 3, '220..245')]   (10 comparisons)
+  event sweep : busiest 2 bookings at t=130, 2 overlapping pairs   (10 marks)
+  the two double-bookings are the chapter's two overlaps, 130..150 and 220..245 --
+  the same data, with the two lists poured into one.
+
+  two-pointer sweep of the list against itself: [(1, 2, '130..150'), (2, 3, '220..245')]
+  it gets the right answer -- which is the worst thing it could do, because the
+  promise that licensed the rule is gone and the output does not say so.  In this
+  list every booking overlaps only its neighbour, so each comparison still retires a
+  span.  Breaking it needs THREE bookings live at once, which is also exactly the
+  thing the question asks about.
+
+  with a workshop from 140 to 230 added: [(1, 3), (50, 150), (130, 245), (140, 230), (220, 320), (540, 540)]
+    every pair  : 5 pairs, busiest unknown to it   (15 comparisons)
+    event sweep : busiest 3 at t=140, 5 pairs   (12 marks)
+    two-pointer : 4 pairs   WRONG
+    it finds 4 of 5 and misses 140..150: after comparing bookings 1 and 2 it
+    advances past booking 1, which still had an overlap with booking 3 waiting.  The
+    rule retires a span per comparison, and with three live at once that is one span
+    too many.  It under-reports, so a double-booking is simply never raised.
+
+  checked against a direct count at all 541 instants from 1 to 541: the maximum is
+  2, and no instant exceeds it -- so the running count is the concurrency, not a
+  proxy for it.
+
+  and the event sweep answers the chapter's question too: on its LEFT and RIGHT it
+  finds [('L1', 'R0', '130..150'), ('L1', 'R1', '220..245')],
+  which is the chapter's own answer -- so nothing was given up by abandoning the
+  two-pointer rule except the two-pointer rule's efficiency.
+
+  boundaries: [] -> (0, None, 0) (no moment to report, not 0);  [(0,10),(11,20)] ->
+  (1, 0, 0) (adjacent is free);  [(0,10),(10,20)] -> (2, 10, 1) (closed spans touch,
+  so that IS a clash);  four identical bookings -> (4, 0, 6), i.e. 4 choose 2 pairs
+  from one instant -- the pair count is quadratic in the answer even when the sweep
+  is linear in the input, which is why it is counted rather than listed.
+
+  600 random booking lists, most of them self-overlapping: the event sweep's pair
+  count matched the quadratic answer every time and its maximum matched a direct
+  per-instant count every time (415 lists had a clash, 185 were clean).  The
+  two-pointer attempt never reported a pair that was not real -- it only ever
+  reported fewer, which is exactly why nobody notices it is wrong.
+
+  at 20,000 bookings, each overlapping the next: busiest 2 at t=5, 19,999 pairs,
+  from 40,000 marks.  The quadratic answer would need 199,990,000 comparisons for
+  the same result, and at the stated 10**6 bookings it would need 5 x 10**11 --
+  while the marks stay at 2 per booking.
+
+all assertions passed

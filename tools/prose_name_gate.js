@@ -85,6 +85,12 @@ if (fs.existsSync('programs')) {
       }
       for (const m of line.matchAll(/^\s*(?:for\s+)?([A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*)\s*(?:=[^=]|\bin\b)/g))
         for (const n of m[1].split(/\s*,\s*/)) declared.add(n);
+      // A quoted key in a dict literal is where a RECORD FIELD is defined: `"paged": False`
+      // defines it and `r["paged"]` reads it, so a reader can look it up in the program just
+      // as they would a variable. Deliberately narrow — the key must be immediately followed
+      // by a colon — so that arbitrary quoted prose inside the program cannot vouch for
+      // itself, which is the hole this gate exists to keep shut.
+      for (const m of line.matchAll(/["']([A-Za-z_]\w*)["']\s*:/g)) declared.add(m[1]);
     }
   }
 }

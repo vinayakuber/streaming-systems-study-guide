@@ -1,0 +1,33 @@
+VALUES = 0:5  1:3  2:7  3:2  4:6  5:1  6:9  7:4  8:8    W = 3
+
+  brute force  : [7, 7, 7, 6, 9, 9, 9]   (7 windows x 3 = 21 reads)
+  one number   : [7, 7, 7, 7, 9, 9, 9]   <- WRONG
+  rescan on departure: [7, 7, 7, 6, 9, 9, 9]   (2 rescans, correct)
+  deque        : [7, 7, 7, 6, 9, 9, 9]   (9p + 6e + 1x = 16 steps)
+
+  the one number is high at window 3 only: it reports 7 for [2, 6, 1], whose maximum is 6.
+  7 left the window at that tick and nothing could put it back.  It is right again
+  at window 4 only because 9 arrives and exceeds the stale number -- the error ends
+  when a bigger value happens along, not when the window moves on.
+
+  rescan-on-departure is correct and costs 2 rescans here, 1 on a
+  rising stream, and 18 of 18 windows on a falling one -- the
+  full re-read, back again under another name.
+
+  no f(kept, departing, arriving) can exist for the maximum:
+    window [8, 2, 7] keeps 8, 8 departs, 3 arrives -> 7
+    window [8, 6, 6] keeps 8, 8 departs, 3 arrives -> 6
+    identical arguments, 7 != 6 -- so EVERY such function is ruled out at once
+  the same search over SUMS comes back empty, which is what invertible means.
+
+  one value replaced by 1e+16: 6 of 7 running totals drift, worst 2.0
+  EVERY value scaled by 1e+16:   0 of 7 drift -- scaling is not the cause
+  the deque is exact on both, because it never removes anything from a number.
+
+  W = 1 -> the stream itself; W = 9 -> one answer; a flat stream keeps the deque
+  at 1 entry with `<=` and at 3 with `<` -- the comparison buys space, not answers.
+
+  800 random (values, W) pairs: the deque and the rescan both equal the brute
+  force on all of them; the one-number version is wrong on 636 of 800.
+
+all assertions passed
