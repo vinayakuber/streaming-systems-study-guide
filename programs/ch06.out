@@ -1,0 +1,20 @@
+CHANGELOG = a=5  a=8  b=7  a=10  a=16  b=8  b=17  b=21  a=24
+  fold    -> {'a': 24, 'b': 21}   (9 changes to 2 entries)
+  emit    -> [('a', 24), ('b', 21)]   (2 entries, not 9)
+  compact -> [('a', 24), ('b', 21)]   (7 of 9 entries dropped)
+  fold(compact) -> {'a': 24, 'b': 21}   (identical: True)
+
+  key 'a' passed through [5, 8, 10, 16, 24]  (5 values)
+  value_after(full log, 'a', 2)      = 8
+  value_after(compacted, 'a', 2)     = UNANSWERABLE
+  with a tombstone for 'b': {'a': 24};  compacting the tombstone away resurrects b: {'a': 24, 'b': 21}
+
+  cache: same table {'a': 30, 'b': 21} from 3 entries instead of 10, handover at version 10
+  audit: the state log says UNANSWERABLE, an uncompacted audit log says 8
+  deltas: fold {'a': 10, 'b': 8}, compacting the deltas gives {'a': 2, 'b': 1} (wrong), converted first {'a': 10, 'b': 8}
+
+  800 random changelogs: folding the compacted log always reproduces the
+  table, emit round-trips the present, and value_after matches a rescan --
+  while every key with a history loses all but its last value.
+
+all assertions passed

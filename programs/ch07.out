@@ -1,0 +1,22 @@
+EVENTS = a@1:5  a@3:3  b@50:4  b@90:7  a@130:2  b@220:9  a@245:6  b@260:1  a@540:8
+  true totals {'a': 24, 'b': 21}   longest gap per key {'a': 295, 'b': 130}
+  ttl = INFINITY : {'a': 24, 'b': 21}  (correct, 2 keys held forever)
+  ttl = 295      : {'a': 24, 'b': 21}  (correct)
+  ttl = 294      : {'b': 21, 'a': 8}  <- restarted [('a', 540)]
+  on_event(('a', 8, 540), ttl=294): dropped {'a': 16}, key looked new (True), so a restarts at 8
+
+  keys saved by the bound, at any moment in this example: 0
+  at 2000 one-off keys + 1 recurring key, observed at t = 2000:
+    ttl = INFINITY : 2001 keys held
+    ttl = 100      : 102 keys held  (1899 saved, 5.1% of the state)
+
+  unique visitors: exact 5000 in 5000 slots, sketch 5307 in 256 slots (6.1% error)
+  carts: spilled-and-reloaded {'b': 21, 'a': 24}, plain expiry {'b': 21, 'a': 8}, live at end {'b': 21, 'a': 24}
+  lifetime score: store {'a': 24, 'b': 21}, keys ever held between events 0
+
+  500 random streams: unbounded == the true totals; at an allowance equal to
+  the worst gap NOTHING is ever dropped and re-created (0 restarts) and every
+  live key is exact; spilling is exact at any allowance; and a tight allowance
+  never overstates a total -- it only ever loses.
+
+all assertions passed

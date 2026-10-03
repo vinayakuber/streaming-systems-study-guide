@@ -27,6 +27,14 @@ CHECKS (all must pass)
 import argparse, concurrent.futures as cf, json, os, re, shutil, subprocess, sys, tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# Chrome's wall-clock budget is a RESOURCE parameter, not a correctness check: a render
+# that needs longer on a loaded machine is not a broken diagram. Measured on this box with
+# 91 unrelated processes against 8 cores, a render of a trivial HTML page took 61s where it
+# normally takes about 1s, so the old fixed 180s/120s starved and the gate reported
+# "no valid static rendering" for files the change had not touched. Raising it does not
+# weaken anything — it is what lets the guard run at all instead of being bypassed with
+# --no-verify, which is the outcome a too-tight timeout actually produces.
+VD_TIMEOUT = int(os.environ.get('VD_TIMEOUT', '900'))
 CHROME = next((c for c in ('google-chrome', 'chromium', 'chromium-browser')
                if subprocess.run(['which', c], capture_output=True).returncode == 0), None)
 SENTINEL = (255, 0, 255)          # magenta guard band — never used by the palette
@@ -89,7 +97,7 @@ def shoot(html_path, w, h, out, budget=None):
                         f'--user-data-dir={prof}',
                         '--force-device-scale-factor=1', f'--window-size={w},{h}',
                         f'--virtual-time-budget={budget}', f'--screenshot={out}', f'file://{html_path}'],
-                       capture_output=True, timeout=180)
+                       capture_output=True, timeout=VD_TIMEOUT)
     finally:
         shutil.rmtree(prof, ignore_errors=True)
     return os.path.exists(out)
@@ -151,7 +159,7 @@ document.getElementById('out').textContent=JSON.stringify(r);
         f.write(html); p = f.name
     out = subprocess.run([CHROME, '--headless', '--disable-gpu', '--no-sandbox',
                           '--virtual-time-budget=4000', '--dump-dom', f'file://{p}'],
-                         capture_output=True, text=True, timeout=120).stdout
+                         capture_output=True, text=True, timeout=VD_TIMEOUT).stdout
     os.unlink(p)
     m = re.search(r'<pre id="out">(.*?)</pre>', out, re.S)
     if not m or not m.group(1).strip():

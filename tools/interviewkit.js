@@ -79,6 +79,26 @@ function buildInterviewSection(spec) {
   });
   md.push('');
 
+  // ---- PART 4: the program in full, plain, and RUN -------------------------------
+  // The traced walkthrough that follows shows the stack and the heap one line at a time,
+  // which is what makes the mechanism visible and is also why it is not something you can
+  // paste into an editor. So the complete program comes first, in a real language, with no
+  // animation and no steps — and with the output it actually produced when it was run, so
+  // the figures above are not merely asserted by the generator but demonstrated by the code.
+  const base = name.replace(/-interview-memory$/, '');
+  const pyPath = path.join(__dirname, '..', 'programs', `${base}.py`);
+  const outPath = path.join(__dirname, '..', 'programs', `${base}.out`);
+  if (fs.existsSync(pyPath)) {
+    if (!fs.existsSync(outPath))
+      throw new Error(`interviewkit: programs/${base}.py exists but programs/${base}.out does not — run tools/run_programs.sh so the output shown is the output it produced`);
+    md.push('#### The whole program', '');
+    md.push(`Everything above as one file you can run: no animation, no stack, no heap — the complete solution, every helper included, and the measurements at the bottom. It is **run by \`tools/run_programs.sh\` on every build** and asserts its own results, so if it stopped working this section could not be generated.`, '');
+    md.push('```python', fs.readFileSync(pyPath, 'utf8').replace(/\s+$/, ''), '```', '');
+    md.push('Running it prints:', '');
+    md.push('```', fs.readFileSync(outPath, 'utf8').replace(/\s+$/, ''), '```', '');
+  }
+
+
   md.push(`#### ${program.heading}`, '');
   md.push(...program.intro, '');
   md.push('The animation steps through the code, holding each line long enough to read the STACK (call frames and their locals) and the HEAP (allocated arrays and objects) as they are AT THAT MOMENT. Expand any step to study it on its own.', '');

@@ -1,0 +1,22 @@
+LEFT  = [(1, 3), (130, 245), (540, 540)]
+RIGHT = [(50, 150), (220, 320)]
+  i=0 j=0  (1, 3) vs (50, 150)  ->  NONE     advance left
+  i=1 j=0  (130, 245) vs (50, 150)  ->  130..150 advance right
+  i=1 j=1  (130, 245) vs (220, 320)  ->  220..245 advance left
+  i=2 j=1  (540, 540) vs (220, 320)  ->  NONE     advance right
+
+  every pair : [(130, 150), (220, 245)]   (3 x 2 = 6 comparisons)
+  sweep      : [(130, 150), (220, 245)]   (4 comparisons)
+
+  with a bound of 220 on how late RIGHT may be: droppable [(1, 3)], kept [(130, 245), (540, 540)]
+
+  double-booked room: busiest 2 at t=5, 2 overlapping pairs
+  attributed click: answering at once gives [(200, None)] (lost), waiting gives [(200, 180)]
+                    a click at 160: at once 100, waiting 150
+  unavailable hours: free [(0, 129), (246, 539), (541, 600)]
+
+  800 random span-list pairs: sweep == every pair, never more than m + n
+  comparisons (697 exercised both advance directions), the free-span
+  complement == a per-unit scan, and the event sweep == a naive pair count.
+
+all assertions passed

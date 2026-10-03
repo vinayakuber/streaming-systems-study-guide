@@ -1,0 +1,26 @@
+ARRIVALS = [1, 3, 90, 130, 245, 260, 220, 50, 540]   (sorted: [1, 3, 50, 90, 130, 220, 245, 260, 540])   G = 47
+    1  new    touches [-]  ->  1..1   withdrawn: -
+    3  extend touches [1..1]  ->  1..3   withdrawn: 1..1
+   90  new    touches [-]  ->  1..3  90..90   withdrawn: -
+  130  extend touches [90..90]  ->  1..3  90..130   withdrawn: 90..90
+  245  new    touches [-]  ->  1..3  90..130  245..245   withdrawn: -
+  260  extend touches [245..245]  ->  1..3  90..130  245..260   withdrawn: 245..245
+  220  extend touches [245..260]  ->  1..3  90..130  220..260   withdrawn: 245..260
+   50  MERGE  touches [1..3 90..130]  ->  1..130  220..260   withdrawn: 1..3 90..130
+  540  new    touches [-]  ->  1..130  220..260  540..540   withdrawn: -
+
+  sorted sweep : [(1, 130), (220, 260), (540, 540)]
+  incremental  : [(1, 130), (220, 260), (540, 540)]
+
+  6 runs withdrawn; 245..260 later became 220..260 -- an EARLIER start, so the start is not a key
+  at the chapter's G = 120: 0 merges, runs [(1, 260), (540, 540)]
+
+  calendar: accepted [True, False, True, True, True], members [(5, 9), (11, 20)]
+  islands : [1, 2, 1, 2, 2, 2]  (position 6 joins TWO stretches: the -1 case)
+  alerts  : incidents [(0, 10), (300, 305)], paged at [0, 300], double pages 0
+            one late firing at 50: [(0, 95)] after paging at [0, 90] -> 1 double page
+
+  800 random (times, G) pairs: incremental == sorted sweep (286 merges
+  among them), and the island count == a naive rescan of the set.
+
+all assertions passed
