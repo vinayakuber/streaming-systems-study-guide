@@ -78,7 +78,12 @@ for (const ch of CHAPTERS) {
       DIAGRAM: ws.some(w => !/-memory$/.test(w)),
       PROGRAM: ws.some(w => /-memory$/.test(w)),
     };
-    for (const band of ['DIAGRAM', 'PROGRAM']) {
+    // A CONCEPT section owes both bands. An INTERVIEW section owes only PROGRAM: it
+    // poses a problem and traces the solution, and a diagram band there would exist
+    // solely to satisfy this gate. A gate that invents content is worse than a gate
+    // that is silent, so a section may declare `bands: ['PROGRAM']`. It is NOT an
+    // escape hatch: omit it and both are still required, which every concept keeps.
+    for (const band of (sec.bands || ['DIAGRAM', 'PROGRAM'])) {
       bands++;
       const key = `ch${String(ch.num).padStart(2, '0')}|${label}|${band}`;
       seenKeys.add(key);

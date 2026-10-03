@@ -1,0 +1,263 @@
+{
+  "name": "ch04-interview-memory",
+  "steps": [
+    {
+      "t": "9 times, out of order, and still arriving",
+      "line": [
+        84
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "batch = ...",
+            "runs = ..."
+          ]
+        }
+      ]
+    },
+    {
+      "t": "the batch answer: sort, then walk",
+      "line": [
+        37
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "batch = ...",
+            "runs = ..."
+          ]
+        },
+        {
+          "name": "sweep",
+          "locals": [
+            "times = @0x100",
+            "sorted = [1, 3, 50, 90, 130, 220, 245, 260, 540]",
+            "out = 1..130",
+            "t = 3"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "so: which runs does one new time touch?",
+      "line": [
+        53
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "batch = 1..130  220..260  540..540",
+            "runs = ..."
+          ]
+        },
+        {
+          "name": "touching",
+          "locals": [
+            "runs = @0x200",
+            "t = 1",
+            "hit = []",
+            "r = none yet"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "arrival 90: new — a second run",
+      "line": [
+        67
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "batch = 1..130  220..260  540..540",
+            "runs = ..."
+          ]
+        },
+        {
+          "name": "absorb",
+          "locals": [
+            "runs = @0x200",
+            "t = 90",
+            "hit = []",
+            "rest = 1..3",
+            "lo = 90",
+            "hi = 90"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "arrival 3: extends one run",
+      "line": [
+        65
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "batch = 1..130  220..260  540..540",
+            "runs = ..."
+          ]
+        },
+        {
+          "name": "absorb",
+          "locals": [
+            "runs = @0x200",
+            "t = 3",
+            "hit = [1..1]",
+            "rest = (none)",
+            "lo = 1",
+            "hi = ..."
+          ]
+        }
+      ]
+    },
+    {
+      "t": "arrival 50 touches 2 runs",
+      "line": [
+        56
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "batch = 1..130  220..260  540..540",
+            "runs = ..."
+          ]
+        },
+        {
+          "name": "touching",
+          "locals": [
+            "runs = @0x200",
+            "t = 50",
+            "hit = [1..3, 90..130]",
+            "r = 90..130"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "so all 2 become ONE",
+      "line": [
+        68
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "batch = 1..130  220..260  540..540",
+            "runs = ..."
+          ]
+        },
+        {
+          "name": "absorb",
+          "locals": [
+            "runs = @0x200",
+            "t = 50",
+            "hit = [1..3, 90..130]",
+            "rest = 220..260",
+            "lo = 1",
+            "hi = 130"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "but 2 runs the consumer was shown no longer exist",
+      "line": [
+        77
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "batch = 1..130  220..260  540..540",
+            "runs = 1..130  220..260"
+          ]
+        },
+        {
+          "name": "withdrawn",
+          "locals": [
+            "before = 1..3  90..130  220..260",
+            "after = 1..130  220..260",
+            "gone = [1..3, 90..130]",
+            "r = 90..130"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and the start is not a stable key",
+      "line": [
+        79
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "batch = 1..130  220..260  540..540",
+            "runs = 1..130  220..260  540..540"
+          ]
+        },
+        {
+          "name": "withdrawn",
+          "locals": [
+            "before = 1..130  220..260",
+            "after = 1..130  220..260  540..540",
+            "gone = []",
+            "r = ..."
+          ]
+        }
+      ]
+    },
+    {
+      "t": "the incremental answer matches the batch one",
+      "line": [
+        42
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "batch = 1..130  220..260  540..540",
+            "runs = 1..130  220..260  540..540"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "what each arrival costs",
+      "line": [
+        63
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "batch = 1..130  220..260  540..540",
+            "runs = 1..130  220..260  540..540"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and the question nobody asked",
+      "line": [
+        93
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "batch = 1..130  220..260  540..540",
+            "runs = 1..130  220..260  540..540"
+          ]
+        }
+      ]
+    }
+  ]
+}

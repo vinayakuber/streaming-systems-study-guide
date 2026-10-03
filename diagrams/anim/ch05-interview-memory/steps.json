@@ -1,0 +1,282 @@
+{
+  "name": "ch05-interview-memory",
+  "steps": [
+    {
+      "t": "9 items, one total, one recorded position",
+      "line": [
+        67
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "clean = ...",
+            "dup = ...",
+            "lost = ...",
+            "exact = ...",
+            "dups = ...",
+            "losses = ..."
+          ]
+        }
+      ]
+    },
+    {
+      "t": "effect first: the total moves",
+      "line": [
+        32
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "clean = 45",
+            "dup = ...",
+            "lost = ...",
+            "exact = ...",
+            "dups = ...",
+            "losses = ..."
+          ]
+        },
+        {
+          "name": "effectThenPosition",
+          "locals": [
+            "items = @0x100",
+            "i = 3"
+          ]
+        },
+        {
+          "name": "applyItem",
+          "locals": [
+            "sum = 15",
+            "item = 3:2"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "it dies here, and restarts at pos = 3",
+      "line": [
+        34
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "clean = 45",
+            "dup = ...",
+            "lost = ...",
+            "exact = ...",
+            "dups = ...",
+            "losses = ..."
+          ]
+        },
+        {
+          "name": "effectThenPosition",
+          "locals": [
+            "items = @0x100",
+            "i = 3"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "so the total is 47, not 45",
+      "line": [
+        32
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "clean = 45",
+            "dup = 47",
+            "lost = ...",
+            "exact = ...",
+            "dups = ...",
+            "losses = ..."
+          ]
+        }
+      ]
+    },
+    {
+      "t": "so record the position first instead",
+      "line": [
+        44
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "clean = 45",
+            "dup = 47",
+            "lost = ...",
+            "exact = ...",
+            "dups = ...",
+            "losses = ..."
+          ]
+        },
+        {
+          "name": "positionThenEffect",
+          "locals": [
+            "items = @0x100",
+            "i = 3"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "it dies here, and item 3 is skipped forever",
+      "line": [
+        46
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "clean = 45",
+            "dup = 47",
+            "lost = ...",
+            "exact = ...",
+            "dups = ...",
+            "losses = ..."
+          ]
+        },
+        {
+          "name": "positionThenEffect",
+          "locals": [
+            "items = @0x100",
+            "i = 3"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "so neither ordering works, and that is a PROOF",
+      "line": [
+        47
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "clean = 45",
+            "dup = 47",
+            "lost = 43",
+            "exact = ...",
+            "dups = ...",
+            "losses = ..."
+          ]
+        }
+      ]
+    },
+    {
+      "t": "the reframe: make it ONE write",
+      "line": [
+        56
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "clean = 45",
+            "dup = 47",
+            "lost = 43",
+            "exact = ...",
+            "dups = ...",
+            "losses = ..."
+          ]
+        },
+        {
+          "name": "together",
+          "locals": [
+            "items = @0x100",
+            "i = 3"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "crash inside the transaction: neither write survives",
+      "line": [
+        59
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "clean = 45",
+            "dup = 47",
+            "lost = 43",
+            "exact = ...",
+            "dups = ...",
+            "losses = ..."
+          ]
+        },
+        {
+          "name": "together",
+          "locals": [
+            "items = @0x100",
+            "i = 3"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "so exactly-once needs the output to be transactional",
+      "line": [
+        61
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "clean = 45",
+            "dup = 47",
+            "lost = 43",
+            "exact = 45",
+            "dups = ...",
+            "losses = ..."
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and when the output is not transactional",
+      "line": [
+        71
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "clean = 45",
+            "dup = 47",
+            "lost = 43",
+            "exact = 45",
+            "dups = 9",
+            "losses = ..."
+          ]
+        }
+      ]
+    },
+    {
+      "t": "the bill",
+      "line": [
+        72
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "clean = 45",
+            "dup = 47",
+            "lost = 43",
+            "exact = 45",
+            "dups = 9",
+            "losses = 9"
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,310 @@
+{
+  "name": "ch09-interview-memory",
+  "steps": [
+    {
+      "t": "3 spans against 2, both sorted",
+      "line": [
+        71
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "slow = ...",
+            "fast = ...",
+            "gone = ..."
+          ]
+        }
+      ]
+    },
+    {
+      "t": "the overlap is two comparisons",
+      "line": [
+        22
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "slow = ...",
+            "fast = ...",
+            "gone = ..."
+          ]
+        },
+        {
+          "name": "everyPair",
+          "locals": [
+            "left = @0x100",
+            "right = @0x200",
+            "out = []",
+            "x = 130..245",
+            "y = 50..150",
+            "o = ..."
+          ]
+        },
+        {
+          "name": "overlapOf",
+          "locals": [
+            "x = 130..245",
+            "y = 50..150",
+            "lo = 130",
+            "hi = 150"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "every pair: 6 comparisons",
+      "line": [
+        34
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "slow = ...",
+            "fast = ...",
+            "gone = ..."
+          ]
+        },
+        {
+          "name": "everyPair",
+          "locals": [
+            "left = @0x100",
+            "right = @0x200",
+            "out = [130..150, 220..245]",
+            "x = 540..540",
+            "y = 220..320",
+            "o = NONE"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "the reframe: one pointer into each",
+      "line": [
+        46
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "slow = [130..150, 220..245]",
+            "fast = ...",
+            "gone = ..."
+          ]
+        },
+        {
+          "name": "sweep",
+          "locals": [
+            "left = @0x100",
+            "right = @0x200",
+            "out = []",
+            "i = 0",
+            "j = 0",
+            "o = ..."
+          ]
+        }
+      ]
+    },
+    {
+      "t": "1..3 ends before 50..150, so LEFT advances",
+      "line": [
+        52
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "slow = [130..150, 220..245]",
+            "fast = ...",
+            "gone = ..."
+          ]
+        },
+        {
+          "name": "sweep",
+          "locals": [
+            "left = @0x100",
+            "right = @0x200",
+            "out = []",
+            "i = 0",
+            "j = 0",
+            "o = NONE"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and here 50..150 ends first, so RIGHT advances",
+      "line": [
+        53
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "slow = [130..150, 220..245]",
+            "fast = ...",
+            "gone = ..."
+          ]
+        },
+        {
+          "name": "sweep",
+          "locals": [
+            "left = @0x100",
+            "right = @0x200",
+            "out = []",
+            "i = 1",
+            "j = 0",
+            "o = 130..150"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "overlap 2: 220..245",
+      "line": [
+        51
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "slow = [130..150, 220..245]",
+            "fast = ...",
+            "gone = ..."
+          ]
+        },
+        {
+          "name": "sweep",
+          "locals": [
+            "left = @0x100",
+            "right = @0x200",
+            "out = [130..150, 220..245]",
+            "i = 2",
+            "j = 1",
+            "o = 220..245"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "a pair that does not overlap at all",
+      "line": [
+        23
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "slow = [130..150, 220..245]",
+            "fast = ...",
+            "gone = ..."
+          ]
+        },
+        {
+          "name": "sweep",
+          "locals": [
+            "left = @0x100",
+            "right = @0x200",
+            "out = []",
+            "i = 0",
+            "j = 0",
+            "o = NONE"
+          ]
+        },
+        {
+          "name": "overlapOf",
+          "locals": [
+            "x = 1..3",
+            "y = 50..150",
+            "lo = 50",
+            "hi = 3"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "4 comparisons against 6",
+      "line": [
+        49
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "slow = [130..150, 220..245]",
+            "fast = [130..150, 220..245]",
+            "gone = ..."
+          ]
+        }
+      ]
+    },
+    {
+      "t": "now the second half: both lists are streams",
+      "line": [
+        73
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "slow = [130..150, 220..245]",
+            "fast = [130..150, 220..245]",
+            "gone = ..."
+          ]
+        },
+        {
+          "name": "droppable",
+          "locals": [
+            "left = @0x100",
+            "bound = 220",
+            "gone = []",
+            "x = 1..3"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "1 of 3 spans may be forgotten",
+      "line": [
+        64
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "slow = [130..150, 220..245]",
+            "fast = [130..150, 220..245]",
+            "gone = ..."
+          ]
+        },
+        {
+          "name": "droppable",
+          "locals": [
+            "left = @0x100",
+            "bound = 220",
+            "gone = [1..3]",
+            "x = 540..540"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "so the bound is the whole design",
+      "line": [
+        66
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "slow = [130..150, 220..245]",
+            "fast = [130..150, 220..245]",
+            "gone = 1 spans"
+          ]
+        }
+      ]
+    }
+  ]
+}

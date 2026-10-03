@@ -1,0 +1,337 @@
+{
+  "name": "ch03-interview-memory",
+  "steps": [
+    {
+      "t": "9 ticks, a window of 3, an answer per tick",
+      "line": [
+        100
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "slow = ...",
+            "fast = ...",
+            "spread = ..."
+          ]
+        }
+      ]
+    },
+    {
+      "t": "the first answer: read all 3",
+      "line": [
+        33
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "slow = ...",
+            "fast = ...",
+            "spread = ..."
+          ]
+        },
+        {
+          "name": "bruteMax",
+          "locals": [
+            "xs = @0x100",
+            "i = 0",
+            "best = 5",
+            "k = 1"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "why a heap does not work either",
+      "line": [
+        36
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "slow = ...",
+            "fast = ...",
+            "spread = ..."
+          ]
+        },
+        {
+          "name": "bruteMax",
+          "locals": [
+            "xs = @0x100",
+            "i = 0",
+            "best = 7",
+            "k = 3"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "the reframe: keep INDEXES, in decreasing order",
+      "line": [
+        63
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "slow = 21 reads",
+            "fast = ...",
+            "spread = ..."
+          ]
+        },
+        {
+          "name": "slideMax",
+          "locals": [
+            "xs = @0x100",
+            "dq = @0x200",
+            "out = []",
+            "i = 0"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "value 7 arrives and evicts 2 entries",
+      "line": [
+        46
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "slow = 21 reads",
+            "fast = ...",
+            "spread = ..."
+          ]
+        },
+        {
+          "name": "slideMax",
+          "locals": [
+            "xs = @0x100",
+            "dq = @0x200",
+            "out = 0 answers",
+            "i = 2"
+          ]
+        },
+        {
+          "name": "evictSmaller",
+          "locals": [
+            "dq = @0x200",
+            "xs = @0x100",
+            "i = 2"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "so the list is the window's suffix maxima",
+      "line": [
+        68
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "slow = 21 reads",
+            "fast = ...",
+            "spread = ..."
+          ]
+        },
+        {
+          "name": "slideMax",
+          "locals": [
+            "xs = @0x100",
+            "dq = @0x200",
+            "out = 0 answers",
+            "i = 2"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "a cheap tick: nothing to evict",
+      "line": [
+        45
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "slow = 21 reads",
+            "fast = ...",
+            "spread = ..."
+          ]
+        },
+        {
+          "name": "slideMax",
+          "locals": [
+            "xs = @0x100",
+            "dq = @0x200",
+            "out = 0 answers",
+            "i = 1"
+          ]
+        },
+        {
+          "name": "evictSmaller",
+          "locals": [
+            "dq = @0x200",
+            "xs = @0x100",
+            "i = 1"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "index 2 has left the window — dropped from the front",
+      "line": [
+        55
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "slow = 21 reads",
+            "fast = ...",
+            "spread = ..."
+          ]
+        },
+        {
+          "name": "slideMax",
+          "locals": [
+            "xs = @0x100",
+            "dq = @0x200",
+            "out = 3 answers",
+            "i = 5"
+          ]
+        },
+        {
+          "name": "expire",
+          "locals": [
+            "dq = @0x200",
+            "i = 5"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "the answer is the front: one read",
+      "line": [
+        70
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "slow = 21 reads",
+            "fast = ...",
+            "spread = ..."
+          ]
+        },
+        {
+          "name": "slideMax",
+          "locals": [
+            "xs = @0x100",
+            "dq = @0x200",
+            "out = [7]",
+            "i = 2"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "16 steps against 21 reads",
+      "line": [
+        73
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "slow = 21 reads",
+            "fast = [7, 7, 7, 6, 9, 9, 9]",
+            "spread = ..."
+          ]
+        },
+        {
+          "name": "slideMax",
+          "locals": [
+            "xs = @0x100",
+            "dq = @0x200",
+            "out = [7, 7, 7, 6, 9, 9, 9]",
+            "i = 9"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "the second half: a second list, kept INCREASING",
+      "line": [
+        87
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "slow = 21 reads",
+            "fast = [7, 7, 7, 6, 9, 9, 9]",
+            "spread = ..."
+          ]
+        },
+        {
+          "name": "slideSpread",
+          "locals": [
+            "xs = @0x100",
+            "hi = @0x200",
+            "lo = @0x300",
+            "out = 4 answers",
+            "i = 6"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "2 of 7 windows exceed 6",
+      "line": [
+        92
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "slow = 21 reads",
+            "fast = [7, 7, 7, 6, 9, 9, 9]",
+            "spread = [4, 5, 5, 5, 8, 8, 5]"
+          ]
+        },
+        {
+          "name": "slideSpread",
+          "locals": [
+            "xs = @0x100",
+            "hi = @0x200",
+            "lo = @0x300",
+            "out = [4, 5, 5, 5, 8, 8, 5]",
+            "i = 9"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and what the two lists cost",
+      "line": [
+        102
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "slow = 21 reads",
+            "fast = [7, 7, 7, 6, 9, 9, 9]",
+            "spread = [4, 5, 5, 5, 8, 8, 5]"
+          ]
+        }
+      ]
+    }
+  ]
+}

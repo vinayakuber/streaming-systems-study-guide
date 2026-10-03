@@ -1,4 +1,4 @@
-# Streaming Systems Study Guide — Read on GitHub
+# Study Guide — Read on GitHub
 
 Each chapter: flow, key concepts, and quiz (tap to reveal answers).
 
