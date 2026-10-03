@@ -1,0 +1,282 @@
+{
+  "name": "ch01-interview-memory",
+  "steps": [
+    {
+      "t": "9 values, a window of 3, an answer per arrival",
+      "line": [
+        58
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "slow = ...",
+            "fast = ...",
+            "early = ...",
+            "same = ...",
+            "drift = ..."
+          ]
+        }
+      ]
+    },
+    {
+      "t": "the first answer: add up the window",
+      "line": [
+        25
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "slow = ...",
+            "fast = ...",
+            "early = ...",
+            "same = ...",
+            "drift = ..."
+          ]
+        },
+        {
+          "name": "recomputeAt",
+          "locals": [
+            "xs = @0x100",
+            "i = 0",
+            "total = 5",
+            "k = 1"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "the reframe: one number, two operations",
+      "line": [
+        36
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "slow = 21 reads",
+            "fast = ...",
+            "early = ...",
+            "same = ...",
+            "drift = ..."
+          ]
+        },
+        {
+          "name": "onArrival",
+          "locals": [
+            "xs = @0x100",
+            "i = 0"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "value 5 leaves the window",
+      "line": [
+        38
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "slow = 21 reads",
+            "fast = ...",
+            "early = ...",
+            "same = ...",
+            "drift = ..."
+          ]
+        },
+        {
+          "name": "onArrival",
+          "locals": [
+            "xs = @0x100",
+            "i = 3"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and before 3 have arrived there is no answer",
+      "line": [
+        45
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "slow = 21 reads",
+            "fast = ...",
+            "early = ...",
+            "same = ...",
+            "drift = ..."
+          ]
+        },
+        {
+          "name": "report",
+          "locals": [
+            "i = 1"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "15 operations against 21 reads",
+      "line": [
+        46
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "slow = 21 reads",
+            "fast = 15 ops",
+            "early = ...",
+            "same = ...",
+            "drift = ..."
+          ]
+        },
+        {
+          "name": "report",
+          "locals": [
+            "i = 8"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "so is the running total exactly right?",
+      "line": [
+        61
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "slow = 21 reads",
+            "fast = 15 ops",
+            "early = NOT_YET",
+            "same = true",
+            "drift = ..."
+          ]
+        }
+      ]
+    },
+    {
+      "t": "now one value replaced by 10000000000000000",
+      "line": [
+        53
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "slow = 21 reads",
+            "fast = 15 ops",
+            "early = NOT_YET",
+            "same = true",
+            "drift = ..."
+          ]
+        },
+        {
+          "name": "driftAt",
+          "locals": [
+            "i = 1"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and the error only accumulates",
+      "line": [
+        53
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "slow = 21 reads",
+            "fast = 15 ops",
+            "early = NOT_YET",
+            "same = true",
+            "drift = 6"
+          ]
+        },
+        {
+          "name": "driftAt",
+          "locals": [
+            "i = 6"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "which is why integers are worth insisting on",
+      "line": [
+        36
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "slow = 21 reads",
+            "fast = 15 ops",
+            "early = NOT_YET",
+            "same = true",
+            "drift = 6"
+          ]
+        },
+        {
+          "name": "onArrival",
+          "locals": [
+            "xs = @0x100",
+            "i = 0"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and what else the window needs",
+      "line": [
+        37
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "slow = 21 reads",
+            "fast = 15 ops",
+            "early = NOT_YET",
+            "same = true",
+            "drift = 6"
+          ]
+        },
+        {
+          "name": "onArrival",
+          "locals": [
+            "xs = @0x100",
+            "i = 3"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "the bill",
+      "line": [
+        62
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "slow = 21 reads",
+            "fast = 15 ops",
+            "early = NOT_YET",
+            "same = true",
+            "drift = 6"
+          ]
+        }
+      ]
+    }
+  ]
+}

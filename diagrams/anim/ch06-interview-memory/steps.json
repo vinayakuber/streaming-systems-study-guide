@@ -1,0 +1,293 @@
+{
+  "name": "ch06-interview-memory",
+  "steps": [
+    {
+      "t": "9 changes, 2 keys",
+      "line": [
+        69
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "table = ...",
+            "back = ...",
+            "small = ...",
+            "same = ...",
+            "past = ...",
+            "gone = ..."
+          ]
+        }
+      ]
+    },
+    {
+      "t": "folding: later overwrites earlier",
+      "line": [
+        25
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "table = ...",
+            "back = ...",
+            "small = ...",
+            "same = ...",
+            "past = ...",
+            "gone = ..."
+          ]
+        },
+        {
+          "name": "fold",
+          "locals": [
+            "log = @0x100",
+            "t = {a:8  b:7}",
+            "e = b=7"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "9 changes become 2 entries",
+      "line": [
+        27
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "table = a:24  b:21",
+            "back = ...",
+            "small = ...",
+            "same = ...",
+            "past = ...",
+            "gone = ..."
+          ]
+        },
+        {
+          "name": "fold",
+          "locals": [
+            "log = @0x100",
+            "t = a:24  b:21",
+            "e = a=24"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and the table emits back as 2 changes",
+      "line": [
+        36
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "table = a:24  b:21",
+            "back = ...",
+            "small = ...",
+            "same = ...",
+            "past = ...",
+            "gone = ..."
+          ]
+        },
+        {
+          "name": "emit",
+          "locals": [
+            "t = @0x200",
+            "log = a=24",
+            "k = \"a\""
+          ]
+        }
+      ]
+    },
+    {
+      "t": "compaction: keep the last per key",
+      "line": [
+        47
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "table = a:24  b:21",
+            "back = 2 entries",
+            "small = ...",
+            "same = ...",
+            "past = ...",
+            "gone = ..."
+          ]
+        },
+        {
+          "name": "compact",
+          "locals": [
+            "log = @0x100",
+            "last = 2 keys",
+            "e = a=24"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and the compacted log folds to the same table",
+      "line": [
+        72
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "table = a:24  b:21",
+            "back = 2 entries",
+            "small = 2 entries",
+            "same = a:24  b:21",
+            "past = ...",
+            "gone = ..."
+          ]
+        }
+      ]
+    },
+    {
+      "t": "\"what was a after its 2nd change?\"",
+      "line": [
+        61
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "table = a:24  b:21",
+            "back = 2 entries",
+            "small = 2 entries",
+            "same = a:24  b:21",
+            "past = ...",
+            "gone = ..."
+          ]
+        },
+        {
+          "name": "valueAfter",
+          "locals": [
+            "log = @0x100",
+            "k = \"a\"",
+            "n = 2",
+            "seen = 2",
+            "e = a=8"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and from the compacted log: UNANSWERABLE",
+      "line": [
+        64
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "table = a:24  b:21",
+            "back = 2 entries",
+            "small = 2 entries",
+            "same = a:24  b:21",
+            "past = 8",
+            "gone = ..."
+          ]
+        },
+        {
+          "name": "valueAfter",
+          "locals": [
+            "log = @0x300",
+            "k = \"a\"",
+            "n = 2",
+            "seen = 1",
+            "e = a=24"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "so compaction trades history for size",
+      "line": [
+        49
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "table = a:24  b:21",
+            "back = 2 entries",
+            "small = 2 entries",
+            "same = a:24  b:21",
+            "past = 8",
+            "gone = UNANSWERABLE"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and it is why a delete must be an entry",
+      "line": [
+        25
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "table = a:24  b:21",
+            "back = 2 entries",
+            "small = 2 entries",
+            "same = a:24  b:21",
+            "past = 8",
+            "gone = UNANSWERABLE"
+          ]
+        },
+        {
+          "name": "fold",
+          "locals": [
+            "log = @0x300",
+            "t = a:24  b:21",
+            "e = a=24"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "how long the log has to be",
+      "line": [
+        71
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "table = a:24  b:21",
+            "back = 2 entries",
+            "small = 2 entries",
+            "same = a:24  b:21",
+            "past = 8",
+            "gone = UNANSWERABLE"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "the bill",
+      "line": [
+        70
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "table = a:24  b:21",
+            "back = 2 entries",
+            "small = 2 entries",
+            "same = a:24  b:21",
+            "past = 8",
+            "gone = UNANSWERABLE"
+          ]
+        }
+      ]
+    }
+  ]
+}

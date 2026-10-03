@@ -1,0 +1,293 @@
+{
+  "name": "ch07-interview-memory",
+  "steps": [
+    {
+      "t": "9 events, 2 keys, forever",
+      "line": [
+        86
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "free = ...",
+            "safe = ...",
+            "tight = ...",
+            "gap = ...",
+            "saved = ..."
+          ]
+        }
+      ]
+    },
+    {
+      "t": "one number per key, and that is all",
+      "line": [
+        33
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "free = ...",
+            "safe = ...",
+            "tight = ...",
+            "gap = ...",
+            "saved = ..."
+          ]
+        },
+        {
+          "name": "totals",
+          "locals": [
+            "events = @0x100",
+            "ttl = INFINITY",
+            "acc = @0x200",
+            "e = a@1"
+          ]
+        },
+        {
+          "name": "onEvent",
+          "locals": [
+            "acc = @0x200",
+            "e = a@1"
+          ]
+        },
+        {
+          "name": "add",
+          "locals": [
+            "acc = @0x200",
+            "e = a@1"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "unbounded: a:24  b:21, 2 keys held",
+      "line": [
+        66
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "free = a:24  b:21",
+            "safe = ...",
+            "tight = ...",
+            "gap = ...",
+            "saved = ..."
+          ]
+        },
+        {
+          "name": "totals",
+          "locals": [
+            "events = @0x100",
+            "ttl = INFINITY",
+            "acc = a:24  b:21",
+            "e = a@540"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "so drop anything untouched for TTL",
+      "line": [
+        42
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "free = a:24  b:21",
+            "safe = ...",
+            "tight = ...",
+            "gap = ...",
+            "saved = ..."
+          ]
+        },
+        {
+          "name": "dropStale",
+          "locals": [
+            "acc = @0x200",
+            "now = 540",
+            "k = \"a\""
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and \"a\" is dropped holding 16",
+      "line": [
+        43
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "free = a:24  b:21",
+            "safe = ...",
+            "tight = ...",
+            "gap = ...",
+            "saved = ..."
+          ]
+        },
+        {
+          "name": "dropStale",
+          "locals": [
+            "acc = @0x200",
+            "now = 540",
+            "k = \"a\""
+          ]
+        }
+      ]
+    },
+    {
+      "t": "then the next \"a\" event arrives",
+      "line": [
+        52
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "free = a:24  b:21",
+            "safe = ...",
+            "tight = ...",
+            "gap = ...",
+            "saved = ..."
+          ]
+        },
+        {
+          "name": "onEvent",
+          "locals": [
+            "acc = @0x200",
+            "e = a@540"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "so \"a\" totals 8, not 24",
+      "line": [
+        88
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "free = a:24  b:21",
+            "safe = a:24  b:21",
+            "tight = a:8  b:21",
+            "gap = ...",
+            "saved = ..."
+          ]
+        }
+      ]
+    },
+    {
+      "t": "at 295 every total is right again",
+      "line": [
+        87
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "free = a:24  b:21",
+            "safe = a:24  b:21",
+            "tight = a:8  b:21",
+            "gap = ...",
+            "saved = ..."
+          ]
+        }
+      ]
+    },
+    {
+      "t": "and that number is a property of the DATA",
+      "line": [
+        77
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "free = a:24  b:21",
+            "safe = a:24  b:21",
+            "tight = a:8  b:21",
+            "gap = ...",
+            "saved = ..."
+          ]
+        },
+        {
+          "name": "longestGap",
+          "locals": [
+            "events = @0x100",
+            "k = \"a\"",
+            "worst = 295",
+            "prev = 540",
+            "e = a@540"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "so the bound is a guess, and both errors are silent",
+      "line": [
+        66
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "free = a:24  b:21",
+            "safe = a:24  b:21",
+            "tight = a:8  b:21",
+            "gap = 295",
+            "saved = ..."
+          ]
+        }
+      ]
+    },
+    {
+      "t": "what would make it safe",
+      "line": [
+        53
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "free = a:24  b:21",
+            "safe = a:24  b:21",
+            "tight = a:8  b:21",
+            "gap = 295",
+            "saved = 0"
+          ]
+        },
+        {
+          "name": "onEvent",
+          "locals": [
+            "acc = @0x200",
+            "e = a@540"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "the bill",
+      "line": [
+        90
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "free = a:24  b:21",
+            "safe = a:24  b:21",
+            "tight = a:8  b:21",
+            "gap = 295",
+            "saved = 0"
+          ]
+        }
+      ]
+    }
+  ]
+}
