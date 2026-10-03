@@ -466,6 +466,389 @@ case the appealing first answer is to materialise a sequence you cannot afford.
 
 **Where it lands.** Neither `sweep` nor `overlapOf` survives; what carries over is the idea of walking a sorted sequence once. This is the case the chapter's program cannot do.
 
+
+<details>
+<summary><b>The whole program</b> for this variation — runnable, no animation</summary>
+
+This is **the double-booked room** solved on its own: a complete file, every helper included, asserting its own results. It is run on every build.
+
+```python
+#!/usr/bin/env python3
+"""Variation 2 -- the double-booked room (looks like facilities). Standalone and runnable.
+
+  One list this time: the bookings for a meeting room, sorted by start.  Report every pair
+  that overlaps, and the busiest moment -- the time at which the most bookings are live at
+  once.  Up to 10**6 bookings.
+
+The chapter had two lists and leaned on a promise about each one: within a list, spans never
+overlap.  Here there is one list and it overlaps ITSELF, so "the span that ends first is
+finished" is simply false and the two-pointer rule does not apply at all -- the version that
+pairs the list with itself is written out below and gets the wrong answer, which is more
+convincing than being told.  The move is to stop thinking in spans and think in EVENTS: every
+booking becomes a start and an end, all of them sorted together, and a running count rises
+and falls.  The busiest moment is that count's maximum and an overlap exists wherever it
+exceeds one.  The span-pair framing was the obstacle, not the solution -- and the event sweep
+is strictly more general, because it also answers the chapter's two-list question.
+
+Run it:  python3 programs/ch09_v2.py
+"""
+import random
+
+# The chapter's two lists poured into one, which is exactly what "one list this time" means:
+# its LEFT = [(1, 3), (130, 245), (540, 540)] and RIGHT = [(50, 150), (220, 320)], sorted by
+# start.  Neither list overlapped itself; the union does, and the chapter's two cross-list
+# overlaps (130..150 and 220..245) are now this room's two double-bookings.  Spans are CLOSED:
+# a booking from 130 to 245 occupies 245.
+BOOKINGS = [(1, 3), (50, 150), (130, 245), (220, 320), (540, 540)]
+LEFT = [(1, 3), (130, 245), (540, 540)]      # kept, to check the general sweep against
+RIGHT = [(50, 150), (220, 320)]
+# One more booking -- a long workshop from 140 to 230 -- so that THREE bookings are live at
+# once.  It is here because the chapter's union is not enough to break the two-pointer rule:
+# measured below, that rule gets the chapter's data exactly right, and only a third
+# simultaneous booking exposes it.
+WITH_WORKSHOP = sorted(BOOKINGS + [(140, 230)])
+NONE = None                                  # these two bookings do not overlap at all
+
+
+def overlap_of(x, y):
+    """The overlap of two closed spans, or NONE.  It starts at the LATER start and ends at the
+    EARLIER end, and if that comes out backwards there is no overlap -- so one expression
+    answers both "do they" and "where"."""
+    lo, hi = max(x[0], y[0]), min(x[1], y[1])
+    return NONE if hi < lo else (lo, hi)
+
+
+def every_pair(bookings):
+    """The answer everyone gives first, and the reference everything else is checked against:
+    try all of them.  Correct, and n(n-1)/2 comparisons -- at 10**6 bookings that is 5 x 10**11.
+    Returns (pairs, comparisons) with pairs as (i, j, lo, hi)."""
+    out, cmp = [], 0
+    for i in range(len(bookings)):
+        for j in range(i + 1, len(bookings)):
+            cmp += 1
+            o = overlap_of(bookings[i], bookings[j])
+            if o is not NONE:
+                out.append((i, j, o[0], o[1]))
+    return out, cmp
+
+
+def two_pointer_against_itself(bookings):
+    """The chapter's sweep, pointed at this problem: one cursor into the list and one into the
+    same list, advancing whichever span ends first.
+
+    It is here to be run rather than dismissed.  The rule was licensed by a promise -- the
+    other list does not overlap itself, so everything remaining in it starts later than the
+    span just compared -- and that promise is now false by construction.  What comes out is
+    every span matched with itself and the real double-bookings missed.
+    """
+    out, i, j = [], 0, 0
+    while i < len(bookings) and j < len(bookings):
+        o = overlap_of(bookings[i], bookings[j])
+        if o is not NONE and i != j:
+            out.append((min(i, j), max(i, j), o[0], o[1]))
+        if bookings[i][1] < bookings[j][1]:
+            i += 1
+        else:
+            j += 1
+    return out
+
+
+def marks_of(bookings):
+    """Every booking as two events: +1 where it starts, -1 just after it ends.
+
+    The end mark is at `end + 1` because the spans are CLOSED -- a booking occupying 245 is
+    still live at 245 and free at 246.  Sorting puts -1 before +1 at the same instant, which
+    is what makes a booking ending at 129 and one starting at 130 not count as a clash, while
+    one ending at 130 and one starting at 130 do.
+    """
+    marks = []
+    for s, e in bookings:
+        marks.append((s, 1))
+        marks.append((e + 1, -1))
+    marks.sort()
+    return marks
+
+
+def event_sweep(bookings):
+    """One pass over the sorted marks, carrying a running count of live bookings.
+
+    The mechanism: the count after processing every mark at an instant IS the number of
+    bookings covering that instant, so the maximum over the pass is the busiest moment and no
+    span is ever compared with another.  The pair count comes free -- an arriving booking
+    clashes with precisely those already live, so adding `live` at each start totals every
+    overlapping pair exactly once, counted at the later of the two starts.
+    Returns (max_live, busiest_moment, pair_count).
+    """
+    live = best = pairs = 0
+    at = None
+    for t, delta in marks_of(bookings):
+        if delta == 1:
+            pairs += live               # it clashes with everything currently live
+        live += delta
+        if live > best:
+            best, at = live, t
+    return best, at, pairs
+
+
+def cross_by_events(left, right):
+    """The same event sweep doing the CHAPTER's job: overlaps between two lists, not within one.
+
+    Each booking is tagged with the list it came from, and a start records an overlap against
+    every live span from the OTHER list.  The later start is the overlap's start, so the pair
+    is recorded exactly once.  It is strictly more general than the two-pointer sweep and
+    strictly more expensive -- the work is one pass plus the live spans touched -- which is the
+    honest summary of what generality costs here.
+    """
+    events = []
+    for tag, spans in (("L", left), ("R", right)):
+        for idx, (s, e) in enumerate(spans):
+            events.append((s, 1, tag, idx, e))
+            events.append((e + 1, -1, tag, idx, e))
+    events.sort(key=lambda m: (m[0], m[1]))
+    live = {"L": {}, "R": {}}
+    out = []
+    for t, delta, tag, idx, end in events:
+        other = "R" if tag == "L" else "L"
+        if delta == -1:
+            live[tag].pop(idx, None)
+            continue
+        for oidx, oend in live[other].items():
+            lo, hi = t, min(end, oend)
+            if hi >= lo:
+                pair = (idx, oidx) if tag == "L" else (oidx, idx)
+                out.append((pair[0], pair[1], lo, hi))
+        live[tag][idx] = end
+    return sorted(out)
+
+
+def every_cross_pair(left, right):
+    """The quadratic reference for the two-list question, indexed the same way."""
+    out = []
+    for i, x in enumerate(left):
+        for j, y in enumerate(right):
+            o = overlap_of(x, y)
+            if o is not NONE:
+                out.append((i, j, o[0], o[1]))
+    return sorted(out)
+
+
+def covering(bookings, t):
+    """How many bookings cover instant t, counted directly.  The per-instant reference the
+    sweep's answer is checked against -- affordable only on a small range, which is the whole
+    reason the sweep exists."""
+    return sum(1 for s, e in bookings if s <= t <= e)
+
+
+def main():
+    print(f"BOOKINGS = {BOOKINGS}   ({len(BOOKINGS)} bookings, closed spans)")
+    pairs, cmp = every_pair(BOOKINGS)
+    best, at, count = event_sweep(BOOKINGS)
+    print("  marks   =", marks_of(BOOKINGS))
+    print(f"\n  every pair  : {[(i, j, f'{lo}..{hi}') for i, j, lo, hi in pairs]}   "
+          f"({cmp} comparisons)")
+    print(f"  event sweep : busiest {best} bookings at t={at}, {count} overlapping pairs   "
+          f"({len(marks_of(BOOKINGS))} marks)")
+
+    assert pairs == [(1, 2, 130, 150), (2, 3, 220, 245)], pairs
+    assert (best, at, count) == (2, 130, 2), (best, at, count)
+    assert count == len(pairs), "the sweep's pair count must match the quadratic answer"
+    assert cmp == len(BOOKINGS) * (len(BOOKINGS) - 1) // 2 == 10
+    assert covering(BOOKINGS, at) == best, "the busiest moment must really be that busy"
+    assert any(s <= at <= e for s, e in BOOKINGS), "and it must be inside a booking"
+    print(f"  the two double-bookings are the chapter's two overlaps, 130..150 and 220..245 --")
+    print(f"  the same data, with the two lists poured into one.")
+
+    # the chapter's sweep, run rather than dismissed -- and it PASSES, which is the dangerous
+    # outcome.  The first version of this program asserted that it misses an overlap here; the
+    # measurement refused that, and the reason is worth more than the assertion was: the
+    # chapter's union is a CHAIN, each booking overlapping only its neighbour, so each
+    # comparison really does retire a span and the rule survives by luck.
+    wrong = two_pointer_against_itself(BOOKINGS)
+    print(f"\n  two-pointer sweep of the list against itself: "
+          f"{[(i, j, f'{lo}..{hi}') for i, j, lo, hi in wrong]}")
+    assert wrong == pairs, wrong
+    print(f"  it gets the right answer -- which is the worst thing it could do, because the")
+    print(f"  promise that licensed the rule is gone and the output does not say so.  In this")
+    print(f"  list every booking overlaps only its neighbour, so each comparison still retires a")
+    print(f"  span.  Breaking it needs THREE bookings live at once, which is also exactly the")
+    print(f"  thing the question asks about.")
+
+    # ...so add the third one
+    trip_pairs, trip_cmp = every_pair(WITH_WORKSHOP)
+    trip_best, trip_at, trip_count = event_sweep(WITH_WORKSHOP)
+    trip_wrong = two_pointer_against_itself(WITH_WORKSHOP)
+    print(f"\n  with a workshop from 140 to 230 added: {WITH_WORKSHOP}")
+    print(f"    every pair  : {len(trip_pairs)} pairs, busiest unknown to it   ({trip_cmp} comparisons)")
+    print(f"    event sweep : busiest {trip_best} at t={trip_at}, {trip_count} pairs   "
+          f"({len(marks_of(WITH_WORKSHOP))} marks)")
+    print(f"    two-pointer : {len(trip_wrong)} pairs   WRONG")
+    assert trip_count == len(trip_pairs) == 5, (trip_count, trip_pairs)
+    assert (trip_best, trip_at) == (3, 140), (trip_best, trip_at)
+    assert covering(WITH_WORKSHOP, trip_at) == 3
+    missed = [p for p in trip_pairs if p not in trip_wrong]
+    assert missed == [(1, 3, 140, 150)], missed
+    assert len(trip_wrong) == 4 < len(trip_pairs), trip_wrong
+    assert all(p in trip_pairs for p in trip_wrong), "it misses pairs, it never invents them"
+    print(f"    it finds {len(trip_wrong)} of {len(trip_pairs)} and misses {missed[0][2]}..{missed[0][3]}: after comparing bookings 1 and 2 it")
+    print(f"    advances past booking 1, which still had an overlap with booking 3 waiting.  The")
+    print(f"    rule retires a span per comparison, and with three live at once that is one span")
+    print(f"    too many.  It under-reports, so a double-booking is simply never raised.")
+
+    # the sweep's count, checked instant by instant across the whole range
+    lo_t, hi_t = min(s for s, _ in BOOKINGS), max(e for _, e in BOOKINGS)
+    by_instant = max(covering(BOOKINGS, t) for t in range(lo_t, hi_t + 2))
+    assert by_instant == best == 2, (by_instant, best)
+    for t in range(lo_t, hi_t + 2):
+        assert covering(BOOKINGS, t) <= best, t
+    print(f"\n  checked against a direct count at all {hi_t - lo_t + 2} instants from {lo_t} to {hi_t + 1}: the maximum is")
+    print(f"  {by_instant}, and no instant exceeds it -- so the running count is the concurrency, not a")
+    print(f"  proxy for it.")
+
+    # the same machinery on the chapter's own two-list question
+    cross = cross_by_events(LEFT, RIGHT)
+    reference = every_cross_pair(LEFT, RIGHT)
+    assert cross == reference == [(1, 0, 130, 150), (1, 1, 220, 245)], cross
+    print(f"\n  and the event sweep answers the chapter's question too: on its LEFT and RIGHT it")
+    print(f"  finds {[(f'L{i}', f'R{j}', f'{lo}..{hi}') for i, j, lo, hi in cross]},")
+    print(f"  which is the chapter's own answer -- so nothing was given up by abandoning the")
+    print(f"  two-pointer rule except the two-pointer rule's efficiency.")
+
+    # boundaries, each one a thing a real booking system has in it
+    assert event_sweep([]) == (0, None, 0), "an empty room has no busiest moment to report"
+    assert event_sweep([(5, 5)]) == (1, 5, 0), "a zero-length booking is still a booking"
+    assert event_sweep([(0, 10), (11, 20)]) == (1, 0, 0), "adjacent bookings do not clash"
+    assert event_sweep([(0, 10), (10, 20)]) == (2, 10, 1), "touching at one instant does"
+    assert event_sweep([(0, 10), (0, 10)]) == (2, 0, 1), "identical bookings clash once"
+    assert event_sweep([(0, 10)] * 4) == (4, 0, 6), "four identical bookings make 6 pairs"
+    assert event_sweep([(0, 100), (10, 20), (30, 40)]) == (2, 10, 2), "nesting, not just overlap"
+    print(f"\n  boundaries: [] -> {event_sweep([])} (no moment to report, not 0);  [(0,10),(11,20)] ->")
+    print(f"  {event_sweep([(0, 10), (11, 20)])} (adjacent is free);  [(0,10),(10,20)] -> {event_sweep([(0, 10), (10, 20)])} (closed spans touch,")
+    print(f"  so that IS a clash);  four identical bookings -> {event_sweep([(0, 10)] * 4)}, i.e. 4 choose 2 pairs")
+    print(f"  from one instant -- the pair count is quadratic in the answer even when the sweep")
+    print(f"  is linear in the input, which is why it is counted rather than listed.")
+
+    # many inputs, including heavy self-overlap, against the quadratic reference
+    rng = random.Random(20260303)
+    overlapping_cases, clean_cases = 0, 0
+    for _ in range(600):
+        n = rng.randint(0, 9)
+        spans = []
+        for _ in range(n):
+            s = rng.randint(0, 25)
+            spans.append((s, s + rng.randint(0, 8)))
+        spans.sort()
+        want, _ = every_pair(spans)
+        best_n, at_n, count_n = event_sweep(spans)
+        assert count_n == len(want), (spans, count_n, len(want))
+        if spans:
+            lo_s = min(s for s, _ in spans)
+            hi_s = max(e for _, e in spans)
+            direct = max(covering(spans, t) for t in range(lo_s, hi_s + 2))
+            assert best_n == direct, (spans, best_n, direct)
+            assert covering(spans, at_n) == best_n, (spans, at_n)
+        else:
+            assert (best_n, at_n, count_n) == (0, None, 0)
+        if want:
+            overlapping_cases += 1
+            assert best_n >= 2, (spans, best_n)
+        else:
+            clean_cases += 1
+            assert best_n <= 1, (spans, best_n)
+        # the two-pointer attempt may never beat the reference, only fall short of it
+        attempt = two_pointer_against_itself(spans)
+        assert all(p in want for p in attempt), (spans, attempt)
+        # and the cross-list sweep against its own quadratic reference
+        half = len(spans) // 2
+        a, b = sorted(spans[:half]), sorted(spans[half:])
+        a = [x for i, x in enumerate(a) if i == 0 or x[0] > a[i - 1][1]]
+        b = [x for i, x in enumerate(b) if i == 0 or x[0] > b[i - 1][1]]
+        assert cross_by_events(a, b) == every_cross_pair(a, b), (a, b)
+    print(f"\n  600 random booking lists, most of them self-overlapping: the event sweep's pair")
+    print(f"  count matched the quadratic answer every time and its maximum matched a direct")
+    print(f"  per-instant count every time ({overlapping_cases} lists had a clash, {clean_cases} were clean).  The")
+    print(f"  two-pointer attempt never reported a pair that was not real -- it only ever")
+    print(f"  reported fewer, which is exactly why nobody notices it is wrong.")
+    assert overlapping_cases > 0 and clean_cases > 0
+
+    # the scale the question names
+    BIG = 20_000
+    big = [(i * 5, i * 5 + 7) for i in range(BIG)]       # each booking overlaps its neighbour
+    marks = len(marks_of(big))
+    big_best, big_at, big_pairs = event_sweep(big)
+    would_compare = BIG * (BIG - 1) // 2
+    print(f"\n  at {BIG:,} bookings, each overlapping the next: busiest {big_best} at t={big_at}, "
+          f"{big_pairs:,} pairs,")
+    print(f"  from {marks:,} marks.  The quadratic answer would need {would_compare:,} comparisons for")
+    print(f"  the same result, and at the stated 10**6 bookings it would need 5 x 10**11 --")
+    print(f"  while the marks stay at 2 per booking.")
+    assert (big_best, big_pairs) == (2, BIG - 1), (big_best, big_pairs)
+    assert marks == 2 * BIG
+    assert would_compare // marks == 4_999, would_compare // marks
+    print("\nall assertions passed")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+Running it prints:
+
+```
+BOOKINGS = [(1, 3), (50, 150), (130, 245), (220, 320), (540, 540)]   (5 bookings, closed spans)
+  marks   = [(1, 1), (4, -1), (50, 1), (130, 1), (151, -1), (220, 1), (246, -1), (321, -1), (540, 1), (541, -1)]
+
+  every pair  : [(1, 2, '130..150'), (2, 3, '220..245')]   (10 comparisons)
+  event sweep : busiest 2 bookings at t=130, 2 overlapping pairs   (10 marks)
+  the two double-bookings are the chapter's two overlaps, 130..150 and 220..245 --
+  the same data, with the two lists poured into one.
+
+  two-pointer sweep of the list against itself: [(1, 2, '130..150'), (2, 3, '220..245')]
+  it gets the right answer -- which is the worst thing it could do, because the
+  promise that licensed the rule is gone and the output does not say so.  In this
+  list every booking overlaps only its neighbour, so each comparison still retires a
+  span.  Breaking it needs THREE bookings live at once, which is also exactly the
+  thing the question asks about.
+
+  with a workshop from 140 to 230 added: [(1, 3), (50, 150), (130, 245), (140, 230), (220, 320), (540, 540)]
+    every pair  : 5 pairs, busiest unknown to it   (15 comparisons)
+    event sweep : busiest 3 at t=140, 5 pairs   (12 marks)
+    two-pointer : 4 pairs   WRONG
+    it finds 4 of 5 and misses 140..150: after comparing bookings 1 and 2 it
+    advances past booking 1, which still had an overlap with booking 3 waiting.  The
+    rule retires a span per comparison, and with three live at once that is one span
+    too many.  It under-reports, so a double-booking is simply never raised.
+
+  checked against a direct count at all 541 instants from 1 to 541: the maximum is
+  2, and no instant exceeds it -- so the running count is the concurrency, not a
+  proxy for it.
+
+  and the event sweep answers the chapter's question too: on its LEFT and RIGHT it
+  finds [('L1', 'R0', '130..150'), ('L1', 'R1', '220..245')],
+  which is the chapter's own answer -- so nothing was given up by abandoning the
+  two-pointer rule except the two-pointer rule's efficiency.
+
+  boundaries: [] -> (0, None, 0) (no moment to report, not 0);  [(0,10),(11,20)] ->
+  (1, 0, 0) (adjacent is free);  [(0,10),(10,20)] -> (2, 10, 1) (closed spans touch,
+  so that IS a clash);  four identical bookings -> (4, 0, 6), i.e. 4 choose 2 pairs
+  from one instant -- the pair count is quadratic in the answer even when the sweep
+  is linear in the input, which is why it is counted rather than listed.
+
+  600 random booking lists, most of them self-overlapping: the event sweep's pair
+  count matched the quadratic answer every time and its maximum matched a direct
+  per-instant count every time (415 lists had a clash, 185 were clean).  The
+  two-pointer attempt never reported a pair that was not real -- it only ever
+  reported fewer, which is exactly why nobody notices it is wrong.
+
+  at 20,000 bookings, each overlapping the next: busiest 2 at t=5, 19,999 pairs,
+  from 40,000 marks.  The quadratic answer would need 199,990,000 comparisons for
+  the same result, and at the stated 10**6 bookings it would need 5 x 10**11 --
+  while the marks stay at 2 per booking.
+
+all assertions passed
+```
+
+</details>
+
 </details>
 <details>
 <summary><b>Variation 3</b> — the attributed click <i>(looks like advertising)</i></summary>
@@ -475,6 +858,366 @@ case the appealing first answer is to materialise a sequence you cannot afford.
 **Why it is not obvious.** Both halves of the chapter's problem are here and a third thing is added: the match is **asymmetric and one-to-one**, so an impression already matched must not match again, and "nearest" means a click cannot be answered until it is certain no closer impression is still in flight. That turns a stateless sweep into a wait, and the wait's length is exactly the lateness bound from the model above — so the bound stops being an optimisation and becomes a correctness requirement. The useful observation is that `W` and the lateness bound are different numbers that are easy to conflate.
 
 **Where it lands.** `droppable` with `bound` derived from `W` plus the lateness allowance, and `overlapOf` replaced by a nearest-preceding test with a one-to-one constraint.
+
+
+<details>
+<summary><b>The whole program</b> for this variation — runnable, no animation</summary>
+
+This is **the attributed click** solved on its own: a complete file, every helper included, asserting its own results. It is run on every build.
+
+```python
+#!/usr/bin/env python3
+"""Variation 3 -- the attributed click (looks like advertising). Standalone and runnable.
+
+  Impressions and clicks arrive on two streams.  Match each click to the impression that
+  preceded it by at most W seconds, and to the NEAREST such impression if several qualify.  An
+  impression may be credited with at most one click.
+
+Both halves of the chapter's problem are here -- two streams, and a bound on what may be
+forgotten -- and a third thing is added: the match is asymmetric and one-to-one, so "nearest"
+cannot be decided until it is certain no closer impression is still in flight.  That turns a
+stateless sweep into a WAIT, and the wait's length is the lateness allowance, not W.  Those are
+two different numbers in the same units and conflating them is the mistake this program
+measures: here W is 60 seconds of business rule and the data runs 85 seconds late, so waiting W
+loses attributions that waiting 85 recovers.  The bound has stopped being an optimisation and
+become a correctness requirement.  Two more things fall out, uninvited.  Answering a click
+early is wrong in BOTH directions -- measured below, it sometimes reports more attributions
+than the correct answer, so no count can audit it.  And "nearest" and "as many matches as
+possible" are different objectives; the spec asks for the first one.
+
+Run it:  python3 programs/ch09_v3.py
+"""
+import random
+
+# Impressions as (shown_at, arrived_at).  The shown_at times are the chapter's LEFT endpoints,
+# 1, 3, 130, 245 and 540 -- its key 'a' session boundaries.  One of them arrives late: the
+# impression shown at 245 reaches the matcher at 330, which is 85 seconds of lateness and is
+# deliberately MORE than W, so the two numbers cannot be confused for one.
+IMPRESSIONS = [(1, 1), (3, 3), (130, 130), (245, 330), (540, 540)]
+# Clicks, punctual, at the chapter's key 'b' event times 50, 90, 220 and 260, plus a second
+# click at 265 that wants the same impression as the one at 260 -- which is what makes the
+# one-to-one rule do some work.
+CLICKS = [50, 90, 220, 260, 265]
+W = 60                    # the attribution window: the chapter's widening constant J
+TRUE_LATENESS = 85        # measured below, not assumed: max(arrived_at - shown_at)
+UNATTRIBUTED = None       # not an impression: this click is credited to nobody
+
+
+def measured_lateness(impressions):
+    """The largest gap between being shown and arriving.  A property of the PIPELINE, knowable
+    only after the fact, which is why the wait is a promise rather than a derivation -- exactly
+    as the chapter's droppable bound was."""
+    return max(arrived - shown for shown, arrived in impressions)
+
+
+def in_window(shown, click_t, w):
+    """Whether an impression qualifies for a click: at or before it, and no more than w before.
+
+    Both ends are inclusive.  An impression shown at the same second as the click counts, and
+    one shown exactly w seconds earlier counts -- w + 1 does not.  Those three cases are the
+    whole definition, and each of them is a line in somebody's revenue report.
+    """
+    return click_t - w <= shown <= click_t
+
+
+def attribute(impressions, clicks, w, wait):
+    """Match each click, in click order, after waiting `wait` seconds for late impressions.
+
+    The mechanism: a click at t is answered at t + wait, so the impressions it may consider are
+    those that had ARRIVED by then -- which is a different set from those SHOWN inside its
+    window.  Among the arrived-and-qualifying impressions it takes the latest, and marks it
+    used so no later click can take it again.  `wait` therefore controls completeness and w
+    controls eligibility; they are independent and both are needed.
+    Returns [(click_t, shown_at or UNATTRIBUTED), ...].
+    """
+    used, out = set(), []
+    for click_t in clicks:
+        deadline = click_t + wait
+        best = UNATTRIBUTED
+        for shown, arrived in impressions:
+            if arrived > deadline:
+                continue                       # still in flight when this click was answered
+            if not in_window(shown, click_t, w):
+                continue
+            if shown in used:
+                continue                       # already credited with a click
+            if best is UNATTRIBUTED or shown > best:
+                best = shown                   # nearest preceding means the LATEST qualifying
+        if best is not UNATTRIBUTED:
+            used.add(best)
+        out.append((click_t, best))
+    return out
+
+
+def attribute_offline(impressions, clicks, w):
+    """The answer with every impression already in hand: the thing a nightly batch job computes
+    and the thing the stream is trying to equal.  Waiting long enough makes the stream agree
+    with it, and that is the only definition of "long enough" available."""
+    return attribute(impressions, clicks, w, wait=float("inf"))
+
+
+def matched_count(result):
+    """How many clicks were credited to an impression."""
+    return sum(1 for _, imp in result if imp is not UNATTRIBUTED)
+
+
+def max_matching(impressions, clicks, w):
+    """The largest number of clicks that COULD be attributed, by augmenting paths.
+
+    It is here as a yardstick, not as an alternative: the spec says nearest, and nearest is a
+    per-click rule that cannot see the clicks after it.  The mechanism is the standard one --
+    try to give each click an impression, and when every candidate is taken, ask the click
+    holding one to move to another, recursively.  The gap between this and `attribute` is the
+    price of answering each click on its own.
+    """
+    shown_list = [s for s, _ in impressions]
+    owner = {}
+
+    def try_click(ci, seen):
+        for idx, shown in enumerate(shown_list):
+            if idx in seen or not in_window(shown, clicks[ci], w):
+                continue
+            seen.add(idx)
+            if idx not in owner or try_click(owner[idx], seen):
+                owner[idx] = ci
+                return True
+        return False
+
+    total = 0
+    for ci in range(len(clicks)):
+        if try_click(ci, set()):
+            total += 1
+    return total
+
+
+def droppable(impressions, bound):
+    """Impressions that may be released, given a promise that no click still to arrive can be
+    answered before `bound`.
+
+    This is the chapter's rule with the wait folded in: an impression stops being needed once no
+    future click's window can reach it.  Without the promise nothing may be dropped and the
+    state grows for as long as the campaign runs -- and with it, the state is bounded by W plus
+    the lateness allowance, which is the sum of the two numbers, not either one.
+    """
+    return [(s, a) for s, a in impressions if s < bound]
+
+
+def main():
+    lateness = measured_lateness(IMPRESSIONS)
+    print(f"IMPRESSIONS (shown, arrived) = {IMPRESSIONS}")
+    print(f"CLICKS = {CLICKS}")
+    print(f"  W = {W} seconds (the attribution window), measured lateness = {lateness} seconds")
+    assert lateness == TRUE_LATENESS == 85, lateness
+    assert lateness > W, "the point of this data is that the two numbers are not the same"
+
+    at_once = attribute(IMPRESSIONS, CLICKS, W, wait=0)
+    waiting_w = attribute(IMPRESSIONS, CLICKS, W, wait=W)
+    waiting_l = attribute(IMPRESSIONS, CLICKS, W, wait=lateness)
+    offline = attribute_offline(IMPRESSIONS, CLICKS, W)
+    for label, res in (("answer at once (wait 0)", at_once),
+                       (f"wait W = {W}", waiting_w),
+                       (f"wait lateness = {lateness}", waiting_l),
+                       ("offline, all data", offline)):
+        shown = "  ".join(f"{c}->{'-' if i is UNATTRIBUTED else i}" for c, i in res)
+        print(f"  {label:<26} {shown}   ({matched_count(res)} attributed)")
+
+    assert at_once == [(50, 3), (90, None), (220, None), (260, None), (265, None)], at_once
+    assert waiting_w == at_once, "waiting W is not waiting long enough, and here changes nothing"
+    assert waiting_l == [(50, 3), (90, None), (220, None), (260, 245), (265, None)], waiting_l
+    assert waiting_l == offline, "waiting the measured lateness must equal the batch answer"
+    assert matched_count(at_once) == 1 and matched_count(waiting_l) == 2
+    assert matched_count(waiting_w) < matched_count(waiting_l), "the conflation costs a match"
+    print(f"\n  the click at 260 is attributed to the impression shown at 245 -- but that impression")
+    print(f"  arrives at 330, so a matcher that waits {W} seconds answers at 320 and credits nobody.")
+    print(f"  Waiting W is not a conservative version of waiting the lateness; it is the wrong")
+    print(f"  quantity, and it happens to be smaller here.  Attribution is lost, not approximated.")
+
+    # the one-to-one rule, and what it does to the click behind
+    assert waiting_l[4] == (265, UNATTRIBUTED), waiting_l[4]
+    assert in_window(245, 265, W), "265 qualified for 245 and was refused it"
+    both = attribute(IMPRESSIONS, [265], W, wait=lateness)
+    assert both == [(265, 245)], both
+    print(f"\n  the click at 265 also qualifies for the impression at 245 -- on its own it gets it")
+    print(f"  ({both[0][1]}) -- and is refused because the click at 260 took it first.  One-to-one makes")
+    print(f"  a click's answer depend on the clicks BEFORE it, which is why the clicks cannot be")
+    print(f"  answered out of order even though each window is independent.")
+
+    # ...and "nearest" is not "as many as possible"
+    greedy_imps = [(100, 100), (150, 150)]
+    greedy_clicks = [160, 199]
+    greedy = attribute(greedy_imps, greedy_clicks, W, wait=0)
+    best_possible = max_matching(greedy_imps, greedy_clicks, W)
+    print(f"\n  impressions at 100 and 150, clicks at 160 and 199, W = {W}:")
+    print(f"    nearest-first  : {greedy}   ({matched_count(greedy)} attributed)")
+    print(f"    best possible  : {best_possible} attributed (160 takes 100, 199 takes 150)")
+    assert greedy == [(160, 150), (199, None)], greedy
+    assert best_possible == 2 and matched_count(greedy) == 1
+    assert matched_count(greedy) < best_possible, "nearest-first must be shown to lose a match"
+    assert in_window(100, 160, W) and not in_window(100, 199, W)
+    print(f"    the click at 160 takes the nearer impression and strands the click at 199, whose")
+    print(f"    only candidate was the one just taken.  Both answers are defensible and the spec")
+    print(f"    picked the first -- so a report of 'lost' attributions may be the rule working.")
+
+    # ...and answering at once is not merely incomplete: it can report MORE attributions than
+    # the correct answer.  This is measured, not constructed -- it fell out of the random cases
+    # below and the first version of this program asserted the opposite.
+    late_imps = [(31, 31), (109, 109), (115, 155), (132, 172), (199, 199)]
+    late_clicks = [30, 51, 89, 154, 181]
+    rushed = attribute(late_imps, late_clicks, W, wait=0)
+    correct = attribute_offline(late_imps, late_clicks, W)
+    print(f"\n  impressions {late_imps}, clicks {late_clicks}:")
+    print(f"    answered at once : {rushed}   ({matched_count(rushed)} attributed)")
+    print(f"    the right answer : {correct}   ({matched_count(correct)} attributed)")
+    assert matched_count(rushed) == 3 and matched_count(correct) == 2
+    assert matched_count(rushed) > matched_count(correct), "the error is NOT one-directional"
+    assert rushed[2] == (89, UNATTRIBUTED) and correct[2] == (89, UNATTRIBUTED)
+    assert rushed[3] == (154, 109) and correct[3] == (154, 132), (rushed[3], correct[3])
+    assert rushed[4] == (181, 132) and correct[4] == (181, UNATTRIBUTED)
+    print(f"    the click at 154 cannot see the impression shown at 132 yet -- it arrives at 172 --")
+    print(f"    so it takes 109 instead, which leaves 132 free for the click at 181.  Three")
+    print(f"    attributions out of a rule that should have made two, and the extra one breaks")
+    print(f"    the spec: 154's nearest preceding impression was 132, not 109.  So the count of")
+    print(f"    attributions is not a check on the matcher -- a rushed matcher can report more")
+    print(f"    conversions than a correct one, which is the direction nobody audits.")
+
+    # boundaries: both ends of the window, and the far side of it
+    assert attribute([(100, 100)], [100], W, 0) == [(100, 100)], "shown at the click's own second"
+    assert attribute([(100, 100)], [160], W, 0) == [(160, 100)], "exactly W before: inside"
+    assert attribute([(100, 100)], [161], W, 0) == [(161, None)], "W + 1 before: outside"
+    assert attribute([(100, 100)], [99], W, 0) == [(99, None)], "after the click: never"
+    assert attribute([], [100], W, 0) == [(100, None)], "no impressions at all"
+    assert attribute([(100, 100)], [], W, 0) == [], "no clicks at all"
+    assert attribute([(100, 100)], [120, 120], W, 0) == [(120, 100), (120, None)], "a tie"
+    print(f"\n  boundaries: shown at the click's own second -> attributed; exactly {W} before ->")
+    print(f"  attributed; {W + 1} before -> not; shown after the click -> never; two clicks at the")
+    print(f"  same second -> the first takes it, because one-to-one admits no tie-break.")
+
+    # what may be forgotten, which is the chapter's question with the wait folded in
+    horizon = 260 - W - lateness
+    gone = droppable(IMPRESSIONS, horizon)
+    print(f"\n  with clicks answered no earlier than 260, an impression is needed only if it was")
+    print(f"  shown at or after 260 - W - lateness = {horizon}: droppable {gone}")
+    assert gone == [(1, 1), (3, 3)], gone
+    assert droppable(IMPRESSIONS, float("-inf")) == [], "with no promise, nothing may be dropped"
+    assert droppable(IMPRESSIONS, float("inf")) == IMPRESSIONS, "and a finished campaign, all"
+    print(f"  so the state is bounded by W PLUS the lateness allowance -- {W} + {lateness} = {W + lateness} seconds of")
+    print(f"  impressions -- and neither number alone would have been enough to size it.")
+
+    # many inputs: waiting the measured lateness must always equal the batch answer
+    rng = random.Random(20260303)
+    fewer, more, equal_count, same, greedy_loses, greedy_ties = 0, 0, 0, 0, 0, 0
+    for _ in range(600):
+        n_imp, n_click = rng.randint(0, 6), rng.randint(0, 5)
+        imps = []
+        for _ in range(n_imp):
+            shown = rng.randint(0, 200)
+            imps.append((shown, shown + rng.choice((0, 0, 5, 40, 120))))
+        imps.sort()
+        imps = [(s, a) for i, (s, a) in enumerate(imps) if i == 0 or s != imps[i - 1][0]]
+        clicks = sorted(rng.randint(0, 260) for _ in range(n_click))
+        late = measured_lateness(imps) if imps else 0
+        batch = attribute_offline(imps, clicks, W)
+        assert attribute(imps, clicks, W, wait=late) == batch, (imps, clicks, late)
+        now = attribute(imps, clicks, W, wait=0)
+        # CORRECTED CLAIM.  This asserted matched_count(now) <= matched_count(batch) -- that
+        # answering early can only lose attributions -- and a random case refused it: a click
+        # that cannot see its nearest impression takes a farther one and thereby frees the
+        # nearer one for a later click.  Answering early is wrong in BOTH directions, so no
+        # count-based check can detect it.
+        delta = matched_count(now) - matched_count(batch)
+        fewer += delta < 0
+        more += delta > 0
+        equal_count += delta == 0
+        same += now == batch
+        # every attribution must be legal and unique, at any wait
+        for wait in (0, W, late, late + 50):
+            res = attribute(imps, clicks, W, wait)
+            credited = [i for _, i in res if i is not UNATTRIBUTED]
+            assert len(credited) == len(set(credited)), (imps, clicks, wait)
+            for click_t, i in res:
+                if i is not UNATTRIBUTED:
+                    assert in_window(i, click_t, W), (click_t, i)
+        # nearest-first can never beat the best possible, and sometimes falls short
+        best = max_matching(imps, clicks, W)
+        got = matched_count(batch)
+        assert got <= best, (imps, clicks, got, best)
+        if got < best:
+            greedy_loses += 1
+        else:
+            greedy_ties += 1
+    print(f"\n  600 random stream pairs: waiting the measured lateness equalled the batch answer")
+    print(f"  every single time.  Answering at once attributed FEWER clicks in {fewer} cases, MORE in")
+    print(f"  {more}, and the same number in {equal_count} -- and it reproduced the batch answer exactly in only")
+    print(f"  {same}.  Every attribution at every wait was inside its window and no impression was")
+    print(f"  credited twice.  Nearest-first matched the maximum possible in {greedy_ties} cases and fewer")
+    print(f"  in {greedy_loses}, so the one-to-one rule leaves money on the table by design, not by bug.")
+    assert fewer > 0 and more > 0 and same > 0 and greedy_loses > 0
+    assert (fewer, more, equal_count, same, greedy_loses, greedy_ties) == (133, 2, 465, 408, 21, 579)
+    print("\nall assertions passed")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+Running it prints:
+
+```
+IMPRESSIONS (shown, arrived) = [(1, 1), (3, 3), (130, 130), (245, 330), (540, 540)]
+CLICKS = [50, 90, 220, 260, 265]
+  W = 60 seconds (the attribution window), measured lateness = 85 seconds
+  answer at once (wait 0)    50->3  90->-  220->-  260->-  265->-   (1 attributed)
+  wait W = 60                50->3  90->-  220->-  260->-  265->-   (1 attributed)
+  wait lateness = 85         50->3  90->-  220->-  260->245  265->-   (2 attributed)
+  offline, all data          50->3  90->-  220->-  260->245  265->-   (2 attributed)
+
+  the click at 260 is attributed to the impression shown at 245 -- but that impression
+  arrives at 330, so a matcher that waits 60 seconds answers at 320 and credits nobody.
+  Waiting W is not a conservative version of waiting the lateness; it is the wrong
+  quantity, and it happens to be smaller here.  Attribution is lost, not approximated.
+
+  the click at 265 also qualifies for the impression at 245 -- on its own it gets it
+  (245) -- and is refused because the click at 260 took it first.  One-to-one makes
+  a click's answer depend on the clicks BEFORE it, which is why the clicks cannot be
+  answered out of order even though each window is independent.
+
+  impressions at 100 and 150, clicks at 160 and 199, W = 60:
+    nearest-first  : [(160, 150), (199, None)]   (1 attributed)
+    best possible  : 2 attributed (160 takes 100, 199 takes 150)
+    the click at 160 takes the nearer impression and strands the click at 199, whose
+    only candidate was the one just taken.  Both answers are defensible and the spec
+    picked the first -- so a report of 'lost' attributions may be the rule working.
+
+  impressions [(31, 31), (109, 109), (115, 155), (132, 172), (199, 199)], clicks [30, 51, 89, 154, 181]:
+    answered at once : [(30, None), (51, 31), (89, None), (154, 109), (181, 132)]   (3 attributed)
+    the right answer : [(30, None), (51, 31), (89, None), (154, 132), (181, None)]   (2 attributed)
+    the click at 154 cannot see the impression shown at 132 yet -- it arrives at 172 --
+    so it takes 109 instead, which leaves 132 free for the click at 181.  Three
+    attributions out of a rule that should have made two, and the extra one breaks
+    the spec: 154's nearest preceding impression was 132, not 109.  So the count of
+    attributions is not a check on the matcher -- a rushed matcher can report more
+    conversions than a correct one, which is the direction nobody audits.
+
+  boundaries: shown at the click's own second -> attributed; exactly 60 before ->
+  attributed; 61 before -> not; shown after the click -> never; two clicks at the
+  same second -> the first takes it, because one-to-one admits no tie-break.
+
+  with clicks answered no earlier than 260, an impression is needed only if it was
+  shown at or after 260 - W - lateness = 115: droppable [(1, 1), (3, 3)]
+  so the state is bounded by W PLUS the lateness allowance -- 60 + 85 = 145 seconds of
+  impressions -- and neither number alone would have been enough to size it.
+
+  600 random stream pairs: waiting the measured lateness equalled the batch answer
+  every single time.  Answering at once attributed FEWER clicks in 133 cases, MORE in
+  2, and the same number in 465 -- and it reproduced the batch answer exactly in only
+  408.  Every attribution at every wait was inside its window and no impression was
+  credited twice.  Nearest-first matched the maximum possible in 579 cases and fewer
+  in 21, so the one-to-one rule leaves money on the table by design, not by bug.
+
+all assertions passed
+```
+
+</details>
 
 </details>
 <details>
@@ -486,7 +1229,675 @@ case the appealing first answer is to materialise a sequence you cannot afford.
 
 **Where it lands.** One pass over `LEFT` emitting the gaps, with `overlapOf` unused. The same sorted, non-overlapping guarantee is what makes the single pass sufficient.
 
+
+<details>
+<summary><b>The whole program</b> for this variation — runnable, no animation</summary>
+
+This is **the unavailable hours** solved on its own: a complete file, every helper included, asserting its own results. It is run on every build.
+
+```python
+#!/usr/bin/env python3
+"""Variation 4 -- the unavailable hours (looks like scheduling). Standalone and runnable.
+
+  Given one person's busy spans, report their FREE spans between a start and an end.  A year of
+  minutes is 525,600 of them, so the range may not be walked.
+
+The complement rather than the intersection, and it is almost all boundary conditions: before
+the first busy span, between consecutive ones, after the last, and the empty cases where
+somebody is busy throughout or not at all.  There is no clever idea here and that is the
+content -- a candidate who finds the chapter's two-pointer sweep elegant and then fumbles this
+is showing the more relevant thing, because the gap-between-consecutive pattern is the one that
+appears in working code and off-by-one at the ends is where it breaks.  What makes it worth
+running is that the one pass has two unstated preconditions, SORTED and NON-OVERLAPPING, which
+the chapter handed over as a promise.  Both versions that quietly assume them are written out
+below, and both report time as free when the person is busy -- the one direction of error a
+calendar must never have.
+
+Run it:  python3 programs/ch09_v4.py
+"""
+import random
+
+# The chapter's LEFT list as one person's busy spans -- its key 'a' sessions at a gap of 120 --
+# and the chapter's own window of 0 to 600.  Spans are CLOSED: busy from 130 to 245 means minute
+# 245 is busy and 246 is not.
+BUSY = [(1, 3), (130, 245), (540, 540)]
+START, END = 0, 600
+YEAR_MINUTES = 525_600
+
+
+def free_spans(busy, start, end):
+    """The free spans, in one pass over the busy spans sorted by start.
+
+    The mechanism is a cursor holding the first minute not yet accounted for.  A busy span
+    beginning after the cursor exposes a gap, which is emitted as (cursor, s - 1); then the
+    cursor jumps past the span's end.  `max(cursor, e + 1)` is what makes a span nested inside
+    an earlier one harmless: the cursor may only ever move forward, because a minute already
+    known to be busy cannot become free because a shorter span also covered it.  The tail after
+    the last span is emitted outside the loop, which is the only reason the loop needs no
+    special case for it.
+    """
+    free, cursor = [], start
+    for s, e in sorted(busy):
+        if e < start or s > end:
+            continue                        # entirely outside the window: not our business
+        if s > cursor:
+            free.append((cursor, s - 1))
+        cursor = max(cursor, e + 1)
+    if cursor <= end:
+        free.append((cursor, end))
+    return free
+
+
+def free_spans_forward_cursor(busy, start, end):
+    """The same pass with `cursor = e + 1` in place of `max(cursor, e + 1)`.
+
+    It is the version that gets written, because on non-overlapping spans the max is visibly
+    redundant.  Give it a span NESTED inside an earlier one and the cursor moves backwards, so
+    the tail is emitted from the wrong place and minutes already known to be busy are reported
+    free.  The output still looks like a plausible calendar, which is the problem.
+    """
+    free, cursor = [], start
+    for s, e in sorted(busy):
+        if e < start or s > end:
+            continue
+        if s > cursor:
+            free.append((cursor, s - 1))
+        cursor = e + 1
+    if cursor <= end:
+        free.append((cursor, end))
+    return free
+
+
+def free_spans_unsorted(busy, start, end):
+    """The same pass without the sort, relying on the caller's promise that the spans arrive in
+    order.  A calendar merges spans from several sources, so that promise is the first thing to
+    go -- and when it does, a span that arrives late is skipped entirely and its minutes are
+    reported as free."""
+    free, cursor = [], start
+    for s, e in busy:
+        if e < start or s > end:
+            continue
+        if s > cursor:
+            free.append((cursor, s - 1))
+        cursor = max(cursor, e + 1)
+    if cursor <= end:
+        free.append((cursor, end))
+    return free
+
+
+def free_by_walking(busy, start, end):
+    """The reference: ask of every single minute whether it is busy, and group the runs.
+
+    Correct, trivially, and O(end - start) -- at a year of minutes that is 525,600 questions to
+    report a handful of spans, which is why it is the thing the one pass replaces and not the
+    thing that ships.  It is also the only implementation here that cannot have an off-by-one,
+    which is exactly what makes it the right reference.
+    """
+    out, run = [], None
+    for t in range(start, end + 1):
+        busy_now = any(s <= t <= e for s, e in busy)
+        if not busy_now and run is None:
+            run = t
+        elif busy_now and run is not None:
+            out.append((run, t - 1))
+            run = None
+    if run is not None:
+        out.append((run, end))
+    return out
+
+
+def minutes(spans):
+    """Total minutes covered by a list of closed, non-overlapping spans."""
+    return sum(e - s + 1 for s, e in spans)
+
+
+def busy_inside(busy, start, end):
+    """Busy minutes inside the window, counted without double-counting an overlap -- the other
+    half of the invariant that free and busy must together be the whole window."""
+    covered = set()
+    for s, e in busy:
+        covered.update(range(max(s, start), min(e, end) + 1))
+    return len(covered)
+
+
+def main():
+    free = free_spans(BUSY, START, END)
+    walked = free_by_walking(BUSY, START, END)
+    print(f"BUSY   = {BUSY}")
+    print(f"window = {START}..{END}")
+    print(f"  one pass        : {free}")
+    print(f"  per-minute walk : {walked}   ({END - START + 1} minutes examined)")
+
+    assert free == walked == [(0, 0), (4, 129), (246, 539), (541, 600)], free
+    assert len(free) == len(BUSY) + 1, "k busy spans inside the window make at most k + 1 gaps"
+    assert minutes(free) == 481 and busy_inside(BUSY, START, END) == 120
+    assert minutes(free) + busy_inside(BUSY, START, END) == END - START + 1
+    print(f"  {minutes(free)} free minutes + {busy_inside(BUSY, START, END)} busy minutes = {END - START + 1}, the whole window -- the two")
+    print(f"  lists partition it, which is the only check that catches an off-by-one at BOTH")
+    print(f"  ends at once, since a one-minute error moves a minute from one total to the other.")
+
+    # the four shapes of gap the single pass has to produce
+    print(f"\n  the gaps, in the order the pass emits them:")
+    print(f"    (0, 0)      before the first busy span, and one minute long")
+    print(f"    (4, 129)    between two busy spans")
+    print(f"    (246, 539)  between two busy spans")
+    print(f"    (541, 600)  after the last busy span, emitted outside the loop")
+    assert free[0] == (START, BUSY[0][0] - 1), "the leading gap comes from the cursor's start"
+    assert free[-1] == (BUSY[-1][1] + 1, END), "the trailing gap comes from the tail clause"
+    assert free[0][0] == free[0][1], "a one-minute gap must survive as a span, not vanish"
+
+    # precondition one: nothing may be nested
+    nested = [(0, 100), (10, 20)]
+    good = free_spans(nested, 0, 120)
+    bad = free_spans_forward_cursor(nested, 0, 120)
+    truth = free_by_walking(nested, 0, 120)
+    print(f"\n  a meeting nested inside a longer one, {nested}, window 0..120:")
+    print(f"    max(cursor, e + 1) : {good}   (correct)")
+    print(f"    cursor = e + 1     : {bad}   WRONG")
+    assert good == truth == [(101, 120)], good
+    assert bad == [(21, 120)] and bad != truth, bad
+    assert minutes(bad) > minutes(good), "the error direction is extra FREE time, every time"
+    assert busy_inside(nested, 21, 100) == 80
+    print(f"    the cursor moved backwards from 101 to 21, so {80} minutes the person is busy for")
+    print(f"    are offered as free.  The error is one-directional: a broken complement over-")
+    print(f"    reports availability, which is the failure a calendar cannot afford.")
+
+    # precondition two: the spans must arrive in order
+    out_of_order = [(130, 245), (1, 3), (540, 540)]
+    sorted_ok = free_spans(out_of_order, START, END)
+    unsorted_bad = free_spans_unsorted(out_of_order, START, END)
+    print(f"\n  the same spans arriving out of order, {out_of_order}:")
+    print(f"    with the sort    : {sorted_ok}   (correct)")
+    print(f"    without the sort : {unsorted_bad}   WRONG")
+    assert sorted_ok == free, "sorting makes arrival order irrelevant, which is the point"
+    # MEASURED, and smaller than guessed: only the span that arrives out of order is lost.
+    # The first expectation was [(0, 129), (246, 600)] -- the span at 540 swallowed as well --
+    # which is wrong, because the cursor is still behind 540 when that span is read, so the
+    # pass handles it correctly.  The damage is confined to the late arrival, which is why a
+    # missing sort survives review: the output is right everywhere except in one span.
+    assert unsorted_bad == [(0, 129), (246, 539), (541, 600)], unsorted_bad
+    assert unsorted_bad != free
+    assert minutes(unsorted_bad) > minutes(free), "again: too much free time, not too little"
+    lost = minutes(unsorted_bad) - minutes(free)
+    assert lost == 3 == minutes([BUSY[0]]), lost
+    assert unsorted_bad[1:] == free[2:], "everything after the late arrival is still right"
+    print(f"    the span at 1..3 arrives after the cursor has passed it and is skipped, so its {lost}")
+    print(f"    busy minutes are offered as free -- and the rest of the day is still correct,")
+    print(f"    which is exactly why a missing sort survives a review of the output.")
+
+    # boundaries, every one of them a real calendar
+    cases = [
+        ([], 0, 10, [(0, 10)], "no meetings: the whole window"),
+        ([(0, 10)], 0, 10, [], "busy throughout: nothing free, and NOT a one-span answer"),
+        ([(0, 5)], 0, 10, [(6, 10)], "busy at the start"),
+        ([(5, 10)], 0, 10, [(0, 4)], "busy at the end"),
+        ([(-5, 20)], 0, 10, [], "a span covering the window from outside it"),
+        ([(-5, 3)], 0, 10, [(4, 10)], "a span starting before the window"),
+        ([(8, 20)], 0, 10, [(0, 7)], "a span ending after the window"),
+        ([(20, 30)], 0, 10, [(0, 10)], "a span entirely after the window"),
+        ([(-30, -20)], 0, 10, [(0, 10)], "a span entirely before it"),
+        ([(0, 3), (4, 7)], 0, 10, [(8, 10)], "adjacent spans leave NO gap between them"),
+        ([(0, 3), (5, 7)], 0, 10, [(4, 4), (8, 10)], "one minute between them does"),
+        ([(5, 5)], 0, 10, [(0, 4), (6, 10)], "a zero-length meeting still splits the day"),
+        ([(0, 10)], 5, 5, [], "a one-minute window, busy"),
+        ([(0, 1)], 5, 5, [(5, 5)], "a one-minute window, free"),
+    ]
+    print(f"\n  boundaries:")
+    for busy, lo, hi, want, label in cases:
+        got = free_spans(busy, lo, hi)
+        assert got == want, (busy, lo, hi, got, want)
+        assert got == free_by_walking(busy, lo, hi), (busy, lo, hi)
+        assert minutes(got) + busy_inside(busy, lo, hi) == hi - lo + 1, (busy, lo, hi)
+        print(f"    {str(busy):<18} {lo}..{hi} -> {str(got):<22} {label}")
+    assert free_spans([], 10, 5) == [], "an empty window has no free time, and is not an error"
+    assert free_by_walking([], 10, 5) == []
+    print(f"    {'[]':<18} 10..5 -> {str([]):<22} start after end: empty, not an error")
+
+    # many inputs, including overlap and disorder, against the per-minute walk
+    rng = random.Random(20260303)
+    cursor_wrong, unsorted_wrong, overlapping = 0, 0, 0
+    for _ in range(600):
+        n = rng.randint(0, 7)
+        busy = []
+        for _ in range(n):
+            s = rng.randint(-3, 30)
+            busy.append((s, s + rng.randint(0, 10)))
+        lo, hi = 0, rng.randint(5, 35)
+        want = free_by_walking(busy, lo, hi)
+        assert free_spans(busy, lo, hi) == want, (busy, lo, hi)
+        assert minutes(want) + busy_inside(busy, lo, hi) == hi - lo + 1, (busy, lo, hi)
+        srt = sorted(busy)
+        if any(srt[i][0] <= srt[i - 1][1] for i in range(1, len(srt))):
+            overlapping += 1
+        if free_spans_forward_cursor(busy, lo, hi) != want:
+            cursor_wrong += 1
+            assert minutes(free_spans_forward_cursor(busy, lo, hi)) >= minutes(want)
+        shuffled = busy[:]
+        rng.shuffle(shuffled)
+        if free_spans_unsorted(shuffled, lo, hi) != want:
+            unsorted_wrong += 1
+            assert minutes(free_spans_unsorted(shuffled, lo, hi)) >= minutes(want)
+        # the gaps must never touch a busy minute, and never touch each other
+        for i, (s, e) in enumerate(want):
+            assert s <= e, (busy, want)
+            assert not any(bs <= s <= be or bs <= e <= be for bs, be in busy), (busy, want)
+            if i:
+                assert s > want[i - 1][1] + 1, (busy, want)
+    print(f"\n  600 random calendars ({overlapping} of them with overlapping or nested spans): the one")
+    print(f"  pass matched the per-minute walk every single time, and free plus busy always came")
+    print(f"  to the whole window.  The forward-cursor version was wrong on {cursor_wrong} and the unsorted")
+    print(f"  version on {unsorted_wrong}, and NEITHER was ever wrong in the safe direction -- every failure")
+    print(f"  reported more free time than there was.")
+    assert cursor_wrong > 0 and unsorted_wrong > 0 and overlapping > 0
+    assert (cursor_wrong, unsorted_wrong, overlapping) == (98, 267, 354)
+
+    # the scale the question names: a year of minutes
+    BIG_SPANS = 2_000
+    big = [(i * 250 + 10, i * 250 + 70) for i in range(BIG_SPANS)]
+    big_free = free_spans(big, 0, YEAR_MINUTES)
+    print(f"\n  a year of {YEAR_MINUTES:,} minutes with {BIG_SPANS:,} meetings in it:")
+    print(f"    one pass        : {len(big_free):,} free spans from {len(big):,} busy spans")
+    print(f"    per-minute walk : would ask {YEAR_MINUTES + 1:,} questions for the same answer")
+    print(f"    {(YEAR_MINUTES + 1) // len(big):,}x the work, and the gap grows with the CALENDAR'S RANGE while the")
+    print(f"    pass grows with the number of MEETINGS -- which is the only reason the complement")
+    print(f"    is computed from the spans at all.")
+    assert len(big_free) == BIG_SPANS + 1, len(big_free)
+    assert minutes(big_free) + minutes(big) == YEAR_MINUTES + 1
+    assert (YEAR_MINUTES + 1) // len(big) == 262
+    assert big_free[0] == (0, 9) and big_free[-1] == (big[-1][1] + 1, YEAR_MINUTES)
+    print("\nall assertions passed")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+Running it prints:
+
+```
+BUSY   = [(1, 3), (130, 245), (540, 540)]
+window = 0..600
+  one pass        : [(0, 0), (4, 129), (246, 539), (541, 600)]
+  per-minute walk : [(0, 0), (4, 129), (246, 539), (541, 600)]   (601 minutes examined)
+  481 free minutes + 120 busy minutes = 601, the whole window -- the two
+  lists partition it, which is the only check that catches an off-by-one at BOTH
+  ends at once, since a one-minute error moves a minute from one total to the other.
+
+  the gaps, in the order the pass emits them:
+    (0, 0)      before the first busy span, and one minute long
+    (4, 129)    between two busy spans
+    (246, 539)  between two busy spans
+    (541, 600)  after the last busy span, emitted outside the loop
+
+  a meeting nested inside a longer one, [(0, 100), (10, 20)], window 0..120:
+    max(cursor, e + 1) : [(101, 120)]   (correct)
+    cursor = e + 1     : [(21, 120)]   WRONG
+    the cursor moved backwards from 101 to 21, so 80 minutes the person is busy for
+    are offered as free.  The error is one-directional: a broken complement over-
+    reports availability, which is the failure a calendar cannot afford.
+
+  the same spans arriving out of order, [(130, 245), (1, 3), (540, 540)]:
+    with the sort    : [(0, 0), (4, 129), (246, 539), (541, 600)]   (correct)
+    without the sort : [(0, 129), (246, 539), (541, 600)]   WRONG
+    the span at 1..3 arrives after the cursor has passed it and is skipped, so its 3
+    busy minutes are offered as free -- and the rest of the day is still correct,
+    which is exactly why a missing sort survives a review of the output.
+
+  boundaries:
+    []                 0..10 -> [(0, 10)]              no meetings: the whole window
+    [(0, 10)]          0..10 -> []                     busy throughout: nothing free, and NOT a one-span answer
+    [(0, 5)]           0..10 -> [(6, 10)]              busy at the start
+    [(5, 10)]          0..10 -> [(0, 4)]               busy at the end
+    [(-5, 20)]         0..10 -> []                     a span covering the window from outside it
+    [(-5, 3)]          0..10 -> [(4, 10)]              a span starting before the window
+    [(8, 20)]          0..10 -> [(0, 7)]               a span ending after the window
+    [(20, 30)]         0..10 -> [(0, 10)]              a span entirely after the window
+    [(-30, -20)]       0..10 -> [(0, 10)]              a span entirely before it
+    [(0, 3), (4, 7)]   0..10 -> [(8, 10)]              adjacent spans leave NO gap between them
+    [(0, 3), (5, 7)]   0..10 -> [(4, 4), (8, 10)]      one minute between them does
+    [(5, 5)]           0..10 -> [(0, 4), (6, 10)]      a zero-length meeting still splits the day
+    [(0, 10)]          5..5 -> []                     a one-minute window, busy
+    [(0, 1)]           5..5 -> [(5, 5)]               a one-minute window, free
+    []                 10..5 -> []                     start after end: empty, not an error
+
+  600 random calendars (354 of them with overlapping or nested spans): the one
+  pass matched the per-minute walk every single time, and free plus busy always came
+  to the whole window.  The forward-cursor version was wrong on 98 and the unsorted
+  version on 267, and NEITHER was ever wrong in the safe direction -- every failure
+  reported more free time than there was.
+
+  a year of 525,600 minutes with 2,000 meetings in it:
+    one pass        : 2,001 free spans from 2,000 busy spans
+    per-minute walk : would ask 525,601 questions for the same answer
+    262x the work, and the gap grows with the CALENDAR'S RANGE while the
+    pass grows with the number of MEETINGS -- which is the only reason the complement
+    is computed from the spans at all.
+
+all assertions passed
+```
+
 </details>
+
+</details>
+
+#### The whole program
+
+Everything above as one file you can run: no animation, no stack, no heap — the complete solution, every helper included, and the measurements at the bottom. It is **run by `tools/run_programs.sh` on every build** and asserts its own results, so if it stopped working this section could not be generated.
+
+```python
+#!/usr/bin/env python3
+"""Every overlap between two sorted lists of spans -- and what a stream may forget.
+
+Two sorted lists of time spans.  Within a list, spans never overlap each other.
+Report every overlap between a span in the first list and a span in the second.
+10^6 spans in each.  Then: both lists are streams that keep arriving -- what may
+you throw away?
+
+Two facts are handed to you and both matter: each list is SORTED, and within a list
+the spans never overlap.  The second is what licenses the advance rule, and it is
+easy to read past as scene-setting.
+
+Run it:  python3 programs/ch09.py
+"""
+import random
+
+# Data, from tools/gen_ch09_interview.js over tools/stream_seed.js.
+# LEFT: key "a"'s sessions at the seed's gap of 120 (consecutive times within 120
+# of each other merged).  RIGHT: key "b"'s events widened to [et, et+J] with J = 60
+# and then merged, so the two lists come from the same seed by different rules and
+# neither overlaps itself.
+LEFT = [(1, 3), (130, 245), (540, 540)]
+RIGHT = [(50, 150), (220, 320)]
+M, NB = len(LEFT), len(RIGHT)
+NONE = None                     # these two spans do not overlap at all
+
+def overlap_of(x, y):
+    """The overlap, or NONE.  The only geometry in the problem: it starts at the LATER
+    start and ends at the EARLIER end, and if that comes out backwards there is no
+    overlap -- so one expression answers both "do they" and "where"."""
+    lo = max(x[0], y[0])
+    hi = min(x[1], y[1])
+    if hi < lo:
+        return NONE
+    return (lo, hi)
+
+def every_pair(left, right):
+    """The answer everyone gives first: try all of them.  Correct, quadratic, and it
+    uses neither of the two facts the question handed you.  Returns (overlaps,
+    comparisons)."""
+    out, cmp = [], 0
+    for x in left:
+        for y in right:
+            cmp += 1
+            o = overlap_of(x, y)
+            if o is not NONE:
+                out.append(o)
+    return out, cmp
+
+def sweep(left, right):
+    """One cursor into each list, advancing whichever span ENDS FIRST.
+
+    That span cannot overlap anything further along the other list, because the other
+    list is sorted AND its spans do not overlap each other -- so everything remaining
+    there starts later than the one just compared.  Each comparison retires exactly
+    one span, so the total is at most m + n.  The rule is symmetric and must be:
+    advancing by start, or always advancing the left, skips overlaps.  And a single
+    span can produce SEVERAL overlaps, so the loop must not assume one each.
+
+    Returns (overlaps, comparisons, trace).
+    """
+    out, trace = [], []
+    i = j = cmp = 0
+    while i < len(left) and j < len(right):
+        cmp += 1
+        o = overlap_of(left[i], right[j])
+        if o is not NONE:
+            out.append(o)
+        advance = "left" if left[i][1] < right[j][1] else "right"
+        trace.append({"i": i, "j": j, "x": left[i], "y": right[j], "o": o, "advance": advance})
+        if advance == "left":
+            i += 1
+        else:
+            j += 1
+    return out, cmp, trace
+
+def droppable(left, bound):
+    """Spans that may be forgotten, given a promise that nothing still to arrive on the
+    other side can START before `bound`.
+
+    The sweep assumed both lists were complete.  As streams they are not: a span the
+    cursor has passed cannot be released, because something overlapping it may not
+    have arrived -- so "finished with" becomes a claim about the FUTURE.  Without such
+    a bound NOTHING can be dropped and the state grows for as long as the system runs.
+    """
+    return [x for x in left if x[1] < bound]
+
+# The three variations.
+
+def the_double_booked_room(bookings):
+    """Variation 1, surface: facilities.  One list; find overlapping pairs and the
+    busiest moment.
+
+    Non-obvious point: self-overlap removes the guarantee the sweep rested on, so
+    "ends first means finished" is false and the two-pointer rule does not apply at
+    all.  The move is to stop thinking in spans and think in EVENTS: each span becomes
+    a start and an end, sorted together, and a running count rises and falls.  The
+    busiest moment is the count's maximum and an overlap exists wherever it exceeds
+    one.  The span-pair framing was the obstacle, not the solution.
+
+    Returns (max_concurrency, busiest_moment, overlapping_pair_count).
+    """
+    marks = []
+    for s, e in bookings:
+        marks.append((s, 1))
+        marks.append((e + 1, -1))        # closed intervals: the end is still busy
+    marks.sort()
+    live = best = 0
+    at = None
+    pairs = 0
+    for t, d in marks:
+        if d == 1:
+            pairs += live                # the arriving booking clashes with all live ones
+        live += d
+        if live > best:
+            best, at = live, t
+    return best, at, pairs
+
+def the_attributed_click(impressions, clicks, w, wait_for_late):
+    """Variation 2, surface: advertising.  Match each click to the NEAREST impression
+    that preceded it by at most w, one-to-one.
+
+    Non-obvious point: the match is asymmetric and one-to-one, so an impression already
+    matched must not match again -- and "nearest" means a click cannot be answered until
+    it is certain no closer impression is still in flight.  That turns a stateless
+    sweep into a WAIT, whose length is the lateness bound from `droppable`, so the bound
+    stops being an optimisation and becomes a correctness requirement.  w and the
+    lateness bound are different numbers and are easy to conflate.
+
+    `impressions` is [(arrival_order_index, t), ...] -- its t values may arrive late.
+    `wait_for_late` false answers each click immediately; true waits for every
+    impression first.  Returns [(click_t, impression_t or None), ...].
+    """
+    out, used = [], set()
+    for ci, ct in enumerate(clicks):
+        if wait_for_late:
+            pool = [t for _, t in impressions]
+        else:                            # only what had arrived by this click's position
+            pool = [t for order, t in impressions if order <= ci]
+        best = None
+        for t in pool:
+            if ct - w <= t <= ct and t not in used:
+                if best is None or t > best:
+                    best = t
+        if best is not None:
+            used.add(best)
+        out.append((ct, best))
+    return out
+
+def the_unavailable_hours(busy, start, end):
+    """Variation 3, surface: scheduling.  Report the FREE spans between start and end.
+
+    Non-obvious point: the complement rather than the intersection, and it is almost
+    all boundary conditions -- before the first busy span, between consecutive ones,
+    after the last, and the empty cases where someone is busy throughout or not at
+    all.  There is no clever idea, which is the point: the gap-between-consecutive
+    pattern is what appears in working code, and off-by-one at the ends is where it
+    breaks.  The sorted, non-overlapping guarantee is what makes one pass enough.
+    """
+    free, cursor = [], start
+    for s, e in sorted(busy):
+        if e < start or s > end:
+            continue
+        if s > cursor:
+            free.append((cursor, s - 1))
+        cursor = max(cursor, e + 1)
+    if cursor <= end:
+        free.append((cursor, end))
+    return free
+
+def main():
+    print(f"LEFT  = {LEFT}")
+    print(f"RIGHT = {RIGHT}")
+    cross, cross_cmp = every_pair(LEFT, RIGHT)
+    fast, cmp, trace = sweep(LEFT, RIGHT)
+    for s in trace:
+        o = "NONE" if s["o"] is NONE else f"{s['o'][0]}..{s['o'][1]}"
+        print(f"  i={s['i']} j={s['j']}  {s['x']} vs {s['y']}  ->  {o:<8} advance {s['advance']}")
+    print(f"\n  every pair : {cross}   ({M} x {NB} = {cross_cmp} comparisons)")
+    print(f"  sweep      : {fast}   ({cmp} comparisons)")
+
+    assert fast == cross == [(130, 150), (220, 245)], (fast, cross)
+    assert (cross_cmp, cmp) == (6, 4) and cmp < cross_cmp
+    assert cmp <= M + NB, "each comparison must retire exactly one span"
+    assert len(fast) >= 2, "fewer than two overlaps and the advance rule would not matter"
+    assert any(s["advance"] == "left" for s in trace), "the left side never advanced"
+    assert any(s["advance"] == "right" for s in trace), "the right side never advanced"
+    assert any(s["o"] is NONE for s in trace), "no compared pair failed to overlap"
+    assert all(LEFT[k][0] > LEFT[k - 1][1] for k in range(1, M)), "LEFT overlaps itself"
+    assert all(RIGHT[k][0] > RIGHT[k - 1][1] for k in range(1, NB)), "RIGHT overlaps itself"
+    # one LEFT span produces BOTH overlaps, so the loop may not assume one each
+    assert sum(1 for s in trace if s["o"] is not NONE and s["x"] == (130, 245)) == 2
+    # the geometry, both ways round
+    assert overlap_of((130, 245), (50, 150)) == (130, 150)
+    assert overlap_of((1, 3), (50, 150)) is NONE and overlap_of((540, 540), (220, 320)) is NONE
+    assert overlap_of((5, 5), (5, 5)) == (5, 5), "closed intervals touch at a point"
+
+    bound = RIGHT[-1][0]
+    gone, kept = droppable(LEFT, bound), [x for x in LEFT if x not in droppable(LEFT, bound)]
+    print(f"\n  with a bound of {bound} on how late RIGHT may be: droppable {gone}, kept {kept}")
+    assert gone == [(1, 3)] and kept == [(130, 245), (540, 540)], (gone, kept)
+    assert len(gone) == 1 and len(kept) == 2
+    # and the opposite outcome is forbidden: with no promise, NOTHING may be dropped
+    assert droppable(LEFT, float("-inf")) == [], "a stream with no bound must keep everything"
+    assert droppable(LEFT, float("inf")) == LEFT, "and a finished stream may drop all of it"
+
+    # variations
+    best, at, pairs = the_double_booked_room([(0, 10), (5, 15), (12, 20), (100, 101)])
+    print(f"\n  double-booked room: busiest {best} at t={at}, {pairs} overlapping pairs")
+    assert (best, at, pairs) == (2, 5, 2), (best, at, pairs)
+    assert the_double_booked_room([(0, 1), (2, 3)]) == (1, 0, 0), "no overlap, no clash"
+
+    late = [(0, 100), (1, 180), (2, 150)]          # the 150 impression arrives LAST
+    now = the_attributed_click(late, [200], w=60, wait_for_late=False)
+    later = the_attributed_click(late, [200], w=60, wait_for_late=True)
+    print(f"  attributed click: answering at once gives {now} (lost), waiting gives {later}")
+    # MEASURED, and sharper than first expected: answering the click at once does not
+    # merely pick a worse impression, it finds NONE at all -- the only impression that
+    # had arrived (100) is already outside the w = 60 window, so the attribution is
+    # lost rather than approximated.  Waiting for the late arrivals recovers 180.
+    assert now == [(200, None)] and later == [(200, 180)], (now, later)
+    assert now != later, "the wait must change the answer"
+    # a click at 160 answered immediately picks 100; waiting finds the nearer 150
+    now2 = the_attributed_click(late, [160], w=60, wait_for_late=False)
+    later2 = the_attributed_click(late, [160], w=60, wait_for_late=True)
+    assert now2 == [(160, 100)] and later2 == [(160, 150)], (now2, later2)
+    assert now2 != later2, "the wait must change the answer, or it is not needed"
+    print(f"                    a click at 160: at once {now2[0][1]}, waiting {later2[0][1]}")
+    # one-to-one: two clicks may not take the same impression
+    two = the_attributed_click([(0, 100)], [120, 130], w=60, wait_for_late=True)
+    assert two == [(120, 100), (130, None)], two
+
+    free = the_unavailable_hours([(130, 245), (540, 540)], 0, 600)
+    print(f"  unavailable hours: free {free}")
+    assert free == [(0, 129), (246, 539), (541, 600)], free
+    assert the_unavailable_hours([], 0, 10) == [(0, 10)], "no busy spans: all free"
+    assert the_unavailable_hours([(0, 10)], 0, 10) == [], "busy throughout: nothing free"
+    assert the_unavailable_hours([(0, 5)], 0, 10) == [(6, 10)], "busy at the start"
+    assert the_unavailable_hours([(5, 10)], 0, 10) == [(0, 4)], "busy at the end"
+    assert the_unavailable_hours([(-5, 20)], 0, 10) == [], "a span covering the window"
+
+    # brute force over many inputs, not just the one example
+    rng = random.Random(20260303)
+    both_ways = 0
+    for _ in range(800):
+        def make(n):
+            spans, t = [], rng.randint(0, 5)
+            for _ in range(n):
+                s = t + rng.randint(1, 8)
+                e = s + rng.randint(0, 6)
+                spans.append((s, e))
+                t = e + 1
+            return spans
+        left, right = make(rng.randint(1, 8)), make(rng.randint(1, 8))
+        want, _ = every_pair(left, right)
+        got, c, tr = sweep(left, right)
+        assert got == want, (left, right)
+        assert c <= len(left) + len(right), (left, right, c)
+        if any(s["advance"] == "left" for s in tr) and any(s["advance"] == "right" for s in tr):
+            both_ways += 1
+        # the complement, against a naive per-unit scan
+        busy_units = {u for s, e in left for u in range(s, e + 1)}
+        lo, hi = 0, max(e for _, e in left) + 3
+        naive, run = [], None
+        for u in range(lo, hi + 1):
+            if u not in busy_units and run is None:
+                run = u
+            elif u in busy_units and run is not None:
+                naive.append((run, u - 1))
+                run = None
+        if run is not None:
+            naive.append((run, hi))
+        assert the_unavailable_hours(left, lo, hi) == naive, (left, lo, hi)
+        # and the event sweep, against a naive pair count
+        pairs_naive = sum(1 for a in range(len(left)) for b in range(a + 1, len(left))
+                          if overlap_of(left[a], left[b]) is not NONE)
+        assert the_double_booked_room(left)[2] == pairs_naive, left
+    assert both_ways > 0, "no random case exercised both advance directions"
+    print(f"\n  800 random span-list pairs: sweep == every pair, never more than m + n")
+    print(f"  comparisons ({both_ways} exercised both advance directions), the free-span")
+    print("  complement == a per-unit scan, and the event sweep == a naive pair count.")
+    print("\nall assertions passed")
+
+if __name__ == "__main__":
+    main()
+```
+
+Running it prints:
+
+```
+LEFT  = [(1, 3), (130, 245), (540, 540)]
+RIGHT = [(50, 150), (220, 320)]
+  i=0 j=0  (1, 3) vs (50, 150)  ->  NONE     advance left
+  i=1 j=0  (130, 245) vs (50, 150)  ->  130..150 advance right
+  i=1 j=1  (130, 245) vs (220, 320)  ->  220..245 advance left
+  i=2 j=1  (540, 540) vs (220, 320)  ->  NONE     advance right
+
+  every pair : [(130, 150), (220, 245)]   (3 x 2 = 6 comparisons)
+  sweep      : [(130, 150), (220, 245)]   (4 comparisons)
+
+  with a bound of 220 on how late RIGHT may be: droppable [(1, 3)], kept [(130, 245), (540, 540)]
+
+  double-booked room: busiest 2 at t=5, 2 overlapping pairs
+  attributed click: answering at once gives [(200, None)] (lost), waiting gives [(200, 180)]
+                    a click at 160: at once 100, waiting 150
+  unavailable hours: free [(0, 129), (246, 539), (541, 600)]
+
+  800 random span-list pairs: sweep == every pair, never more than m + n
+  comparisons (697 exercised both advance directions), the free-span
+  complement == a per-unit scan, and the event sweep == a naive pair count.
+
+all assertions passed
+```
 
 #### The solution as a running program — stack and heap at every step
 

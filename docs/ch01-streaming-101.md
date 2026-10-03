@@ -450,6 +450,354 @@ case the appealing first answer is to materialise a sequence you cannot afford.
 
 **Where it lands.** `onArrival`'s subtraction is the line that cannot be written, which is why this needs a monotonic deque instead of a running total.
 
+
+<details>
+<summary><b>The whole program</b> for this variation — runnable, no animation</summary>
+
+This is **the rolling maximum** solved on its own: a complete file, every helper included, asserting its own results. It is run on every build.
+
+```python
+#!/usr/bin/env python3
+"""Variation 2 — the rolling maximum (looks like risk). Standalone and runnable.
+
+  A risk screen shows the LARGEST exposure among the last W ticks and must update on
+  every tick.  Same window, same "you may not re-read it" rule as the average: one
+  arrival in, one departure out, an answer after each tick.
+
+The trick does not transfer, and seeing exactly why is the whole exercise.  A total can
+have a value subtracted out of it because addition is invertible; a maximum cannot --
+once the maximum leaves the window, no single kept number can produce the next one.  So
+an incremental window needs an INVERTIBLE COMBINE, which sums and counts have and
+extremes do not, and the replacement is a structure (the values that could still become
+the maximum) rather than an accumulator.  The impossibility is proved below by running
+it, not argued: two windows agree on (kept maximum, departing value, arriving value) and
+disagree on the answer, so no update function of those three arguments can exist.
+
+Run it:  python3 programs/ch01_v2.py
+"""
+
+import random
+
+# The chapter's own stream, reused unchanged: these are the nine seed values in arrival
+# order, all DISTINCT so a wrong window cannot be mistaken for a right one, and they rise
+# AND fall, which a monotone input would hide.  Here they are exposures in lakh.
+VALUES = [5, 3, 7, 2, 6, 1, 9, 4, 8]
+
+# W = 3, the chapter's window: large enough that a value departs, small enough to trace.
+W = 3
+
+# HUGE = 1e16 is the chapter's constant too, and for the same reason: a float64 carries
+# ~15-16 significant decimal digits, so a total near 1e16 cannot also hold a unit value
+# exactly.  It is used here for the SECOND half of the invertibility point -- addition is
+# invertible in arithmetic but not in float64, and only for a MIXTURE of magnitudes.
+HUGE = 1e16
+
+N = len(VALUES)
+NWIN = N - W + 1
+
+
+def brute_max(xs, i, w=W):
+    """Window i, read in full.  The reference: w reads per window, exact by construction
+    because nothing is ever removed from a kept quantity."""
+    best = xs[i]
+    for k in range(1, w):
+        if xs[i + k] > best:
+            best = xs[i + k]
+    return best
+
+
+def all_maxima(xs, w=W):
+    """brute_max over every window, for comparison."""
+    return [brute_max(xs, i, w) for i in range(len(xs) - w + 1)]
+
+
+def running_total(xs, w=W):
+    """The average's machine, kept here as the CONTRAST: one accumulator, +arriving and
+    -departing.  It works because subtraction undoes addition exactly."""
+    total, out = 0, []
+    for i, v in enumerate(xs):
+        total += v
+        if i - w >= 0:
+            total -= xs[i - w]
+        if i >= w - 1:
+            out.append(total)
+    return out
+
+
+def running_max_single(xs, w=W):
+    """The appealing wrong answer: keep ONE number and max the arrival into it.
+
+    The departure has no line to write -- there is no un-max -- so the kept number is
+    really the maximum of the whole PREFIX, which can only be too high, never too low.
+    Returned so the comparison is run rather than described."""
+    best, out = None, []
+    for i, v in enumerate(xs):
+        best = v if best is None else max(best, v)
+        # the departing value xs[i - w] would have to be removed here, and cannot be
+        if i >= w - 1:
+            out.append(best)
+    return out
+
+
+def running_max_rescan(xs, w=W):
+    """The second attempt, and it is CORRECT: keep one number, and when the departing
+    value is the one being kept, rescan the window to find the next.
+
+    The cost is what fails.  Returns (answers, rescans): on a decreasing stream the
+    maximum departs every single tick, so this is the full re-read the question forbids,
+    recovered under a different name."""
+    out, rescans = [], 0
+    best = None
+    for i, v in enumerate(xs):
+        if i < w - 1:
+            best = v if best is None else max(best, v)
+            continue
+        if best is None or i == w - 1:
+            best = brute_max(xs, 0, w)
+            rescans += 1
+        else:
+            if xs[i - w] == best:          # the kept number just left the window
+                best = brute_max(xs, i - w + 1, w)
+                rescans += 1
+            else:
+                best = max(best, v)
+        out.append(best)
+    return out, rescans
+
+
+def slide_max(xs, w=W):
+    """The answer: keep the INDEXES that could still become the maximum, decreasing.
+
+    An arriving value makes every smaller-or-equal entry behind it dead -- the newcomer
+    is both larger and newer, so while any of them is in the window so is it, and it is
+    the bigger.  Indexes rather than values, because only an index says whether an entry
+    has left.  The front is the answer in one read; at most one entry can expire per tick
+    because the window moves by one.  Returns (answers, pushes, pops, expiries)."""
+    dq, out = [], []
+    pushes = pops = expiries = 0
+    for i, v in enumerate(xs):
+        while dq and xs[dq[-1]] <= v:
+            dq.pop()
+            pops += 1
+        dq.append(i)
+        pushes += 1
+        if dq[0] <= i - w:
+            dq.pop(0)
+            expiries += 1
+        if i >= w - 1:
+            out.append(xs[dq[0]])
+    return out, pushes, pops, expiries
+
+
+def find_max_collision(rng, w=W, tries=20000):
+    """Search for the proof that no incremental maximum exists.
+
+    Two windows with the SAME kept maximum, the SAME departing value and the SAME
+    arriving value, whose next maxima differ.  Any update function f(kept, out, in) must
+    return one number for one argument triple, so finding this pair rules out every such
+    function at once -- including ones nobody has thought of yet.  The same search over
+    SUMS can never succeed, which is what invertible means, and that is checked too."""
+    seen = {}
+    for _ in range(tries):
+        win = [rng.randint(0, 9) for _ in range(w)]
+        arriving = rng.randint(0, 9)
+        key = (max(win), win[0], arriving)
+        nxt = max(win[1:] + [arriving])
+        if key in seen and seen[key][0] != nxt:
+            return key, seen[key], (nxt, win)
+        seen.setdefault(key, (nxt, win))
+    return None
+
+
+def find_sum_collision(rng, w=W, tries=20000):
+    """The same search over sums.  It must come back empty: kept - out + in is a
+    function, so two windows agreeing on the triple cannot disagree on the answer."""
+    seen = {}
+    for _ in range(tries):
+        win = [rng.randint(0, 9) for _ in range(w)]
+        arriving = rng.randint(0, 9)
+        key = (sum(win), win[0], arriving)
+        nxt = sum(win[1:]) + arriving
+        if key in seen and seen[key][0] != nxt:
+            return key, seen[key], (nxt, win)
+        seen.setdefault(key, (nxt, win))
+    return None
+
+
+def main():
+    print("VALUES =", "  ".join(f"{i}:{v}" for i, v in enumerate(VALUES)), f"   W = {W}")
+    truth = all_maxima(VALUES)
+    single = running_max_single(VALUES)
+    rescan, rescans = running_max_rescan(VALUES)
+    deque_out, pushes, pops, expiries = slide_max(VALUES)
+    brute_reads = NWIN * W
+    steps = pushes + pops + expiries
+
+    print()
+    print(f"  brute force  : {truth}   ({NWIN} windows x {W} = {brute_reads} reads)")
+    print(f"  one number   : {single}   <- WRONG")
+    print(f"  rescan on departure: {rescan}   ({rescans} rescans, correct)")
+    print(f"  deque        : {deque_out}   ({pushes}p + {pops}e + {expiries}x = {steps} steps)")
+
+    assert deque_out == truth, (deque_out, truth)
+    assert truth == [7, 7, 7, 6, 9, 9, 9], truth
+    assert (pushes, pops, expiries) == (9, 6, 1), (pushes, pops, expiries)
+    assert steps < brute_reads, (steps, brute_reads)
+    assert pushes == N, "every index must be pushed exactly once for the amortised claim"
+
+    # the one-number answer must be CAUGHT, and caught in the predicted direction
+    wrong = [i for i, (a, b) in enumerate(zip(single, truth)) if a != b]
+    assert wrong == [3], f"the one-number maximum differs at windows {wrong}"
+    assert all(a >= b for a, b in zip(single, truth)), "the prefix maximum can only read HIGH"
+    assert single[3] == 7 and truth[3] == 6, (single[3], truth[3])
+    # the correction: the stale number is not wrong FOREVER, it is wrong until a larger
+    # value arrives.  Window 4 agrees again because 9 > 7, not because 7 expired.
+    assert single[4] == truth[4] == 9 and max(VALUES[4:7]) == 9
+    assert single[2] == truth[2], "window 2 still holds 7 legitimately"
+    print(f"\n  the one number is high at window {wrong[0]} only: it reports {single[3]} for "
+          f"[{', '.join(str(v) for v in VALUES[3:6])}], whose maximum is {truth[3]}.")
+    print(f"  7 left the window at that tick and nothing could put it back.  It is right again")
+    print(f"  at window 4 only because 9 arrives and exceeds the stale number -- the error ends")
+    print(f"  when a bigger value happens along, not when the window moves on.")
+
+    # the rescan answer is correct, and its cost is the thing the question forbids
+    assert rescan == truth, (rescan, truth)
+    falling = list(range(20, 0, -1))
+    _, fall_rescans = running_max_rescan(falling)
+    assert running_max_rescan(falling)[0] == all_maxima(falling)
+    assert fall_rescans == len(falling) - W + 1, fall_rescans
+    rising = list(range(1, 21))
+    _, rise_rescans = running_max_rescan(rising)
+    assert rise_rescans == 1, rise_rescans
+    print(f"\n  rescan-on-departure is correct and costs {rescans} rescans here, {rise_rescans} on a")
+    print(f"  rising stream, and {fall_rescans} of {len(falling) - W + 1} windows on a falling one -- the")
+    print(f"  full re-read, back again under another name.")
+
+    # ---- the impossibility, measured rather than argued
+    rng = random.Random(20260303)
+    hit = find_max_collision(rng)
+    assert hit is not None, "no collision found; the impossibility argument is unproven"
+    key, (n1, w1), (n2, w2) = hit
+    kept, out_v, in_v = key
+    assert n1 != n2
+    assert max(w1) == max(w2) == kept and w1[0] == w2[0] == out_v
+    assert max(w1[1:] + [in_v]) == n1 and max(w2[1:] + [in_v]) == n2
+    print(f"\n  no f(kept, departing, arriving) can exist for the maximum:")
+    print(f"    window {w1} keeps {kept}, {out_v} departs, {in_v} arrives -> {n1}")
+    print(f"    window {w2} keeps {kept}, {out_v} departs, {in_v} arrives -> {n2}")
+    print(f"    identical arguments, {n1} != {n2} -- so EVERY such function is ruled out at once")
+    assert find_sum_collision(random.Random(20260303)) is None, (
+        "a sum collision was found, which would mean addition is not invertible")
+    print(f"  the same search over SUMS comes back empty, which is what invertible means.")
+    assert running_total(VALUES) == [sum(VALUES[i:i + W]) for i in range(NWIN)]
+
+    # ---- and the second half: addition is invertible in arithmetic, not in float64
+    mixture = [HUGE] + VALUES[1:]              # ONE value replaced: magnitudes mixed
+    uniform = [v * HUGE for v in VALUES]       # every value scaled: magnitudes shared
+    mix_drift = [r - e for r, e in zip(running_total(mixture),
+                                       [sum(mixture[i:i + W]) for i in range(NWIN)])]
+    uni_drift = [r - e for r, e in zip(running_total(uniform),
+                                       [sum(uniform[i:i + W]) for i in range(NWIN)])]
+    mix_bad = sum(1 for d in mix_drift if d != 0)
+    uni_bad = sum(1 for d in uni_drift if d != 0)
+    print(f"\n  one value replaced by {HUGE:.0e}: {mix_bad} of {NWIN} running totals drift, worst "
+          f"{max(abs(d) for d in mix_drift)!r}")
+    print(f"  EVERY value scaled by {HUGE:.0e}:   {uni_bad} of {NWIN} drift -- scaling is not the cause")
+    assert mix_bad == 6, f"measured {mix_bad} drifting totals"
+    assert mix_drift[0] == 0.0, "window 0 precedes the first subtraction, so it cannot drift"
+    # the opposite outcome is forbidden: uniform scaling must drift on NOTHING.  If this
+    # ever fires, the claim 'it is the mixture, not the magnitude' is what changes.
+    assert uni_bad == 0, f"uniform scaling drifted on {uni_bad} answers"
+    assert all(d == 0 for d in uni_drift)
+    # the deque never subtracts, so it is exact in BOTH cases -- the structure buys that
+    assert slide_max(mixture)[0] == all_maxima(mixture)
+    assert slide_max(uniform)[0] == all_maxima(uniform)
+    print(f"  the deque is exact on both, because it never removes anything from a number.")
+
+    # ---- boundaries
+    assert slide_max(VALUES, 1)[0] == VALUES, "W = 1 must return the stream itself"
+    assert slide_max(VALUES, N)[0] == [max(VALUES)], "W = N must give one answer"
+    flat = [4] * 6
+    assert slide_max(flat)[0] == [4] * (6 - W + 1), "equal values must not break the eviction"
+    # `<=` not `<` in the eviction: with `<` the deque keeps duplicates of the maximum and
+    # still answers correctly, but it grows -- so the cost claim, not the answer, is what
+    # that comparison protects.  Measured here on a flat stream.
+    dq_len = []
+    dq = []
+    for i, v in enumerate(flat):
+        while dq and flat[dq[-1]] < v:       # deliberately the weaker comparison
+            dq.pop()
+        dq.append(i)
+        if dq[0] <= i - W:
+            dq.pop(0)
+        dq_len.append(len(dq))
+    assert max(dq_len) == W, f"with `<` the deque reached {max(dq_len)} on a flat stream"
+    print(f"\n  W = 1 -> the stream itself; W = {N} -> one answer; a flat stream keeps the deque")
+    print(f"  at 1 entry with `<=` and at {max(dq_len)} with `<` -- the comparison buys space, not answers.")
+
+    # ---- many inputs, against the brute force
+    rng = random.Random(20260303)
+    caught = 0
+    for _ in range(800):
+        w = rng.randint(1, 6)
+        n = rng.randint(w, 22)
+        xs = [rng.randint(-30, 30) for _ in range(n)]
+        want = all_maxima(xs, w)
+        assert slide_max(xs, w)[0] == want, (xs, w)
+        assert running_max_rescan(xs, w)[0] == want, (xs, w)
+        if running_max_single(xs, w) != want:
+            caught += 1
+    print(f"\n  800 random (values, W) pairs: the deque and the rescan both equal the brute")
+    print(f"  force on all of them; the one-number version is wrong on {caught} of 800.")
+    assert caught > 400, f"the one-number version was only wrong {caught} times"
+
+    print("\nall assertions passed")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+Running it prints:
+
+```
+VALUES = 0:5  1:3  2:7  3:2  4:6  5:1  6:9  7:4  8:8    W = 3
+
+  brute force  : [7, 7, 7, 6, 9, 9, 9]   (7 windows x 3 = 21 reads)
+  one number   : [7, 7, 7, 7, 9, 9, 9]   <- WRONG
+  rescan on departure: [7, 7, 7, 6, 9, 9, 9]   (2 rescans, correct)
+  deque        : [7, 7, 7, 6, 9, 9, 9]   (9p + 6e + 1x = 16 steps)
+
+  the one number is high at window 3 only: it reports 7 for [2, 6, 1], whose maximum is 6.
+  7 left the window at that tick and nothing could put it back.  It is right again
+  at window 4 only because 9 arrives and exceeds the stale number -- the error ends
+  when a bigger value happens along, not when the window moves on.
+
+  rescan-on-departure is correct and costs 2 rescans here, 1 on a
+  rising stream, and 18 of 18 windows on a falling one -- the
+  full re-read, back again under another name.
+
+  no f(kept, departing, arriving) can exist for the maximum:
+    window [8, 2, 7] keeps 8, 8 departs, 3 arrives -> 7
+    window [8, 6, 6] keeps 8, 8 departs, 3 arrives -> 6
+    identical arguments, 7 != 6 -- so EVERY such function is ruled out at once
+  the same search over SUMS comes back empty, which is what invertible means.
+
+  one value replaced by 1e+16: 6 of 7 running totals drift, worst 2.0
+  EVERY value scaled by 1e+16:   0 of 7 drift -- scaling is not the cause
+  the deque is exact on both, because it never removes anything from a number.
+
+  W = 1 -> the stream itself; W = 9 -> one answer; a flat stream keeps the deque
+  at 1 entry with `<=` and at 3 with `<` -- the comparison buys space, not answers.
+
+  800 random (values, W) pairs: the deque and the rescan both equal the brute
+  force on all of them; the one-number version is wrong on 636 of 800.
+
+all assertions passed
+```
+
+</details>
+
 </details>
 <details>
 <summary><b>Variation 3</b> — the time-based window <i>(looks like monitoring)</i></summary>
@@ -459,6 +807,387 @@ case the appealing first answer is to materialise a sequence you cannot afford.
 **Why it is not obvious.** The count stops being fixed, so "exactly one leaves when one arrives" is false — zero or many may expire — and the divisor changes on every arrival, which means the count must be maintained alongside the total. The subtler part is that the answer changes **with no arrival at all**: values age out while the stream is quiet, so a correct implementation must be able to recompute on a timer rather than only on input. That is the same clock-versus-arrival distinction the batching problem turns on.
 
 **Where it lands.** `onArrival` looping the subtraction and maintaining a count, plus a timer-driven recompute — `report` dividing by the live count rather than by W.
+
+
+<details>
+<summary><b>The whole program</b> for this variation — runnable, no animation</summary>
+
+This is **the time-based window** solved on its own: a complete file, every helper included, asserting its own results. It is run on every build.
+
+```python
+#!/usr/bin/env python3
+"""Variation 3 — the time-based window (looks like monitoring). Standalone and runnable.
+
+  A dashboard shows the average latency over THE LAST 60 SECONDS, not the last W samples.
+  Probes report whenever they feel like it, so arrivals are irregular: three may land in
+  the same second and then nothing for four minutes.
+
+Two things break.  The count stops being fixed, so "exactly one leaves when one arrives"
+is false in both directions -- zero, one or many may expire -- and the divisor therefore
+has to be maintained beside the total instead of being the constant W.  The subtler one is
+that the answer changes WITH NO ARRIVAL AT ALL: values age out while the stream is quiet,
+so a correct implementation must be able to recompute on a timer and not only on input.
+That is the same clock-versus-arrival split the batching problem turns on, and a dashboard
+driven only by arrivals shows a number that was true minutes ago.
+
+Run it:  python3 programs/ch01_v3.py
+"""
+
+import random
+
+# The chapter's nine values, now carrying the seed's nine event TIMES (in event-time
+# order, which is what a time window needs) instead of positions.  Times in seconds,
+# values in milliseconds.  The gaps are the seed's own and they are what makes this
+# worth running: between 3 and 50 nothing expires, at 90 two expire at once, and at 540
+# three do, so every case the statement names appears in one trace.
+SAMPLES = [(1, 5), (3, 3), (50, 7), (90, 2), (130, 6), (220, 1), (245, 9), (260, 4), (540, 8)]
+
+# SPAN = 60 seconds: the statement's own number.  It also happens to be the chapter's
+# watermark lag, which is not a coincidence -- both are "how far back do I still care".
+SPAN = 60
+
+# W = 3, the chapter's fixed window size, kept only so the fixed-divisor mistake can be
+# run with a plausible constant rather than an invented one.
+W = 3
+
+# One boundary pair, written separately because the chapter's times contain no gap of
+# exactly SPAN: these two are 60 apart to the second, which is the only place the
+# inclusive-or-exclusive choice is visible at all.
+EDGE = [(0, 10), (60, 20)]
+
+
+def window_at(samples, now, span=SPAN):
+    """The reference: every sample still inside the window at clock time `now`.
+
+    A full rescan, correct for any arrival pattern, and the only definition the rest of
+    the file is checked against.  `t > now - span` is STRICT at the old end and inclusive
+    at the new, so the window is the half-open interval (now - span, now]: a sample
+    exactly span seconds old has just left.  The other choice is defensible; what is not
+    defensible is leaving it undecided, because it changes the answer."""
+    return [(t, v) for t, v in samples if now - span < t <= now]
+
+
+def prefix_average_at(samples, i, span=SPAN):
+    """(average, count) as reported ON the arrival of samples[i]: the window computed over
+    the samples seen SO FAR, which is a prefix and not the whole list.
+
+    It is a separate reference from average_at on purpose.  When two samples carry the
+    same stamp, the first of them is reported before the second has been seen, so an
+    arrival-time answer and a clock-time answer legitimately differ -- the clock-time one
+    is the later, more complete view of the same instant.  Conflating the two is the same
+    clock-versus-arrival confusion in miniature, and it only shows up on ties."""
+    now = samples[i][0]
+    win = [(t, v) for t, v in samples[:i + 1] if now - span < t <= now]
+    if not win:
+        return None, 0
+    return sum(v for _, v in win) / len(win), len(win)
+
+
+def average_at(samples, now, span=SPAN):
+    """(average, count) at clock time `now`, or (None, 0) when the window is empty.
+
+    None rather than 0.0: there is no average of no values, exactly as there is no average
+    of W values before W have arrived.  Reporting 0.0 for an empty window is a dashboard
+    that shows a healthy latency when the probes have stopped answering."""
+    win = window_at(samples, now, span)
+    if not win:
+        return None, 0
+    return sum(v for _, v in win) / len(win), len(win)
+
+
+def incremental(samples, span=SPAN):
+    """The answer: one pass, keeping the window's TOTAL and its COUNT together.
+
+    The expiry is a `while`, not an `if`, because an arrival after a quiet stretch can
+    retire many samples at once; and the divisor is len(window), which moves on its own.
+    Returns [(t, avg, count, expired_here), ...] -- expired_here is reported so that the
+    0/1/many claim is measured rather than asserted."""
+    win, total, out = [], 0.0, []
+    for t, v in samples:
+        win.append((t, v))
+        total += v
+        gone = 0
+        while win and win[0][0] <= t - span:
+            total -= win.pop(0)[1]
+            gone += 1
+        out.append((t, total / len(win), len(win), gone))
+    return out
+
+
+def expire_one_per_arrival(samples, span=SPAN):
+    """The appealing wrong answer, part one: assume the fixed window's invariant holds and
+    retire at most ONE sample per arrival -- an `if` where the `while` belongs.
+
+    Stale samples then stay in the total, so the average is dragged toward values that
+    left minutes ago.  It is right whenever no more than one expires, which is most
+    arrivals, which is what makes it survive review."""
+    win, total, out = [], 0.0, []
+    for t, v in samples:
+        win.append((t, v))
+        total += v
+        if win and win[0][0] <= t - span:
+            total -= win.pop(0)[1]
+        out.append((t, total / len(win), len(win)))
+    return out
+
+
+def fixed_divisor(samples, span=SPAN, w=W):
+    """The appealing wrong answer, part two: expire correctly but divide by a CONSTANT --
+    here the nominal "about w probes per window" that someone wrote down once.
+
+    The total is right and the answer is not, which is the most confusing possible
+    failure: the bug is in the denominator, so the number moves correctly and sits at the
+    wrong level."""
+    win, total, out = [], 0.0, []
+    for t, v in samples:
+        win.append((t, v))
+        total += v
+        while win and win[0][0] <= t - span:
+            total -= win.pop(0)[1]
+        out.append((t, total / w, len(win)))
+    return out
+
+
+def arrival_driven_reading(samples, span=SPAN):
+    """What a dashboard updated only on input shows at an arbitrary later instant: the
+    last answer it computed, held forever.  Returns a function of `now`."""
+    computed = incremental(samples, span)
+
+    def read(now):
+        last = None
+        for t, avg, count, _ in computed:
+            if t <= now:
+                last = (avg, count)
+        return last if last is not None else (None, 0)
+    return read
+
+
+def timer_driven_scan(samples, until, span=SPAN, tick=1):
+    """What a dashboard that also recomputes on a timer shows: one incremental window
+    advanced by the CLOCK, admitting arrivals as they come due and expiring by age at every
+    tick whether or not anything arrived.
+
+    This is the mechanism the statement demands, and it is deliberately written without
+    reference to window_at, so that agreeing with the rescan is a check and not a tautology.
+    Returns {now: (avg, count)} for every tick up to `until`.  The cost is per TICK, which
+    is what correctness during a quiet stream actually costs."""
+    win, total, nxt, out = [], 0.0, 0, {}
+    for now in range(0, until + 1, tick):
+        while nxt < len(samples) and samples[nxt][0] <= now:
+            win.append(samples[nxt])
+            total += samples[nxt][1]
+            nxt += 1
+        while win and win[0][0] <= now - span:
+            total -= win.pop(0)[1]
+        out[now] = (total / len(win) if win else None, len(win))
+    return out
+
+
+def main():
+    print(f"SAMPLES (t seconds, v ms) = {SAMPLES}")
+    print(f"SPAN = {SPAN}s   window = (now - {SPAN}, now]\n")
+
+    fast = incremental(SAMPLES)
+    for i, (t, avg, count, gone) in enumerate(fast):
+        ref_avg, ref_count = prefix_average_at(SAMPLES, i)
+        assert count == ref_count and abs(avg - ref_avg) < 1e-12, (t, avg, ref_avg)
+        # these nine stamps are all distinct, so the clock view agrees here as well
+        assert average_at(SAMPLES, t) == (ref_avg, ref_count), t
+        win = [v for _, v in window_at(SAMPLES, t)]
+        print(f"  t={t:>3}s  window {str(win):<14} count {count}  avg {avg:>6.3f}   "
+              f"expired here: {gone}")
+
+    counts = [c for _, _, c, _ in fast]
+    expiries = [g for *_, g in fast]
+    print(f"\n  counts   : {counts}")
+    print(f"  expiries : {expiries}")
+    assert counts == [1, 2, 3, 2, 2, 1, 2, 3, 1], counts
+    assert expiries == [0, 0, 0, 2, 1, 2, 0, 0, 3], expiries
+    # the invariant the fixed window relies on is false in BOTH directions here
+    assert 0 in expiries, "nothing ever arrives without something leaving"
+    assert 1 in expiries, "no arrival ever retires exactly one, so the easy case is absent"
+    assert max(expiries) == 3, f"the biggest single expiry was {max(expiries)}"
+    assert min(counts) < max(counts), "the count must rise AND fall or the divisor is constant"
+    assert sum(expiries) == len(SAMPLES) - counts[-1], (
+        "every sample must either have expired or still be in the final window")
+    print(f"  the count rises to {max(counts)} and falls to {min(counts)}; one arrival retires {max(expiries)}")
+    print(f"  samples at once and another retires none -- so 'one in, one out' is false both ways.")
+
+    # ---- the two wrong answers, run
+    one = expire_one_per_arrival(SAMPLES)
+    fix = fixed_divisor(SAMPLES)
+    bad_one = [(t, a, c) for (t, a, c), (_, ra, rc, _) in zip(one, fast) if abs(a - ra) > 1e-12]
+    bad_fix = [(t, a) for (t, a, _), (_, ra, _, _) in zip(fix, fast) if abs(a - ra) > 1e-12]
+    print(f"\n  one-expiry-per-arrival is wrong at t = {[t for t, _, _ in bad_one]}")
+    for t, a, c in bad_one:
+        ra, rc = average_at(SAMPLES, t)
+        print(f"    t={t:>3}s reports {a:.3f} over {c} samples; the truth is {ra:.3f} over {rc}")
+    # CORRECTED, twice.  The first expectation was that it is wrong only at the three
+    # arrivals where two or more expire -- 90, 220, 540.  Measured: it is wrong at FIVE,
+    # including 130 and 245 where only one sample was due to leave.  The reason is that the
+    # error does not heal: once an arrival retires one of the two it owed, each later
+    # arrival adds one and retires one, so the backlog is carried forever and the count
+    # pins at 3.  The second wrong expectation was the DIRECTION -- stale samples do not
+    # reliably drag the average up: at t=90 it reads 4.000 against 4.500 and at t=130 it
+    # reads 5.000 against 4.000.  Whether the error is high or low depends on the stale
+    # values, so there is no safe side to err on.
+    assert [t for t, _, _ in bad_one] == [90, 130, 220, 245, 540], bad_one
+    assert one[3][1] < fast[3][1] and one[4][1] > fast[4][1], "the error must go BOTH ways"
+    assert [c for _, _, c in one[3:]] == [3, 3, 3, 3, 3, 3], (
+        "once behind, the count must pin at the first stale size and never recover")
+    assert all(g <= 1 for g in expiries[4:5]) and abs(one[4][1] - fast[4][1]) > 1e-12, (
+        "t=130 owed only one expiry and is still wrong, which is the carried backlog")
+    # the opposite outcome exists too, and it is the dangerous one: at t=260 the stale
+    # window happens to hold exactly the right three samples, so the bug reports the
+    # correct answer and nothing is visible at that arrival at all.
+    assert abs(one[7][1] - fast[7][1]) < 1e-12 and one[7][2] == fast[7][2] == 3
+    assert all(abs(a - ra) < 1e-12 for (_, a, _), (_, ra, _, _) in zip(one[:3], fast[:3]))
+    print(f"  ...right at the first 3 arrivals, where nothing had expired yet, and right again")
+    print(f"  at t=260 BY ACCIDENT -- the stale window happens to hold the correct three samples.")
+    assert len(bad_fix) == sum(1 for c in counts if c != W), bad_fix
+    print(f"  the fixed divisor {W} is wrong at {len(bad_fix)} of {len(SAMPLES)} arrivals -- right only when the")
+    print(f"  live count happens to equal {W}, which it does {counts.count(W)} times.")
+
+    # ---- the answer changes with no arrival at all
+    quiet = arrival_driven_reading(SAMPLES)
+    timed = timer_driven_scan(SAMPLES, 10_000)
+    print(f"\n  nothing arrives between t=130 and t=220, and the answer moves anyway:")
+    for now in (130, 180, 191, 219):
+        truth, tc = average_at(SAMPLES, now)
+        held, hc = quiet(now)
+        shown = "NONE" if truth is None else f"{truth:.3f}"
+        print(f"    now={now:>3}s  truth {shown:>6} over {tc} samples;  "
+              f"arrival-driven dashboard still shows {held:.3f} over {hc}")
+        assert timed[now] == (truth, tc), (now, timed[now])
+    assert average_at(SAMPLES, 130)[1] == 2 and average_at(SAMPLES, 180)[1] == 1
+    assert average_at(SAMPLES, 191) == (None, 0), average_at(SAMPLES, 191)
+    assert quiet(191) == quiet(130) == (4.0, 2), (quiet(191), quiet(130))
+    assert average_at(SAMPLES, 180)[0] == 6.0, "the single surviving sample is the 6ms one"
+    # the last arrival is the worst case: the dashboard holds 8.0 forever
+    assert quiet(10_000) == (8.0, 1) and average_at(SAMPLES, 10_000) == (None, 0)
+    assert timed[10_000] == (None, 0), timed[10_000]
+    assert timed[600] == (None, 0) and timed[540] == (8.0, 1), (timed[600], timed[540])
+    print(f"    now=10000s truth   NONE over 0 samples;  arrival-driven still shows 8.000 over 1")
+    print(f"  so the quiet-stream error is unbounded in TIME, not in value: the number is simply old.")
+
+    # ---- the boundary the window definition decides
+    inc = [(t, v) for t, v in EDGE if 60 - SPAN <= t <= 60]
+    exc = window_at(EDGE, 60)
+    print(f"\n  two samples exactly {SPAN}s apart, {EDGE}, read at now={EDGE[1][0]}:")
+    print(f"    (now-{SPAN}, now] keeps {exc} -> avg {average_at(EDGE, 60)[0]}")
+    print(f"    [now-{SPAN}, now] keeps {inc} -> avg {sum(v for _, v in inc) / len(inc)}")
+    assert exc == [(60, 20)] and average_at(EDGE, 60) == (20.0, 1)
+    assert inc == EDGE and sum(v for _, v in inc) / len(inc) == 15.0
+    assert average_at(EDGE, 60)[0] != 15.0, "the two conventions must actually differ here"
+    print(f"    {20.0} against {15.0} on the same two samples -- a 25% difference decided by one `<`.")
+
+    # ---- two samples in the SAME second: the arrival view and the clock view differ
+    TIE = [(10, 4), (10, 8), (80, 2)]      # two probes answer within the same second
+    assert prefix_average_at(TIE, 0) == (4.0, 1), prefix_average_at(TIE, 0)
+    assert prefix_average_at(TIE, 1) == (6.0, 2), prefix_average_at(TIE, 1)
+    assert average_at(TIE, 10) == (6.0, 2), "the clock view at t=10 sees both"
+    assert prefix_average_at(TIE, 0) != average_at(TIE, 10), (
+        "on a tie the arrival answer and the clock answer must be allowed to differ")
+    print(f"\n  two probes reporting in the same second, {TIE[:2]}:")
+    print(f"    on the first arrival the dashboard can only say {prefix_average_at(TIE, 0)[0]} over 1 sample;")
+    print(f"    the clock at t=10 says {average_at(TIE, 10)[0]} over 2 -- the same instant, a later view of it.")
+    print(f"  so 'the average at time t' is two different questions, and only ties expose it.")
+
+    # ---- many irregular streams, against the rescan
+    rng = random.Random(20260303)
+    disagreements = 0
+    for _ in range(600):
+        n = rng.randint(1, 18)
+        t = 0
+        samples = []
+        for _ in range(n):
+            t += rng.choice([0, 0, 1, 5, 30, 59, 60, 61, 200])
+            samples.append((t, rng.randint(1, 40)))
+        span = rng.choice([1, 10, 60, 120])
+        got = incremental(samples, span)
+        for i, (gt, ga, gc, _) in enumerate(got):
+            ra, rc = prefix_average_at(samples, i, span)
+            assert gc == rc and abs(ga - ra) < 1e-9, (samples, span, gt, ga, ra)
+        until = samples[-1][0] + span + 2
+        scan = timer_driven_scan(samples, until, span)
+        for now in (0, until, rng.randint(0, until)):
+            ra, rc = average_at(samples, now, span)
+            got_a, got_c = scan[now]
+            assert got_c == rc and ((got_a is None and ra is None)
+                                    or abs(got_a - ra) < 1e-9), (samples, span, now)
+        if any(abs(a - ra) > 1e-9 for (_, a, _), (_, ra, _, _) in
+               zip(expire_one_per_arrival(samples, span), got)):
+            disagreements += 1
+    print(f"\n  600 irregular streams x 4 spans: the incremental total+count equals the rescan at")
+    print(f"  every arrival and at every probed clock instant; the one-expiry version differs on")
+    print(f"  {disagreements} of 600, which is how often a stream has a gap big enough to retire two.")
+    assert disagreements > 100, f"only {disagreements} streams exposed the one-expiry bug"
+
+    print("\nall assertions passed")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+Running it prints:
+
+```
+SAMPLES (t seconds, v ms) = [(1, 5), (3, 3), (50, 7), (90, 2), (130, 6), (220, 1), (245, 9), (260, 4), (540, 8)]
+SPAN = 60s   window = (now - 60, now]
+
+  t=  1s  window [5]            count 1  avg  5.000   expired here: 0
+  t=  3s  window [5, 3]         count 2  avg  4.000   expired here: 0
+  t= 50s  window [5, 3, 7]      count 3  avg  5.000   expired here: 0
+  t= 90s  window [7, 2]         count 2  avg  4.500   expired here: 2
+  t=130s  window [2, 6]         count 2  avg  4.000   expired here: 1
+  t=220s  window [1]            count 1  avg  1.000   expired here: 2
+  t=245s  window [1, 9]         count 2  avg  5.000   expired here: 0
+  t=260s  window [1, 9, 4]      count 3  avg  4.667   expired here: 0
+  t=540s  window [8]            count 1  avg  8.000   expired here: 3
+
+  counts   : [1, 2, 3, 2, 2, 1, 2, 3, 1]
+  expiries : [0, 0, 0, 2, 1, 2, 0, 0, 3]
+  the count rises to 3 and falls to 1; one arrival retires 3
+  samples at once and another retires none -- so 'one in, one out' is false both ways.
+
+  one-expiry-per-arrival is wrong at t = [90, 130, 220, 245, 540]
+    t= 90s reports 4.000 over 3 samples; the truth is 4.500 over 2
+    t=130s reports 5.000 over 3 samples; the truth is 4.000 over 2
+    t=220s reports 3.000 over 3 samples; the truth is 1.000 over 1
+    t=245s reports 5.333 over 3 samples; the truth is 5.000 over 2
+    t=540s reports 7.000 over 3 samples; the truth is 8.000 over 1
+  ...right at the first 3 arrivals, where nothing had expired yet, and right again
+  at t=260 BY ACCIDENT -- the stale window happens to hold the correct three samples.
+  the fixed divisor 3 is wrong at 7 of 9 arrivals -- right only when the
+  live count happens to equal 3, which it does 2 times.
+
+  nothing arrives between t=130 and t=220, and the answer moves anyway:
+    now=130s  truth  4.000 over 2 samples;  arrival-driven dashboard still shows 4.000 over 2
+    now=180s  truth  6.000 over 1 samples;  arrival-driven dashboard still shows 4.000 over 2
+    now=191s  truth   NONE over 0 samples;  arrival-driven dashboard still shows 4.000 over 2
+    now=219s  truth   NONE over 0 samples;  arrival-driven dashboard still shows 4.000 over 2
+    now=10000s truth   NONE over 0 samples;  arrival-driven still shows 8.000 over 1
+  so the quiet-stream error is unbounded in TIME, not in value: the number is simply old.
+
+  two samples exactly 60s apart, [(0, 10), (60, 20)], read at now=60:
+    (now-60, now] keeps [(60, 20)] -> avg 20.0
+    [now-60, now] keeps [(0, 10), (60, 20)] -> avg 15.0
+    20.0 against 15.0 on the same two samples -- a 25% difference decided by one `<`.
+
+  two probes reporting in the same second, [(10, 4), (10, 8)]:
+    on the first arrival the dashboard can only say 4.0 over 1 sample;
+    the clock at t=10 says 6.0 over 2 -- the same instant, a later view of it.
+  so 'the average at time t' is two different questions, and only ties expose it.
+
+  600 irregular streams x 4 spans: the incremental total+count equals the rescan at
+  every arrival and at every probed clock instant; the one-expiry version differs on
+  445 of 600, which is how often a stream has a gap big enough to retire two.
+
+all assertions passed
+```
+
+</details>
 
 </details>
 <details>
@@ -470,7 +1199,615 @@ case the appealing first answer is to materialise a sequence you cannot afford.
 
 **Where it lands.** 0x200 and the retained window both persisted, with the input position — the O(W) space from the traced frames becoming the checkpoint size.
 
+
+<details>
+<summary><b>The whole program</b> for this variation — runnable, no animation</summary>
+
+This is **the average that must survive a restart** solved on its own: a complete file, every helper included, asserting its own results. It is run on every build.
+
+```python
+#!/usr/bin/env python3
+"""Variation 4 — the average that must survive a restart (looks like reliability).
+Standalone and runnable.
+
+  The same rolling average, and the process is restarted mid-stream -- a deploy, an OOM
+  kill, a node reboot.  The running average must CONTINUE, not start again.
+
+The total is one number and looks trivially checkpointable, and that is the trap: restoring
+the total without the last W values makes the next subtraction impossible, so the state
+that must be saved is the whole window, which is W+1 numbers to report one.  The second
+trap is that the checkpoint and the input position must be saved as ONE fact; skew them
+either way and the restart is silently wrong, in opposite directions depending on which is
+ahead.  Both failures below are produced by running the worker with a crash injected and
+restarting it from what it actually wrote.
+
+Run it:  python3 programs/ch01_v4.py
+"""
+
+import random
+
+# The chapter's stream and window, unchanged: nine distinct values so a wrong answer can be
+# attributed to the wrong value, and W = 3 so there is both a warm-up and a departure.
+VALUES = [5, 3, 7, 2, 6, 1, 9, 4, 8]
+W = 3
+
+# HUGE = 1e16 is the chapter's constant, used here for the part of this problem that only
+# a checkpoint has: a total carried across a restart carries its accumulated float error
+# with it, where a total REBUILT from the persisted window starts clean.  The chapter's
+# finding holds and is re-asserted: uniform scaling drifts on nothing, a mixture drifts.
+HUGE = 1e16
+
+N = len(VALUES)
+NWIN = N - W + 1
+
+
+def exact_answers(xs, w=W):
+    """The reference: every window summed from scratch, so nothing is ever subtracted."""
+    return [sum(xs[i:i + w]) / w for i in range(len(xs) - w + 1)]
+
+
+def save_window(total, window, pos):
+    """The checkpoint that works: the window's CONTENTS plus the input position, written as
+    one record.  It is W+1 numbers and a position to report one number, and that ratio is
+    the content of this problem -- the thing to persist is larger than the thing emitted."""
+    return {"window": list(window), "pos": pos, "size": len(window) + 1}
+
+
+def save_total(total, window, pos):
+    """The checkpoint that looks sufficient: the accumulator and the position, two numbers.
+    Small, cheap, and missing exactly the values the next subtraction needs."""
+    return {"total": total, "pos": pos, "size": 2}
+
+
+def run(xs, w=W, crash_at=None, policy="window", skew=0):
+    """Run the worker, kill it before consuming xs[crash_at], restart it from what it
+    persisted, and return the answers the consumer saw across both lives.
+
+    policy:
+      "window"  -- persist the window and the position together.  Exact.
+      "total"   -- persist the accumulator and the position.  On restart the window is
+                   gone, so the departing value is unknown and nothing can be subtracted;
+                   the total only ever reads too high.
+      "replay"  -- persist the accumulator, and on restart RE-READ the last w inputs from
+                   the source to reconstitute the window.  Exact, and it is persisting the
+                   window by another name: the cost moved from the checkpoint to the
+                   recovery, and it needs a source that can be read backwards.
+    skew shifts the persisted position relative to the persisted state, which is what a
+    checkpoint written in two steps does when the crash lands between them.
+    """
+    total, window, answers = 0.0, [], []
+    saver = save_window if policy == "window" else save_total
+    ck = saver(total, window, 0)
+    for i, v in enumerate(xs):
+        if crash_at is not None and i == crash_at:
+            break
+        total += v
+        window.append(v)
+        if len(window) > w:
+            total -= window.pop(0)
+        if i >= w - 1:
+            answers.append(total / w)
+        ck = saver(total, window, i + 1)
+        ck["pos"] = max(0, min(len(xs), ck["pos"] + skew))
+    if crash_at is None:
+        return answers, ck
+    # ---- the restart: everything not in `ck` is gone
+    if policy == "window":
+        total, window = sum(ck["window"]), list(ck["window"])
+    elif policy == "replay":
+        start = max(0, ck["pos"] - w)
+        window = list(xs[start:ck["pos"]])          # re-read from the source
+        total = sum(window)
+    else:
+        total, window = ck["total"], []             # the window is simply not there
+    for i in range(ck["pos"], len(xs)):
+        total += xs[i]
+        window.append(xs[i])
+        if len(window) > w:
+            total -= window.pop(0)
+        elif policy == "total":
+            pass                                   # nothing to subtract: the hole
+        if i >= w - 1:
+            answers.append(total / w)
+    return answers, ck
+
+
+def main():
+    print("VALUES =", "  ".join(f"{i}:{v}" for i, v in enumerate(VALUES)), f"   W = {W}")
+    truth, clean_ck = run(VALUES)
+    assert truth == exact_answers(VALUES), (truth, exact_answers(VALUES))
+    print(f"  no crash: {[round(a, 4) for a in truth]}\n")
+
+    # ---- crash at every position, under each policy
+    for policy in ("window", "replay", "total"):
+        ends = []
+        for c in range(1, N):
+            got, ck = run(VALUES, crash_at=c, policy=policy)
+            ends.append(got[-1] if got else None)
+            if policy in ("window", "replay"):
+                assert got == truth, (policy, c, got, truth)
+            else:
+                assert got != truth, (policy, c, "a total-only restart came out right")
+                assert got[-1] > truth[-1], (c, got[-1], truth[-1])
+                assert ck["total"] > 0, "these values are all positive, so the total must be"
+        print(f"  crash at each of positions 1..{N - 1}, policy {policy:>7}: final answer "
+              f"{sorted(set(round(e, 4) for e in ends))}")
+    # CORRECTED.  The first expectation was that a total-only restart simply stops
+    # subtracting, so the final answer would be the whole stream's sum over W.  Measured, it
+    # is not: the window REFILLS after the restart and subtraction resumes once it holds
+    # more than W values.  What is permanent is narrower and much sharper -- the restored
+    # total entered the accumulator with no window entries behind it, so it is never taken
+    # out, and the final answer is high by EXACTLY the checkpointed total over W.  That
+    # holds once the window has refilled (W arrivals after the restart); during the refill
+    # the error is a partial sum instead, which is wrong in a way that is harder to spot.
+    for c in range(1, N):
+        got, ck = run(VALUES, crash_at=c, policy="total")
+        if N - c >= W:                 # enough input left for the window to refill
+            assert abs((got[-1] - truth[-1]) - ck["total"] / W) < 1e-12, (c, got[-1], ck)
+    _, ck4 = run(VALUES, crash_at=4, policy="total")
+    got4 = run(VALUES, crash_at=4, policy="total")[0]
+    print(f"    crash_at=4 persisted total {ck4['total']:.0f}; the truth ends at {truth[-1]:.4f} and the")
+    print(f"    restart ends at {got4[-1]:.4f} -- high by exactly {ck4['total']:.0f}/{W} = "
+          f"{ck4['total'] / W:.4f}, the restored total that")
+    print(f"    nothing will ever subtract, because no window entry corresponds to it.")
+
+    # ---- what the two checkpoints cost
+    small = run(VALUES, policy="total")[1]
+    big = run(VALUES, policy="window")[1]
+    print(f"\n  checkpoint sizes: total-only {small['size']} numbers, window {big['size']} numbers,")
+    print(f"  to report 1 number.  At the chapter's real W the ratio is what matters:")
+    for w in (3, 1000, 100_000):
+        print(f"    W = {w:>7,} -> {w + 1:>7,} numbers persisted per 1 reported")
+    assert big["size"] == W + 1 and small["size"] == 2
+    assert run(VALUES, w=5, policy="window")[1]["size"] == 6, "the checkpoint must grow with W"
+    assert big["size"] > small["size"], "the working checkpoint must be the larger one"
+
+    # ---- the position skew: two writes again, and the direction is NOT obvious
+    ahead = run(VALUES, crash_at=4, policy="window", skew=+1)[0]
+    behind = run(VALUES, crash_at=4, policy="window", skew=-1)[0]
+    print(f"\n  checkpoint and position written separately, crash in between (crash_at=4):")
+    print(f"    position ONE AHEAD of the state : {[round(a, 4) for a in ahead]}")
+    print(f"    position ONE BEHIND the state   : {[round(a, 4) for a in behind]}")
+    print(f"    the truth                       : {[round(a, 4) for a in truth]}")
+    # CORRECTED.  The expectation taken from the problem statement was that an older state
+    # against a newer position double-counts.  Measured, it is the other way round: a
+    # position AHEAD of the state skips the input in between (xs[4] = 6 is never added, so
+    # the sequence is SHORT by one answer), and a position BEHIND the state re-reads input
+    # already folded in, which is the double count.  The lesson survives intact -- skew is
+    # fatal either way -- but the two directions are not interchangeable, and only one of
+    # them loses data.
+    assert len(ahead) == len(truth) - 1, (len(ahead), len(truth))
+    assert len(behind) == len(truth) + 1, (len(behind), len(truth))
+    assert ahead != truth and behind != truth
+    skipped = [a for a in ahead if a not in truth]
+    print(f"    AHEAD loses one input and emits {len(ahead)} answers instead of {len(truth)};")
+    print(f"    BEHIND re-reads one and emits {len(behind)} -- so the skew is detectable by")
+    print(f"    COUNTING answers, which is the cheapest available alarm.")
+    assert skipped, "the ahead-skew must produce at least one answer nobody should have seen"
+    # and skew 0 must be exact, so the assertion above is about the skew and not the crash
+    assert run(VALUES, crash_at=4, policy="window", skew=0)[0] == truth
+
+    # ---- the warm-up has to survive the restart too
+    early = run(VALUES, crash_at=1, policy="window")[0]
+    assert early == truth, "a crash during the warm-up must not emit an early answer"
+    assert len(run(VALUES, crash_at=1, policy="window")[1]["window"]) == 1, (
+        "the checkpoint at position 1 holds one value, not W of them")
+    assert run(VALUES, crash_at=N - 1, policy="window")[0] == truth
+    print(f"\n  crash at position 1 (mid warm-up): {len(early)} answers, the first still withheld")
+    print(f"  until {W} values exist -- the position is what says whether the warm-up is over.")
+
+    # ---- the float cost of carrying a total across a restart
+    mixture = [HUGE] + VALUES[1:]
+    uniform = [v * HUGE for v in VALUES]
+    for name, xs in (("mixture", mixture), ("uniform", uniform)):
+        exact = exact_answers(xs)
+        rebuilt = run(xs, crash_at=4, policy="window")[0]     # total rebuilt from window
+        carried = run(xs, crash_at=4, policy="replay")[0]     # total re-derived from source
+        live = run(xs)[0]                                     # never restarted
+        drift_live = sum(1 for a, b in zip(live, exact) if a != b)
+        drift_rebuilt = sum(1 for a, b in zip(rebuilt, exact) if a != b)
+        print(f"\n  {name}: answers differing from a from-scratch sum --")
+        print(f"    never restarted {drift_live} of {NWIN}, restarted and rebuilt from the window "
+              f"{drift_rebuilt} of {NWIN}")
+        assert rebuilt == carried, "rebuilding from the window and replaying must agree"
+        if name == "mixture":
+            assert drift_live == 6, drift_live
+            # the restart REPAIRS some of the drift, which was not the expected direction:
+            # summing the persisted window from scratch discards the error accumulated
+            # before the crash, so a restart is an accidental re-grounding.
+            assert drift_rebuilt < drift_live, (drift_rebuilt, drift_live)
+        else:
+            # the opposite outcome is forbidden: uniform scaling must drift on NOTHING,
+            # restarted or not.  If this fires, the claim changes, not the assertion.
+            assert drift_live == 0 and drift_rebuilt == 0, (drift_live, drift_rebuilt)
+    print(f"  so a restart that rebuilds the total from the window is MORE accurate than the")
+    print(f"  process that never crashed -- the checkpoint is also a re-grounding.")
+
+    # ---- many streams, every crash point, every policy
+    rng = random.Random(20260303)
+    for _ in range(300):
+        w = rng.randint(1, 5)
+        n = rng.randint(w, 16)
+        xs = [rng.randint(-40, 40) for _ in range(n)]
+        want = exact_answers(xs, w)
+        assert run(xs, w)[0] == want, (xs, w)
+        for c in range(1, n):
+            assert run(xs, w, crash_at=c, policy="window")[0] == want, (xs, w, c)
+            assert run(xs, w, crash_at=c, policy="replay")[0] == want, (xs, w, c)
+            got, ck = run(xs, w, crash_at=c, policy="total")
+            if n - c >= w:
+                # the exact error, which also covers the one case where the total-only
+                # checkpoint is accidentally RIGHT: a persisted total of zero.  Asserting
+                # `!= want` would have been wrong there, and negative values make it happen.
+                assert abs((got[-1] - want[-1]) - ck["total"] / w) < 1e-9, (xs, w, c, ck)
+                # and the FINAL answer is right exactly when the restored total was zero.
+                # Not the whole sequence: while the window refills, the error is a partial
+                # sum rather than the restored total, so the transient is wrong either way.
+                assert (abs(got[-1] - want[-1]) < 1e-9) == (ck["total"] == 0), (xs, w, c, ck)
+    print(f"\n  300 random streams x every crash point: the window checkpoint and the replay")
+    print(f"  recover exactly, and the total-only checkpoint's final answer is high by exactly")
+    print(f"  the restored total over W -- so it is right only when that total happens to be")
+    print(f"  zero, which negative values do occasionally arrange.")
+
+    print("\nall assertions passed")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+Running it prints:
+
+```
+VALUES = 0:5  1:3  2:7  3:2  4:6  5:1  6:9  7:4  8:8    W = 3
+  no crash: [5.0, 4.0, 5.0, 3.0, 5.3333, 4.6667, 7.0]
+
+  crash at each of positions 1..8, policy  window: final answer [7.0]
+  crash at each of positions 1..8, policy  replay: final answer [7.0]
+  crash at each of positions 1..8, policy   total: final answer [7.3333, 8.6667, 9.3333, 9.6667, 10.0, 11.0, 12.0]
+    crash_at=4 persisted total 12; the truth ends at 7.0000 and the
+    restart ends at 11.0000 -- high by exactly 12/3 = 4.0000, the restored total that
+    nothing will ever subtract, because no window entry corresponds to it.
+
+  checkpoint sizes: total-only 2 numbers, window 4 numbers,
+  to report 1 number.  At the chapter's real W the ratio is what matters:
+    W =       3 ->       4 numbers persisted per 1 reported
+    W =   1,000 ->   1,001 numbers persisted per 1 reported
+    W = 100,000 -> 100,001 numbers persisted per 1 reported
+
+  checkpoint and position written separately, crash in between (crash_at=4):
+    position ONE AHEAD of the state : [5.0, 4.0, 3.3333, 4.0, 4.6667, 7.0]
+    position ONE BEHIND the state   : [5.0, 4.0, 3.6667, 3.3333, 3.0, 5.3333, 4.6667, 7.0]
+    the truth                       : [5.0, 4.0, 5.0, 3.0, 5.3333, 4.6667, 7.0]
+    AHEAD loses one input and emits 6 answers instead of 7;
+    BEHIND re-reads one and emits 8 -- so the skew is detectable by
+    COUNTING answers, which is the cheapest available alarm.
+
+  crash at position 1 (mid warm-up): 7 answers, the first still withheld
+  until 3 values exist -- the position is what says whether the warm-up is over.
+
+  mixture: answers differing from a from-scratch sum --
+    never restarted 6 of 7, restarted and rebuilt from the window 1 of 7
+
+  uniform: answers differing from a from-scratch sum --
+    never restarted 0 of 7, restarted and rebuilt from the window 0 of 7
+  so a restart that rebuilds the total from the window is MORE accurate than the
+  process that never crashed -- the checkpoint is also a re-grounding.
+
+  300 random streams x every crash point: the window checkpoint and the replay
+  recover exactly, and the total-only checkpoint's final answer is high by exactly
+  the restored total over W -- so it is right only when that total happens to be
+  zero, which negative values do occasionally arrange.
+
+all assertions passed
+```
+
 </details>
+
+</details>
+
+#### The whole program
+
+Everything above as one file you can run: no animation, no stack, no heap — the complete solution, every helper included, and the measurements at the bottom. It is **run by `tools/run_programs.sh` on every build** and asserts its own results, so if it stopped working this section could not be generated.
+
+```python
+#!/usr/bin/env python3
+"""The average of the last W values, on every arrival.
+
+Values arrive one at a time, forever.  After every arrival, report the average of
+the most recent W of them.  You may not re-read the window on each arrival -- so
+recomputing the W values each time is out, and the answer has to be maintained.
+
+Two follow-ups do the real work.  What do you report before W values have arrived?
+And: is a running total exactly right?
+
+Run it:  python3 programs/ch01.py
+"""
+
+import random
+
+# Data.  Every constant comes from tools/gen_ch01_interview.js, which derives it
+# from tools/stream_seed.js.
+
+# VALUES: the seed events' values, in arrival order.  They are all DISTINCT on
+# purpose -- if two were equal, a wrong window could not be attributed to the
+# wrong index, so a bug could average the wrong three values and still look right.
+VALUES = [5, 3, 7, 2, 6, 1, 9, 4, 8]
+
+# W = 3: small enough that the whole trace fits on a page, large enough that
+# there is a warm-up (W - 1 = 2 withheld answers) and a departure to subtract.
+W = 3
+
+# HUGE = 1e16: chosen because a float64 has ~15-16 significant decimal digits, so
+# a total near 1e16 cannot also hold a unit value exactly.  The generator's
+# finding, kept here deliberately: uniformly SCALING every value by HUGE produces
+# NO drift, because the values then share an exponent and the arithmetic stays
+# exact.  It is the MIXTURE of magnitudes that drifts, so exactly ONE value is
+# replaced.  Both cases are asserted below so the claim cannot silently flip.
+HUGE = 1e16
+
+N = len(VALUES)
+NWIN = N - W + 1
+WARMUP = W - 1
+
+# The reference implementation and the incremental one.
+
+def recompute_at(xs, i, w=W):
+    """The answer everyone gives first: add the w values of window i from scratch.
+
+    Costs w reads per window -- so the price is set by the window size, not by
+    the data.  Exact for any arithmetic, because no value is ever subtracted out.
+    """
+    total = 0
+    for k in range(w):
+        total += xs[i + k]
+    return total / w
+
+def all_windows(xs, w=W):
+    """Run recompute_at over every window in turn, for comparison."""
+    return [recompute_at(xs, i, w) for i in range(len(xs) - w + 1)]
+
+def running(xs, w=W):
+    """Keep the window's TOTAL instead of its contents.
+
+    On each arrival: add what came in, and subtract the one value that left.
+    Exactly one value leaves when one arrives, so the update is two operations
+    whatever w is.  `report` withholds the first w-1 answers, because there is no
+    average of w values before w values exist.
+
+    Returns (answers, trace, adds, subs).  The subtraction reads xs[i - w], which
+    is why the SPACE is O(w) even though the TIME is O(1): the departing value
+    must still be reachable.
+    """
+    total = 0
+    answers, trace = [], []
+    adds = subs = 0
+    for i in range(len(xs)):
+        total += xs[i]                    # on_arrival: the addition
+        adds += 1
+        left = i - w
+        removed = None
+        if left >= 0:                     # on_arrival: the subtraction
+            total -= xs[left]
+            removed = xs[left]
+            subs += 1
+        full = i >= w - 1                 # report: the warm-up guard
+        trace.append({"i": i, "added": xs[i], "removed": removed,
+                      "sum": total, "avg": total / w if full else None,
+                      "full": full})
+        if full:
+            answers.append(total / w)
+    return answers, trace, adds, subs
+
+def drift_at(xs, i, w=W):
+    """How far the running total has wandered from the truth at window i.
+
+    running(...)[i] - recompute_at(xs, i).  Zero for exact arithmetic; non-zero
+    once the window holds a mixture of magnitudes, because adding a value and
+    later subtracting it does not return to where you started.
+    """
+    return running(xs, w)[0][i] - recompute_at(xs, i, w)
+
+# The three variations.
+
+def the_rolling_maximum(xs, w=W):
+    """Variation 1, surface: risk.  The same window, but the MAXIMUM.
+
+    Non-obvious point: the trick does not transfer.  `running`'s subtraction is
+    the line that cannot be written -- addition is invertible and max is not, so
+    once the maximum leaves the window a single kept number cannot produce the
+    next one.  What works instead keeps the indexes that could still become the
+    maximum, in decreasing order: a monotonic deque.
+    """
+    dq, out = [], []
+    for i, v in enumerate(xs):
+        while dq and xs[dq[-1]] <= v:
+            dq.pop()
+        dq.append(i)
+        if dq[0] <= i - w:
+            dq.pop(0)
+        if i >= w - 1:
+            out.append(xs[dq[0]])
+    return out
+
+def the_time_based_window(stamped, span):
+    """Variation 2, surface: monitoring.  Average everything from the last `span`.
+
+    Non-obvious point: "exactly one leaves when one arrives" becomes false -- zero
+    or many expire -- so the COUNT must be maintained beside the total and the
+    divisor changes every arrival.  Subtler: the answer changes with no arrival at
+    all, as values age out while the stream is quiet, so a real implementation
+    needs a timer-driven recompute as well as an input-driven one.
+
+    `stamped` is [(t, v), ...] in time order.  Returns [(t, avg, count), ...].
+    """
+    from collections import deque
+    win = deque()
+    total = 0.0
+    out = []
+    for t, v in stamped:
+        win.append((t, v))
+        total += v
+        while win and win[0][0] < t - span:   # zero, one or many expire
+            total -= win.popleft()[1]
+        out.append((t, total / len(win), len(win)))
+    return out
+
+def the_average_that_must_survive_a_restart(xs, crash_after, w=W):
+    """Variation 3, surface: reliability.  The process restarts mid-stream.
+
+    Non-obvious point: the total is one number and looks trivially
+    checkpointable, and that is the trap -- restoring the total WITHOUT the last w
+    values makes the next subtraction impossible, so the state to persist is the
+    whole window plus the input position, which is larger than the thing being
+    reported.
+
+    Returns (answers_from_full_checkpoint, answers_from_total_only_checkpoint).
+    The second is what a checkpoint of the accumulator alone produces: it has to
+    guess the departing value, and guessing zero leaves the total too high.
+    """
+    total, window, out_good = 0, [], []
+    for i in range(crash_after):            # before the crash
+        total += xs[i]
+        window.append(xs[i])
+        if len(window) > w:
+            total -= window.pop(0)
+        if i >= w - 1:
+            out_good.append(total / w)
+    out_bad, bad_total = list(out_good), total   # the crash: only `total` was saved
+    for i in range(crash_after, len(xs)):
+        total += xs[i]                      # restored WITH the window: can subtract
+        window.append(xs[i])
+        if len(window) > w:
+            total -= window.pop(0)
+        out_good.append(total / w)
+        bad_total += xs[i]                  # restored without it: nothing to subtract
+        out_bad.append(bad_total / w)
+    return out_good, out_bad
+
+
+def main():
+    print("VALUES =", "  ".join(f"{i}:{v}" for i, v in enumerate(VALUES)))
+    print(f"W = {W} -> {NWIN} windows, {WARMUP} answers withheld\n")
+
+    exact = all_windows(VALUES)
+    answers, trace, adds, subs = running(VALUES)
+    recompute_ops = NWIN * W
+
+    for t in trace:
+        rm = "-" if t["removed"] is None else f"-{t['removed']}"
+        av = "NOT_YET" if t["avg"] is None else f"{t['avg']:.4f}"
+        print(f"  arrival {t['i']}: +{t['added']} {rm:>3}  sum={t['sum']:>2}  report={av}")
+    print()
+    print(f"  recomputed : {[round(v, 4) for v in exact]}  ({recompute_ops} reads)")
+    print(f"  running    : {[round(v, 4) for v in answers]}  ({adds} adds + {subs} subs = {adds + subs} ops)")
+
+    assert answers == exact, "the running total disagrees with recomputation on small values"
+    assert adds + subs < recompute_ops, f"{adds + subs} ops is not cheaper than {recompute_ops} reads"
+    assert adds == N and subs == N - W, f"expected {N} adds and {N - W} subs, got {adds} and {subs}"
+    assert sum(1 for t in trace if not t["full"]) == WARMUP == 2
+    assert any(t["removed"] is not None for t in trace), "nothing ever leaves the window"
+    assert trace[WARMUP - 1]["avg"] is None and trace[WARMUP]["avg"] == answers[0]
+
+    # ---- the drift, measured.  Mixture of magnitudes vs uniform scaling.
+    big = [HUGE] + VALUES[1:]
+    uniform = [v * HUGE for v in VALUES]
+    big_exact, big_run = all_windows(big), running(big)[0]
+    uni_exact, uni_run = all_windows(uniform), running(uniform)[0]
+    drift = [r - e for r, e in zip(big_run, big_exact)]
+    uni_drift = [r - e for r, e in zip(uni_run, uni_exact)]
+    drifted = sum(1 for d in drift if d != 0)
+    uni_drifted = sum(1 for d in uni_drift if d != 0)
+    worst = max(abs(d) for d in drift)
+    first_bad = next(i for i, d in enumerate(drift) if d != 0)
+
+    print(f"\n  one value replaced by {HUGE:.0e}: at window {first_bad} recomputation gives "
+          f"{big_exact[first_bad]!r} and the running total {big_run[first_bad]!r},")
+    print(f"    so drift_at({first_bad}) = {drift[first_bad]!r};  {drifted} of {NWIN} drift, worst {worst!r} (= 2/3)")
+    print(f"  EVERY value multiplied by {HUGE:.0e}: {uni_drifted} of {NWIN} answers drift")
+
+    assert drifted == 6, f"expected 6 of {NWIN} drifting, measured {drifted}"
+    assert drifted != NWIN, "every answer drifts, so nothing shows the exact case"
+    assert drift[0] == 0.0, "window 0 drifts, but it precedes the first subtraction"
+    assert first_bad == 1, f"drift starts at window {first_bad}, expected 1"
+    assert abs(worst - 2 / 3) < 1e-12, f"worst drift {worst!r} is not 2/3"
+    assert drift_at(big, first_bad) == drift[first_bad]
+    # the opposite outcome is forbidden too: uniform scaling must drift on NONE
+    assert uni_drifted == 0, (
+        f"uniform scaling drifted on {uni_drifted} answers; the claim 'it is the "
+        f"mixture, not the magnitude' would have to be rewritten, not the assert")
+    assert all(d == 0 for d in uni_drift)
+
+    # ---- the three variations
+    assert the_rolling_maximum(VALUES) == [7, 7, 7, 6, 9, 9, 9]
+    assert the_rolling_maximum(VALUES) != answers, "max and mean must not coincide here"
+    stamped = [(0, 10.0), (10, 20.0), (70, 30.0), (71, 40.0), (200, 50.0)]
+    tb = the_time_based_window(stamped, 60)
+    print(f"\n  time-based window (span 60): {[(t, round(a, 3), c) for t, a, c in tb]}")
+    # MEASURED, and not what a first reading expects: the count is 1,2,2,2,1 -- at
+    # t=71 one value arrives and one expires (so the count holds), and at t=200 TWO
+    # expire at once and none would have expired on a timer tick at t=140 either.
+    # So "exactly one leaves when one arrives" is false in both directions here.
+    assert [c for _, _, c in tb] == [1, 2, 2, 2, 1], f"measured counts {[c for *_, c in tb]}"
+    assert tb[2][1] == 25.0, "the divisor did not follow the count"
+    assert tb[4][1] == 50.0, "two values expiring at once left the total too high"
+    assert min(c for *_, c in tb) < max(c for *_, c in tb), "the count must rise AND fall"
+    good, bad = the_average_that_must_survive_a_restart(VALUES, crash_after=5)
+    print(f"  restart, window checkpointed : {[round(v, 4) for v in good]}")
+    print(f"  restart, total only          : {[round(v, 4) for v in bad]}")
+    assert good == exact, "a full checkpoint must continue exactly"
+    assert bad != exact, "a total-only checkpoint must NOT come out right"
+    assert bad[-1] > exact[-1], "the un-subtracted total has to read too high"
+
+    # ---- brute force over many inputs, not just the one example
+    rng = random.Random(20260303)
+    for _ in range(600):
+        w = rng.randint(1, 6)
+        n = rng.randint(w, 20)
+        xs = [rng.randint(-50, 50) for _ in range(n)]
+        assert running(xs, w)[0] == all_windows(xs, w), (xs, w)
+        assert the_rolling_maximum(xs, w) == [max(xs[i:i + w]) for i in range(n - w + 1)], (xs, w)
+    print("\n  600 random (values, W) pairs: running total == recomputation, and the")
+    print("  rolling maximum == max of every window.")
+
+    print("\nall assertions passed")
+
+if __name__ == "__main__":
+    main()
+```
+
+Running it prints:
+
+```
+VALUES = 0:5  1:3  2:7  3:2  4:6  5:1  6:9  7:4  8:8
+W = 3 -> 7 windows, 2 answers withheld
+
+  arrival 0: +5   -  sum= 5  report=NOT_YET
+  arrival 1: +3   -  sum= 8  report=NOT_YET
+  arrival 2: +7   -  sum=15  report=5.0000
+  arrival 3: +2  -5  sum=12  report=4.0000
+  arrival 4: +6  -3  sum=15  report=5.0000
+  arrival 5: +1  -7  sum= 9  report=3.0000
+  arrival 6: +9  -2  sum=16  report=5.3333
+  arrival 7: +4  -6  sum=14  report=4.6667
+  arrival 8: +8  -1  sum=21  report=7.0000
+
+  recomputed : [5.0, 4.0, 5.0, 3.0, 5.3333, 4.6667, 7.0]  (21 reads)
+  running    : [5.0, 4.0, 5.0, 3.0, 5.3333, 4.6667, 7.0]  (9 adds + 6 subs = 15 ops)
+
+  one value replaced by 1e+16: at window 1 recomputation gives 4.0 and the running total 4.666666666666667,
+    so drift_at(1) = 0.666666666666667;  6 of 7 drift, worst 0.666666666666667 (= 2/3)
+  EVERY value multiplied by 1e+16: 0 of 7 answers drift
+
+  time-based window (span 60): [(0, 10.0, 1), (10, 15.0, 2), (70, 25.0, 2), (71, 35.0, 2), (200, 50.0, 1)]
+  restart, window checkpointed : [5.0, 4.0, 5.0, 3.0, 5.3333, 4.6667, 7.0]
+  restart, total only          : [5.0, 4.0, 5.0, 5.3333, 8.3333, 9.6667, 12.3333]
+
+  600 random (values, W) pairs: running total == recomputation, and the
+  rolling maximum == max of every window.
+
+all assertions passed
+```
 
 #### The solution as a running program — stack and heap at every step
 

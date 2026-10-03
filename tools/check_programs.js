@@ -33,9 +33,26 @@ const checkOne = (py, out, label, embedText) => {
     if (firstDef && !embedText.includes(firstDef)) return `${label}: embed.md does not contain the program's first definition — the section is not showing the program that was tested`;
     const lastOut = want.trim().split('\n').slice(-1)[0];
     if (lastOut && !embedText.includes(lastOut)) return `${label}: embed.md does not contain the program's last output line — the results shown were not produced by running it`;
+    if (DOCS) {
+      if (firstDef && !DOCS.includes(firstDef)) return `${label}: the PUBLISHED page (docs/*.md) does not contain the program — the embed has it and the chapter does not, so run tools/to_markdown.js`;
+      if (lastOut && !DOCS.includes(lastOut)) return `${label}: the PUBLISHED page (docs/*.md) does not show the program's output — run tools/to_markdown.js`;
+    }
   }
   return null;
 };
+
+// THE ARTIFACT THE READER READS. check_programs originally looked only at
+// diagrams/anim/*/embed.md — the file the generator writes. But docs/*.md is built from
+// those embeds by a SEPARATE step (tools/to_markdown.js), so a run that regenerates the
+// embeds and skips that step leaves the page without the programs while every gate still
+// passes. That is exactly what happened: 123 variation programs were green in the embeds
+// and invisible on the published chapter page. The gate now reads both.
+const docsDir = path.join(root, 'docs');
+const DOCS = fs.existsSync(docsDir)
+  ? fs.readdirSync(docsDir).filter(f => f.endsWith('.md'))
+      .map(f => fs.readFileSync(path.join(docsDir, f), 'utf8')).join('\n')
+  : '';
+if (!DOCS) console.log('note: no docs/*.md — the published-page check is not running here');
 
 const sections = fs.existsSync(animDir)
   ? fs.readdirSync(animDir).filter(d => /-interview-memory$/.test(d)).sort() : [];

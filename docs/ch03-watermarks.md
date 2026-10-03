@@ -458,6 +458,297 @@ case the appealing first answer is to materialise a sequence you cannot afford.
 
 **Where it lands.** `evictSmaller` with the comparison reversed and applied to running totals rather than values, and no fixed `W` — so `expire` disappears entirely.
 
+
+<details>
+<summary><b>The whole program</b> for this variation — runnable, no animation</summary>
+
+This is **the shortest spike** solved on its own: a complete file, every helper included, asserting its own results. It is run on every build.
+
+```python
+#!/usr/bin/env python3
+"""Variation 2 — the shortest spike (looks like load testing). Standalone and runnable.
+
+  A load test records how many requests arrived in each second.  Find the SHORTEST run of
+  consecutive seconds whose total reaches at least K -- the tightest burst in the run.
+  Idle seconds are recorded as zero, so a run may contain seconds that contribute nothing.
+
+The window is no longer a fixed size, so the sliding machinery does not apply directly and
+`expire` disappears entirely: there is no W to expire against.  The move that unlocks it is
+to change WHAT IS STORED.  Replace the counts by their running totals and the question
+becomes, for each position, the nearest earlier total that is at least K below it -- which
+is answerable from a list kept INCREASING, because a later total no larger than the back
+makes the back useless: the later one is both smaller and closer, so it would always give a
+shorter run.  Same eviction argument as the sliding maximum, opposite ordering, different
+quantity.  "Both better AND newer" is the giveaway that it generalises.
+
+Run it:  python3 programs/ch03_v2.py
+"""
+
+import random
+
+# The chapter's nine values, now read as requests arriving in each of nine seconds.  All
+# distinct, so a wrong run cannot be mistaken for a right one, and they rise and fall.
+COUNTS = [5, 3, 7, 2, 6, 1, 9, 4, 8]
+
+# The same nine seconds with three IDLE seconds spliced in, which is the case the statement
+# bothers to mention.  A zero second repeats the running total, so the increasing list has
+# to decide between two equal totals -- and the answer must prefer the later one.
+IDLE = [5, 3, 7, 0, 0, 0, 2, 6, 1, 9, 4, 8]
+
+# K values chosen from the data rather than invented: 15 is reached by [5,3,7] exactly, 21
+# by [9,4,8] exactly, and 22 by nothing of length 3, so it is the boundary where the answer
+# has to grow.  999 is unreachable and must be reported as such.
+KS = (15, 21, 22, 999)
+
+N = len(COUNTS)
+
+
+def prefix(counts):
+    """Running totals with a leading zero, so that the total of counts[i:j] is pre[j]-pre[i]
+    for every pair including i = 0.  The leading zero is not decoration: without it the run
+    that starts at second 0 has no earlier total to subtract and is silently unreachable."""
+    pre = [0]
+    for c in counts:
+        pre.append(pre[-1] + c)
+    return pre
+
+
+def shortest_naive(counts, k):
+    """The reference: every run, summed.  Returns (length, ops) -- ops counted so the
+    quadratic cost is a measurement and not an adjective."""
+    best, ops = None, 0
+    pre = prefix(counts)
+    for i in range(len(counts)):
+        for j in range(i + 1, len(counts) + 1):
+            ops += 1
+            if pre[j] - pre[i] >= k and (best is None or j - i < best):
+                best = j - i
+    return best, ops
+
+
+def shortest_two_pointer(counts, k):
+    """The appealing answer, and it is CORRECT ONLY FOR NON-NEGATIVE COUNTS.
+
+    Grow the right edge, then pull the left edge in while the total still reaches K.  It
+    works here because every count is at least zero, which makes the running total
+    non-decreasing, so shrinking the window can only lower it.  Feed it signed data -- net
+    connections opened minus closed, a queue depth delta -- and it is wrong, because
+    dropping a negative value RAISES the total and the left edge stops too early.  The
+    assumption is in the data, not in the code, which is why it survives review."""
+    best, total, left = None, 0, 0
+    for right, c in enumerate(counts):
+        total += c
+        while left <= right and total - counts[left] >= k:
+            total -= counts[left]
+            left += 1
+        if total >= k and (best is None or right - left + 1 < best):
+            best = right - left + 1
+    return best
+
+
+def shortest_deque(counts, k, strict=False):
+    """The answer: prefix totals plus a list kept increasing.
+
+    Two loops at each position j, and they do different jobs.  The FRONT loop answers: while
+    the front total is at least K below pre[j], that front is a usable start -- and it is
+    discarded afterwards, because any later j is further away from it, so it can never give
+    a shorter run again.  The BACK loop maintains the invariant: a total no larger than the
+    back makes the back dead, since the newcomer is both smaller and closer.
+
+    `strict` swaps the back loop's `>=` for `>`, which keeps equal totals instead of
+    replacing them.  That changes the LIST LENGTH and not the answer, because the front loop
+    pops every usable start and keeps the minimum -- the same way `<=` versus `<` in the
+    sliding maximum buys space rather than correctness.  Returns (length, max_list_len).
+    """
+    pre = prefix(counts)
+    dq, best, widest = [], None, 0
+    for j, pj in enumerate(pre):
+        while dq and pj - pre[dq[0]] >= k:
+            i = dq.pop(0)
+            if best is None or j - i < best:
+                best = j - i
+        if strict:
+            while dq and pre[dq[-1]] > pj:
+                dq.pop()
+        else:
+            while dq and pre[dq[-1]] >= pj:
+                dq.pop()
+        dq.append(j)
+        widest = max(widest, len(dq))
+    return best, widest
+
+
+def main():
+    pre = prefix(COUNTS)
+    print("COUNTS =", "  ".join(f"{i}:{v}" for i, v in enumerate(COUNTS)))
+    print(f"prefix  = {pre}\n")
+
+    for k in KS:
+        want, ops = shortest_naive(COUNTS, k)
+        got, widest = shortest_deque(COUNTS, k)
+        tp = shortest_two_pointer(COUNTS, k)
+        assert got == want == tp, (k, got, want, tp)
+        if want is None:
+            print(f"  K = {k:>3} -> no run reaches it ({ops} pairs examined to be sure)")
+        else:
+            start = next(i for i in range(N - want + 1) if sum(COUNTS[i:i + want]) >= k)
+            run = COUNTS[start:start + want]
+            print(f"  K = {k:>3} -> {want} seconds, {run} totalling {sum(run)}   "
+                  f"(list never longer than {widest}, naive examined {ops} pairs)")
+
+    assert shortest_deque(COUNTS, 15)[0] == 3 and shortest_deque(COUNTS, 21)[0] == 3
+    assert shortest_deque(COUNTS, 22)[0] == 4, shortest_deque(COUNTS, 22)
+    assert shortest_deque(COUNTS, 999)[0] is None, "an unreachable K must report nothing"
+    # the boundary between 21 and 22 is the whole point of choosing those two: 21 is
+    # reachable in three seconds and 22 is not, and nothing between them changes
+    assert max(sum(COUNTS[i:i + 3]) for i in range(N - 2)) == 21
+    assert shortest_deque(COUNTS, 21)[0] < shortest_deque(COUNTS, 22)[0]
+    print(f"\n  21 is reached by three seconds exactly and 22 by none, so the answer steps")
+    print(f"  from 3 to 4 between them -- the step is in the data, not in the algorithm.")
+
+    # ---- idle seconds
+    print(f"\n  IDLE = {IDLE}  (three zero seconds spliced into the same stream)")
+    ipre = prefix(IDLE)
+    repeats = [i for i in range(1, len(ipre)) if ipre[i] == ipre[i - 1]]
+    print(f"  prefix = {ipre}")
+    print(f"  the running total repeats at positions {repeats}, which is what a zero second is")
+    assert len(repeats) == 3, repeats
+    for k in (15, 21, 22):
+        want, _ = shortest_naive(IDLE, k)
+        loose, w_loose = shortest_deque(IDLE, k)
+        strict, w_strict = shortest_deque(IDLE, k, strict=True)
+        assert loose == want == strict, (k, loose, want, strict)
+        assert w_strict >= w_loose, (k, w_loose, w_strict)
+        print(f"    K = {k:>3} -> {want} seconds;  list length {w_loose} with `>=`, "
+              f"{w_strict} with `>`")
+    # MEASURED, and it is the same finding the sliding maximum gives: the comparison buys
+    # SPACE, not answers.  The first expectation was that `>` would over-report the length
+    # by keeping the older of two equal totals; it does not, because the front loop pops
+    # every usable start and keeps the minimum, so a stale duplicate is harmless.
+    assert shortest_deque(IDLE, 15, strict=True)[1] > shortest_deque(IDLE, 15)[1], (
+        "the strict comparison must at least cost space, or there is nothing to say")
+    assert shortest_deque(IDLE, 15, strict=True)[0] == shortest_deque(IDLE, 15)[0]
+
+    # ---- where the two-pointer actually breaks
+    rng = random.Random(20260303)
+    counter = None
+    for _ in range(3000):
+        n = rng.randint(2, 8)
+        xs = [rng.randint(-6, 6) for _ in range(n)]
+        k = rng.randint(1, 12)
+        if shortest_two_pointer(xs, k) != shortest_naive(xs, k)[0]:
+            counter = (xs, k, shortest_two_pointer(xs, k), shortest_naive(xs, k)[0])
+            break
+    assert counter is not None, "no signed counterexample found; the claim is unproven"
+    xs, k, tp, want = counter
+    assert shortest_deque(xs, k)[0] == want, (xs, k)
+    print(f"\n  the two-pointer, on signed data (net connections opened minus closed):")
+    print(f"    {xs} with K = {k}: two-pointer says {tp}, the truth is {want}")
+    print(f"    the deque says {shortest_deque(xs, k)[0]} -- it never assumed the totals increase.")
+    # and it must be RIGHT on every non-negative stream, or the distinction is not real
+    for _ in range(800):
+        n = rng.randint(1, 12)
+        xs = [rng.randint(0, 9) for _ in range(n)]
+        k = rng.randint(1, 30)
+        assert shortest_two_pointer(xs, k) == shortest_naive(xs, k)[0], (xs, k)
+    print(f"    on 800 non-negative streams it agrees with the truth every time, which is")
+    print(f"    exactly what makes shipping it a decision about the data rather than the code.")
+
+    # ---- boundaries
+    # the list holds ONE entry on an empty stream, not zero: the leading zero of the
+    # prefix array is pushed before any count is read, and it is the entry that makes
+    # runs starting at second 0 reachable at all.
+    assert shortest_deque([], 1) == (None, 1), shortest_deque([], 1)
+    assert shortest_deque([0, 0, 0], 1)[0] is None, "an idle stream cannot reach 1"
+    assert shortest_deque([0, 0, 0], 0)[0] == 1, "K = 0 is reached by one idle second"
+    assert shortest_deque([7], 7)[0] == 1 and shortest_deque([7], 8)[0] is None
+    assert shortest_deque(COUNTS, 0)[0] == 1, (
+        "K = 0 must give 1, not 0: the empty run is excluded because the list is empty at j=0")
+    assert shortest_deque(COUNTS, sum(COUNTS))[0] == N, "K = the whole total needs every second"
+    print(f"\n  boundaries: empty stream -> None; all-idle -> None for K=1 and 1 for K=0;")
+    print(f"  K = {sum(COUNTS)} (the entire test) -> {N} seconds, the whole stream.")
+
+    # ---- the scale, and the cost of the naive answer at it
+    BIG = 20_000
+    big = [(i * 7919) % 50 for i in range(BIG)]        # deterministic, no seed needed
+    bk = 50 * 40
+    got, widest = shortest_deque(big, bk)
+    assert got is not None and got >= 1
+    assert shortest_two_pointer(big, bk) == got, (got, shortest_two_pointer(big, bk))
+    small = big[:700]
+    _, naive_ops = shortest_naive(small, bk)
+    print(f"\n  at {BIG:,} seconds: shortest run reaching {bk} is {got} seconds, and the")
+    print(f"  increasing list never held more than {widest:,} entries.")
+    print(f"  the naive pair scan on just the first {len(small):,} of them examined "
+          f"{naive_ops:,} pairs;")
+    print(f"  at {BIG:,} that is about {BIG * (BIG + 1) // 2:,} -- which is why the store changes.")
+    assert naive_ops == len(small) * (len(small) + 1) // 2, naive_ops
+    assert widest <= BIG
+
+    # ---- many inputs, against the pair scan
+    for _ in range(400):
+        n = rng.randint(1, 20)
+        xs = [rng.randint(0, 9) for _ in range(n)]
+        k = rng.randint(0, 40)
+        want, _ = shortest_naive(xs, k)
+        assert shortest_deque(xs, k)[0] == want, (xs, k)
+        assert shortest_deque(xs, k, strict=True)[0] == want, (xs, k)
+        signed = [rng.randint(-9, 9) for _ in range(n)]
+        want_s, _ = shortest_naive(signed, k)
+        assert shortest_deque(signed, k)[0] == want_s, (signed, k)
+    print(f"\n  400 random streams, non-negative and signed, both comparisons: the increasing")
+    print(f"  list equals the pair scan every time.")
+
+    print("\nall assertions passed")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+Running it prints:
+
+```
+COUNTS = 0:5  1:3  2:7  3:2  4:6  5:1  6:9  7:4  8:8
+prefix  = [0, 5, 8, 15, 17, 23, 24, 33, 37, 45]
+
+  K =  15 -> 3 seconds, [5, 3, 7] totalling 15   (list never longer than 4, naive examined 45 pairs)
+  K =  21 -> 3 seconds, [9, 4, 8] totalling 21   (list never longer than 6, naive examined 45 pairs)
+  K =  22 -> 4 seconds, [1, 9, 4, 8] totalling 22   (list never longer than 6, naive examined 45 pairs)
+  K = 999 -> no run reaches it (45 pairs examined to be sure)
+
+  21 is reached by three seconds exactly and 22 by none, so the answer steps
+  from 3 to 4 between them -- the step is in the data, not in the algorithm.
+
+  IDLE = [5, 3, 7, 0, 0, 0, 2, 6, 1, 9, 4, 8]  (three zero seconds spliced into the same stream)
+  prefix = [0, 5, 8, 15, 15, 15, 15, 17, 23, 24, 33, 37, 45]
+  the running total repeats at positions [4, 5, 6], which is what a zero second is
+    K =  15 -> 3 seconds;  list length 4 with `>=`, 7 with `>`
+    K =  21 -> 3 seconds;  list length 6 with `>=`, 9 with `>`
+    K =  22 -> 4 seconds;  list length 6 with `>=`, 9 with `>`
+
+  the two-pointer, on signed data (net connections opened minus closed):
+    [-4, -6, -5, 4, 5, -2, -1, 0] with K = 5: two-pointer says None, the truth is 1
+    the deque says 1 -- it never assumed the totals increase.
+    on 800 non-negative streams it agrees with the truth every time, which is
+    exactly what makes shipping it a decision about the data rather than the code.
+
+  boundaries: empty stream -> None; all-idle -> None for K=1 and 1 for K=0;
+  K = 45 (the entire test) -> 9 seconds, the whole stream.
+
+  at 20,000 seconds: shortest run reaching 2000 is 80 seconds, and the
+  increasing list never held more than 82 entries.
+  the naive pair scan on just the first 700 of them examined 245,350 pairs;
+  at 20,000 that is about 200,010,000 -- which is why the store changes.
+
+  400 random streams, non-negative and signed, both comparisons: the increasing
+  list equals the pair scan every time.
+
+all assertions passed
+```
+
+</details>
+
 </details>
 <details>
 <summary><b>Variation 3</b> — the next warmer day <i>(looks like weather)</i></summary>
@@ -467,6 +758,321 @@ case the appealing first answer is to materialise a sequence you cannot afford.
 **Why it is not obvious.** There is no window at all here, which is what makes it worth putting beside the others: `expire` is gone and only the eviction remains. Keep the days whose answer is still unknown; when a warmer day arrives, it is the answer for every unresolved day cooler than it, so they are all resolved and removed at once. Each day enters once and leaves once, so it is linear even though one day can resolve many. The trap is reaching for the sliding-window machinery and looking for a window size that is not there — the shared idea is the eviction, not the window.
 
 **Where it lands.** `evictSmaller` almost verbatim, with the evicted entries producing answers rather than being discarded, and `expire` deleted.
+
+
+<details>
+<summary><b>The whole program</b> for this variation — runnable, no animation</summary>
+
+This is **the next warmer day** solved on its own: a complete file, every helper included, asserting its own results. It is run on every build.
+
+```python
+#!/usr/bin/env python3
+"""Variation 3 — the next warmer day (looks like weather). Standalone and runnable.
+
+  A station records one temperature a day.  For each day, report HOW MANY DAYS UNTIL THE
+  NEXT WARMER ONE, or zero if no warmer day ever comes.
+
+There is no window at all here, which is exactly what makes it worth putting beside the
+sliding maximum: `expire` is gone and only the eviction remains.  Keep the days whose answer
+is still unknown; when a warmer day arrives it is the answer for EVERY unresolved day cooler
+than it, so they are all resolved and removed at once.  Each day is pushed once and removed
+once, so the whole thing is linear even though a single day can resolve many.  The trap is
+reaching for the sliding-window machinery and hunting for a window size that is not in the
+question -- the shared idea is the eviction, not the window.
+
+The unresolved days are also the watermark's backlog in miniature: they are precisely the
+events the running maximum has not yet passed.
+
+Run it:  python3 programs/ch03_v3.py
+"""
+
+import random
+
+# The chapter's nine values, read now as nine daily highs in Celsius.  All distinct, so a
+# resolution can be attributed to the day that caused it, and they rise AND fall -- a
+# monotone series would leave the stack either empty or untouched and hide the mechanism.
+TEMPS = [5, 3, 7, 2, 6, 1, 9, 4, 8]
+
+# A run with repeats, kept separate because the nine above have none: "warmer" is strict,
+# so an equal day must NOT resolve anything, and that is only visible with ties.
+TIED = [5, 5, 5, 6]
+
+N = len(TEMPS)
+
+
+def naive(temps):
+    """The reference: for each day, scan forward until something warmer turns up.
+
+    Returns (answers, ops).  Quadratic in the worst case, and the worst case is a cooling
+    trend -- every day scans to the end and finds nothing, which is also the case where the
+    linear answer does the least work, so the two disagree most exactly where it matters."""
+    out, ops = [], 0
+    for i, t in enumerate(temps):
+        out.append(0)
+        for j in range(i + 1, len(temps)):
+            ops += 1
+            if temps[j] > t:
+                out[i] = j - i
+                break
+    return out, ops
+
+
+def next_warmer(temps):
+    """The answer: a stack of the days whose answer is still UNKNOWN, kept cooling downward.
+
+    The arriving day is warmer than every day it evicts, and it is the FIRST such day for all
+    of them, because any earlier warmer day would have evicted them already.  So one
+    comparison resolves a whole group, and the evicted entries produce answers instead of
+    being discarded -- which is the one line that differs from the sliding maximum.
+
+    `<` and not `<=`: an equal day is not warmer, so it must leave the cooler day waiting.
+    Returns (answers, pushes, pops, biggest_group, unresolved)."""
+    out = [0] * len(temps)
+    stack, pushes, pops, biggest = [], 0, 0, 0
+    for i, t in enumerate(temps):
+        group = 0
+        while stack and temps[stack[-1]] < t:
+            j = stack.pop()
+            out[j] = i - j
+            pops += 1
+            group += 1
+        if group > biggest:
+            biggest = group
+        stack.append(i)
+        pushes += 1
+    return out, pushes, pops, biggest, list(stack)
+
+
+def next_warmer_within(temps, lookahead):
+    """The sliding-window reflex: pick a window and only look that far ahead.
+
+    This is the wrong answer the question invites, and it is wrong in a specific way -- it
+    reports 0 ("no warmer day ever") for a day whose warmer day exists but is further off
+    than the chosen lookahead, which is indistinguishable in the output from the true 0.
+    The lookahead that would be safe is the largest gap in the ANSWER, which is not known
+    until the answer is known."""
+    out = []
+    for i, t in enumerate(temps):
+        out.append(0)
+        for j in range(i + 1, min(len(temps), i + lookahead + 1)):
+            if temps[j] > t:
+                out[i] = j - i
+                break
+    return out
+
+
+def main():
+    print("TEMPS =", "  ".join(f"{i}:{v}" for i, v in enumerate(TEMPS)))
+    want, naive_ops = naive(TEMPS)
+    got, pushes, pops, biggest, unresolved = next_warmer(TEMPS)
+    print(f"  naive  : {want}   ({naive_ops} forward comparisons)")
+    print(f"  stack  : {got}   ({pushes} pushes + {pops} pops = {pushes + pops} steps"
+          f" -- the stack LOSES at this size)")
+    assert got == want, (got, want)
+    assert got == [2, 1, 4, 1, 2, 1, 0, 1, 0], got
+    assert pushes == N, "every day must be pushed exactly once for the linear claim"
+    assert pops == N - len(unresolved) == 7, (pops, unresolved)
+    # CORRECTED.  The expectation was that the stack is cheaper here.  It is NOT: 16 steps
+    # against 14 comparisons on nine days, because the forward scan stops at the first
+    # warmer day and these temperatures turn over quickly, while the stack pays a push for
+    # every day whether or not it does any work.  The stack's win is asymptotic, and the
+    # crossover is measured at the end of this program rather than assumed here.
+    assert pushes + pops > naive_ops, (pushes + pops, naive_ops)
+    print(f"  the {len(unresolved)} days never resolved are {unresolved} "
+          f"(temps {[TEMPS[i] for i in unresolved]}), which is")
+    print(f"  the stack at the end -- and it is cooling downward, as it was all along.")
+    assert [TEMPS[i] for i in unresolved] == [9, 8], unresolved
+    assert all(TEMPS[a] > TEMPS[b] for a, b in zip(unresolved, unresolved[1:])), (
+        "the stack must be decreasing, or the group eviction is not justified")
+    assert all(got[i] == 0 for i in unresolved)
+
+    # one day resolving many is the thing that makes the linear claim surprising
+    print(f"\n  the biggest single eviction was {biggest} days at once: day 6 ({TEMPS[6]}C) is the")
+    print(f"  answer for days {[i for i in range(N) if i + got[i] == 6 and got[i]]} simultaneously.")
+    assert biggest == 3, biggest
+    assert [i for i in range(N) if got[i] and i + got[i] == 6] == [2, 4, 5]
+    assert sum(1 for i in range(N) if got[i] and i + got[i] == 6) == biggest
+    # ...and no day is resolved twice, which is the other half of "pushed once, popped once"
+    resolved = [i for i in range(N) if got[i]]
+    assert len(resolved) == len(set(resolved)) == pops
+
+    # ---- the strict comparison
+    tied_want, _ = naive(TIED)
+    tied_got, *_ = next_warmer(TIED)
+    print(f"\n  TIED = {TIED}: {tied_got}")
+    assert tied_got == tied_want == [3, 2, 1, 0], (tied_got, tied_want)
+    print(f"  the three equal days all wait for day 3 ({TIED[3]}C) -- an equal day is not warmer,")
+    print(f"  so `<` is what keeps them waiting.  With `<=` each would resolve to its neighbour:")
+    loose = [0] * len(TIED)
+    stack = []
+    for i, t in enumerate(TIED):                 # the same loop with the weaker comparison
+        while stack and TIED[stack[-1]] <= t:
+            j = stack.pop()
+            loose[j] = i - j
+        stack.append(i)
+    print(f"    `<=` gives {loose}, which claims tomorrow is warmer when tomorrow is identical")
+    assert loose == [1, 1, 1, 0], loose
+    assert loose != tied_got, "the two comparisons must differ on ties or there is nothing to say"
+    # and on the nine distinct temperatures they must AGREE, so the difference is about ties
+    loose9 = [0] * N
+    stack = []
+    for i, t in enumerate(TEMPS):
+        while stack and TEMPS[stack[-1]] <= t:
+            j = stack.pop()
+            loose9[j] = i - j
+        stack.append(i)
+    assert loose9 == got, "with no ties the comparison cannot matter, and it must not"
+
+    # ---- the window that is not there
+    needed = max(got)
+    print(f"\n  the sliding-window reflex: with a lookahead of L days,")
+    for L in (1, 2, 3, 4, 8):
+        w = next_warmer_within(TEMPS, L)
+        bad = [i for i in range(N) if w[i] != got[i]]
+        print(f"    L = {L}: {w}   wrong on days {bad}")
+        assert (bad == []) == (L >= needed), (L, bad, needed)
+        for i in bad:
+            assert w[i] == 0 and got[i] != 0, (i, w[i], got[i])
+    assert needed == 4, needed
+    print(f"  the smallest safe lookahead here is {needed}, and every too-small one fails the")
+    print(f"  same way: it reports 0, which is indistinguishable from a true 'never warmer'.")
+    # and the safe lookahead is data-dependent, up to n-1: a single cold snap at the end
+    staircase = list(range(10, 0, -1)) + [99]
+    sgot, *_ = next_warmer(staircase)
+    assert max(sgot) == len(staircase) - 1, sgot
+    assert next_warmer_within(staircase, len(staircase) - 2)[0] == 0 and sgot[0] != 0
+    print(f"  on {staircase} the answer for day 0 is {sgot[0]} days, so no fixed lookahead")
+    print(f"  short of the whole series is safe -- the window size is a property of the data.")
+
+    # ---- boundaries
+    assert next_warmer([])[0] == []
+    assert next_warmer([7])[0] == [0], "one day can have no warmer day"
+    cooling = [9, 7, 5, 3, 1]
+    warming = [1, 3, 5, 7, 9]
+    c, cp, cpop, cbig, cun = next_warmer(cooling)
+    w2, wp, wpop, wbig, wun = next_warmer(warming)
+    assert c == [0] * 5 and len(cun) == 5 and cpop == 0, (c, cun)
+    assert w2 == [1, 1, 1, 1, 0] and len(wun) == 1 and wpop == 4, (w2, wun)
+    assert cbig == 0 and wbig == 1, (cbig, wbig)
+    print(f"\n  a cooling run {cooling} -> {c}: nothing is ever resolved and the stack holds all 5,")
+    print(f"  which is where the stack costs O(n) space (a flat run does the same).  A warming run -> {w2}:")
+    print(f"  every day is resolved by the next, one at a time, and the stack never exceeds 1.")
+    flat = [4, 4, 4, 4]
+    assert next_warmer(flat)[0] == [0] * 4 and len(next_warmer(flat)[4]) == 4
+    print(f"  a flat run {flat} -> all zeros, and all four stay unresolved: strictness again.")
+
+    # ---- the scale
+    BIG = 100_000
+    rng = random.Random(20260303)
+    # choices() rather than a randint per day: the point of this block is the step count,
+    # not the random number generator, and 100,000 randint calls dominate the runtime.
+    big = rng.choices(range(1000), k=BIG)
+    bgot, bpush, bpop, bbig, bun = next_warmer(big)
+    assert bpush == BIG and bpop == BIG - len(bun)
+    assert bpop + bpush <= 2 * BIG, (bpop, bpush)
+    small = big[:2000]
+    _, small_ops = naive(small)
+    print(f"\n  at {BIG:,} days: {bpush:,} pushes + {bpop:,} pops = {bpush + bpop:,} steps, biggest")
+    print(f"  single eviction {bbig:,} days, {len(bun)} days never resolved.")
+    print(f"  the forward scan on the first {len(small):,} days alone made {small_ops:,} comparisons.")
+    # where the stack starts winning, measured rather than assumed
+    cross = None
+    for n in range(2, 400):
+        p2 = big[:n]
+        _, ops2 = naive(p2)
+        _, pu, po, _, _ = next_warmer(p2)
+        if pu + po < ops2:
+            cross = (n, pu + po, ops2)
+            break
+    assert cross is not None, "the stack never became cheaper, which would need explaining"
+    print(f"  the crossover on this series is at {cross[0]} days ({cross[1]} steps against "
+          f"{cross[2]} comparisons);")
+    print(f"  below that the forward scan is genuinely the better program.")
+    assert cross[0] > N, (
+        "the crossover must be beyond the nine-day sample, or the LOSES claim above is wrong")
+    assert bbig > 1, "no group eviction at scale, so the interesting path was not exercised"
+    assert len(bun) == len([i for i in range(BIG) if bgot[i] == 0])
+    # the descending tail is exactly the unresolved set, and it must be the record highs
+    # CORRECTED: `>` is the wrong test here.  With 200,000 days drawn from 1,000 values ties
+    # are certain, and a day equal to the warmest day after it is still unresolved, because
+    # "warmer" is strict.  So the unresolved set is the days that MATCH OR BEAT every later
+    # day, which is a weaker condition than being a strict suffix record.
+    run_max, best = [], None
+    for i in range(BIG - 1, -1, -1):
+        if best is None or big[i] >= best:
+            run_max.append(i)
+        if best is None or big[i] > best:
+            best = big[i]
+    assert sorted(run_max) == sorted(bun), (len(run_max), len(bun))
+    print(f"  and the unresolved days are exactly those matching or beating every later day")
+    print(f"  -- {len(bun)} of {BIG:,}, which with ties is more than the strict record highs.")
+
+    # ---- many inputs, against the forward scan
+    for _ in range(600):
+        n = rng.randint(0, 25)
+        xs = [rng.randint(-10, 10) for _ in range(n)]      # ties on purpose
+        want_x, _ = naive(xs)
+        got_x, px, pp, _, un = next_warmer(xs)
+        assert got_x == want_x, xs
+        assert px == n and pp == n - len(un), (xs, px, pp, un)
+    print(f"\n  600 random series (with ties, since the range repeats): the stack equals the")
+    print(f"  forward scan every time, and pushes + unresolved always accounts for every day.")
+
+    print("\nall assertions passed")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+Running it prints:
+
+```
+TEMPS = 0:5  1:3  2:7  3:2  4:6  5:1  6:9  7:4  8:8
+  naive  : [2, 1, 4, 1, 2, 1, 0, 1, 0]   (14 forward comparisons)
+  stack  : [2, 1, 4, 1, 2, 1, 0, 1, 0]   (9 pushes + 7 pops = 16 steps -- the stack LOSES at this size)
+  the 2 days never resolved are [6, 8] (temps [9, 8]), which is
+  the stack at the end -- and it is cooling downward, as it was all along.
+
+  the biggest single eviction was 3 days at once: day 6 (9C) is the
+  answer for days [2, 4, 5] simultaneously.
+
+  TIED = [5, 5, 5, 6]: [3, 2, 1, 0]
+  the three equal days all wait for day 3 (6C) -- an equal day is not warmer,
+  so `<` is what keeps them waiting.  With `<=` each would resolve to its neighbour:
+    `<=` gives [1, 1, 1, 0], which claims tomorrow is warmer when tomorrow is identical
+
+  the sliding-window reflex: with a lookahead of L days,
+    L = 1: [0, 1, 0, 1, 0, 1, 0, 1, 0]   wrong on days [0, 2, 4]
+    L = 2: [2, 1, 0, 1, 2, 1, 0, 1, 0]   wrong on days [2]
+    L = 3: [2, 1, 0, 1, 2, 1, 0, 1, 0]   wrong on days [2]
+    L = 4: [2, 1, 4, 1, 2, 1, 0, 1, 0]   wrong on days []
+    L = 8: [2, 1, 4, 1, 2, 1, 0, 1, 0]   wrong on days []
+  the smallest safe lookahead here is 4, and every too-small one fails the
+  same way: it reports 0, which is indistinguishable from a true 'never warmer'.
+  on [10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 99] the answer for day 0 is 10 days, so no fixed lookahead
+  short of the whole series is safe -- the window size is a property of the data.
+
+  a cooling run [9, 7, 5, 3, 1] -> [0, 0, 0, 0, 0]: nothing is ever resolved and the stack holds all 5,
+  which is where the stack costs O(n) space (a flat run does the same).  A warming run -> [1, 1, 1, 1, 0]:
+  every day is resolved by the next, one at a time, and the stack never exceeds 1.
+  a flat run [4, 4, 4, 4] -> all zeros, and all four stay unresolved: strictness again.
+
+  at 100,000 days: 100,000 pushes + 99,877 pops = 199,877 steps, biggest
+  single eviction 15 days, 123 days never resolved.
+  the forward scan on the first 2,000 days alone made 14,446 comparisons.
+  the crossover on this series is at 16 days (28 steps against 30 comparisons);
+  below that the forward scan is genuinely the better program.
+  and the unresolved days are exactly those matching or beating every later day
+  -- 123 of 100,000, which with ties is more than the strict record highs.
+
+  600 random series (with ties, since the range repeats): the stack equals the
+  forward scan every time, and pushes + unresolved always accounts for every day.
+
+all assertions passed
+```
+
+</details>
 
 </details>
 <details>
@@ -478,7 +1084,648 @@ case the appealing first answer is to materialise a sequence you cannot afford.
 
 **Where it lands.** `slideSpread` with `expire` taking the left edge as an argument instead of `i − W`, and the emit replaced by a running best length.
 
+
+<details>
+<summary><b>The whole program</b> for this variation — runnable, no animation</summary>
+
+This is **the longest steady stretch** solved on its own: a complete file, every helper included, asserting its own results. It is run on every build.
+
+```python
+#!/usr/bin/env python3
+"""Variation 4 — the longest steady stretch (looks like manufacturing). Standalone and
+runnable.
+
+  A sensor on a line logs one measurement a second.  Find the LONGEST run of consecutive
+  seconds in which the highest and lowest measurement differ by at most L -- the longest
+  stretch the process held steady.
+
+This is the two-deque version of the sliding spread with the window size turned into the
+ANSWER rather than an input, and that inversion is the exercise.  There is no W to slide:
+grow the right edge while the spread fits, and advance the left edge when it does not.  Both
+deques must then expire from the front by POSITION against the actual left edge, not against
+`i - W`, and the subtle part is that advancing the left edge may expire from one deque, both
+or neither.  Get that wrong and a front goes stale, the spread reads too small, and the
+answer is a longer steady stretch than really occurred -- which on a factory floor is a
+quality claim nobody made.
+
+Run it:  python3 programs/ch03_v4.py
+"""
+
+import random
+
+# The chapter's nine values, read as nine seconds of sensor readings.  All distinct and they
+# rise and fall, so the left edge genuinely has to advance and both deques genuinely expire.
+READINGS = [5, 3, 7, 2, 6, 1, 9, 4, 8]
+
+# L = 6, the chapter's own spread threshold.  It is the interesting value for these nine:
+# the first six readings span exactly 7 - 1 = 6, so they are one steady stretch and the
+# answer is 6, which is more than a first glance at the series suggests.
+L = 6
+
+N = len(READINGS)
+
+
+def spread(xs):
+    """The highest minus the lowest.  Written out because it is the quantity the whole
+    program is about, and because the brute force needs it on arbitrary slices."""
+    return max(xs) - min(xs)
+
+
+def longest_naive(xs, limit):
+    """The reference: every run, measured.  Returns (length, start, ops).
+
+    Quadratic in the count of runs AND linear inside each one, so it is really cubic as
+    written -- which is honest, because that is what "check every stretch" costs before any
+    insight is applied."""
+    best, bstart, ops = 0, 0, 0
+    for i in range(len(xs)):
+        for j in range(i, len(xs)):
+            ops += 1
+            if spread(xs[i:j + 1]) <= limit:
+                if j - i + 1 > best:
+                    best, bstart = j - i + 1, i
+            else:
+                break                       # widening further can only widen the spread
+    return best, bstart, ops
+
+
+def longest_steady(xs, limit):
+    """The answer: two deques and a left edge that is pushed forward only as far as needed.
+
+    `hi` is kept decreasing and `lo` increasing, so the spread of the current run is one
+    subtraction of the two fronts.  The left edge advances in a `while`, not an `if`, because
+    one arriving reading can invalidate several seconds at once; and each front is dropped
+    only when its index has actually fallen behind the left edge, which is why the two `if`s
+    are separate and tested against `left` rather than against any fixed offset.
+
+    Returns (length, start, pushes, back_pops, front_pops, left_steps)."""
+    hi, lo, left, best, bstart = [], [], 0, 0, 0
+    pushes = back = front = steps = 0
+    for i, v in enumerate(xs):
+        while hi and xs[hi[-1]] <= v:
+            hi.pop()
+            back += 1
+        hi.append(i)
+        while lo and xs[lo[-1]] >= v:
+            lo.pop()
+            back += 1
+        lo.append(i)
+        pushes += 2
+        while xs[hi[0]] - xs[lo[0]] > limit:
+            left += 1
+            steps += 1
+            if hi[0] < left:                # the maximum may or may not be the one leaving
+                hi.pop(0)
+                front += 1
+            if lo[0] < left:                # and the minimum independently may or may not
+                lo.pop(0)
+                front += 1
+        if i - left + 1 > best:
+            best, bstart = i - left + 1, left
+    return best, bstart, pushes, back, front, steps
+
+
+def longest_popping_both(xs, limit):
+    """The bug the statement warns about: advance the left edge and drop BOTH fronts, on the
+    assumption that the window moving means one entry left each deque.
+
+    It drops extremes that are still inside the run, so a front goes stale, the spread reads
+    too small, and the run is believed to be steady for longer than it was.  Returns the
+    length only -- the point is that it is a plausible number."""
+    hi, lo, left, best = [], [], 0, 0
+    for i, v in enumerate(xs):
+        while hi and xs[hi[-1]] <= v:
+            hi.pop()
+        hi.append(i)
+        while lo and xs[lo[-1]] >= v:
+            lo.pop()
+        lo.append(i)
+        while hi and lo and xs[hi[0]] - xs[lo[0]] > limit:
+            left += 1
+            hi.pop(0)
+            lo.pop(0)
+        best = max(best, i - left + 1)
+    return best
+
+
+def longest_fixed_offset(xs, limit):
+    """The other wrong answer: look for the window size that is not in the question.
+
+    It keeps a current W, expires against `i - W` exactly as the fixed-window program does,
+    and grows W whenever the spread fits.  W can therefore never shrink, so once it is too
+    large the expiry is wrong forever after -- the answer is a ratchet, not a measurement."""
+    hi, lo, best = [], [], 1
+    for i, v in enumerate(xs):
+        while hi and xs[hi[-1]] <= v:
+            hi.pop()
+        hi.append(i)
+        while lo and xs[lo[-1]] >= v:
+            lo.pop()
+        lo.append(i)
+        if hi[0] <= i - best:
+            hi.pop(0)
+        if lo[0] <= i - best:
+            lo.pop(0)
+        if xs[hi[0]] - xs[lo[0]] <= limit:
+            best += 1
+    return best
+
+
+def main():
+    print("READINGS =", "  ".join(f"{i}:{v}" for i, v in enumerate(READINGS)), f"   L = {L}")
+    want, wstart, ops = longest_naive(READINGS, L)
+    got, start, pushes, back, front, steps = longest_steady(READINGS, L)
+    run = READINGS[start:start + got]
+    print(f"  naive  : {want} seconds from second {wstart}   ({ops} runs measured)")
+    print(f"  deques : {got} seconds from second {start} -> {run}, spread "
+          f"{spread(run)} <= {L}")
+    print(f"           ({pushes} pushes, {back} back-pops, {front} front-pops, "
+          f"{steps} left-edge steps)")
+    assert (got, start) == (want, wstart), (got, start, want, wstart)
+    assert got == 6 and start == 0, (got, start)
+    assert run == [5, 3, 7, 2, 6, 1] and spread(run) == 6 == L, run
+    # the answer is 6 and not 4, because the first six readings span exactly L.  One more
+    # reading would break it, and that is the boundary the whole measurement sits on.
+    assert spread(READINGS[0:7]) == 8 > L, spread(READINGS[0:7])
+    print(f"  adding second 6 ({READINGS[6]}) takes the spread to {spread(READINGS[0:7])}, so the stretch")
+    print(f"  ends exactly where it does -- the answer sits on the = in 'at most {L}'.")
+
+    # ---- the left edge advances by more than one, and the two deques expire separately
+    assert steps >= 1, "the left edge never moved, so the hard part was never exercised"
+    assert front >= 1, "nothing ever expired from a front"
+    assert front < 2 * steps, (
+        "every left-edge step dropped from BOTH deques, so the separate `if`s are untested")
+    print(f"\n  {steps} left-edge steps produced only {front} front-pops: most steps drop from one")
+    print(f"  deque and not the other, which is precisely what a single shared `if` gets wrong.")
+
+    # ---- the two wrong answers, run
+    bad_both = longest_popping_both(READINGS, L)
+    bad_fix = longest_fixed_offset(READINGS, L)
+    print(f"\n  popping both fronts   : {bad_both} seconds (truth {want}) -- over by {bad_both - want}")
+    print(f"  expiring at i - best  : {bad_fix} seconds (truth {want}) -- over by {bad_fix - want}")
+    assert bad_both == 8 and bad_fix == 7, (bad_both, bad_fix)
+    assert bad_both > want and bad_fix > want
+    # and the direction is not an accident of this input: measured over many, both bugs
+    # ONLY ever over-report, which is the dangerous direction for a quality claim.
+    rng = random.Random(20260303)
+    over_both = over_fix = under = 0
+    for _ in range(3000):
+        n = rng.randint(1, 12)
+        xs = [rng.randint(0, 12) for _ in range(n)]
+        lim = rng.randint(0, 6)
+        t, _, _ = longest_naive(xs, lim)
+        assert longest_steady(xs, lim)[0] == t, (xs, lim)
+        b1, b2 = longest_popping_both(xs, lim), longest_fixed_offset(xs, lim)
+        over_both += b1 > t
+        over_fix += b2 > t
+        under += (b1 < t) + (b2 < t)
+    print(f"  over 3000 random series: popping-both over-reports {over_both} times, the fixed")
+    print(f"  offset {over_fix} times, and NEITHER ever under-reports ({under} cases) -- the error")
+    print(f"  always claims more stability than the line actually had.")
+    assert under == 0, f"{under} under-reports, so the direction claim is wrong"
+    assert over_both > 1000 and over_fix > 2000, (over_both, over_fix)
+
+    # ---- the boundaries, where L decides everything
+    print()
+    for lim in (0, 1, 2, 4, 6, 8, 99):
+        t, st, _ = longest_naive(READINGS, lim)
+        g, gs, *_ = longest_steady(READINGS, lim)
+        assert (g, gs) == (t, st), (lim, g, t)
+        print(f"  L = {lim:>2} -> {g} seconds from second {gs}: {READINGS[gs:gs + g]}")
+    assert longest_steady(READINGS, 0)[0] == 1, "with no tolerance and no repeats, every run is 1"
+    assert longest_steady(READINGS, 99)[0] == N, "a tolerance above the whole spread takes everything"
+    assert longest_steady(READINGS, spread(READINGS) - 1)[0] < N, (
+        "one below the full spread must NOT take the whole series")
+    assert longest_steady([], 5)[0] == 0 and longest_naive([], 5)[0] == 0
+    assert longest_steady([4], 0)[0] == 1
+    flat = [4, 4, 4, 4, 4]
+    assert longest_steady(flat, 0)[0] == 5, "with repeats, L = 0 finds the flat run"
+    print(f"  L = 0 on a flat run {flat} -> {longest_steady(flat, 0)[0]} seconds, so L = 0 is not")
+    print(f"  trivially 1: it asks for the longest CONSTANT stretch, which is a real question.")
+
+    # ---- the scale
+    BIG = 100_000
+    rng2 = random.Random(7)
+    big = rng2.choices(range(100), k=BIG)
+    bgot, bstart, bpush, bback, bfront, bsteps = longest_steady(big, 20)
+    assert bpush == 2 * BIG, bpush
+    assert bback + bfront <= bpush, (bback, bfront, bpush)
+    assert bsteps <= BIG, bsteps
+    assert spread(big[bstart:bstart + bgot]) <= 20
+    assert bstart + bgot <= BIG
+    # and it really is the longest: no run one longer anywhere fits
+    assert all(spread(big[i:i + bgot + 1]) > 20 for i in range(0, BIG - bgot, 997)), (
+        "a longer steady run was found by sampling, so the answer is not maximal")
+    small = big[:1500]
+    st, _, sops = longest_naive(small, 20)
+    assert longest_steady(small, 20)[0] == st
+    print(f"\n  at {BIG:,} seconds with L = 20: longest steady stretch {bgot} seconds from "
+          f"second {bstart:,},")
+    print(f"  found with {bpush:,} pushes, {bback + bfront:,} pops and {bsteps:,} left-edge steps --")
+    print(f"  every index enters each deque once and leaves at most once, and the left edge")
+    print(f"  only ever moves forward, so all three are bounded by the stream length.")
+    print(f"  the naive scan over the first {len(small):,} seconds alone measured {sops:,} runs.")
+
+    print("\nall assertions passed")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+Running it prints:
+
+```
+READINGS = 0:5  1:3  2:7  3:2  4:6  5:1  6:9  7:4  8:8    L = 6
+  naive  : 6 seconds from second 0   (33 runs measured)
+  deques : 6 seconds from second 0 -> [5, 3, 7, 2, 6, 1], spread 6 <= 6
+           (18 pushes, 13 back-pops, 1 front-pops, 6 left-edge steps)
+  adding second 6 (9) takes the spread to 8, so the stretch
+  ends exactly where it does -- the answer sits on the = in 'at most 6'.
+
+  6 left-edge steps produced only 1 front-pops: most steps drop from one
+  deque and not the other, which is precisely what a single shared `if` gets wrong.
+
+  popping both fronts   : 8 seconds (truth 6) -- over by 2
+  expiring at i - best  : 7 seconds (truth 6) -- over by 1
+  over 3000 random series: popping-both over-reports 2040 times, the fixed
+  offset 3000 times, and NEITHER ever under-reports (0 cases) -- the error
+  always claims more stability than the line actually had.
+
+  L =  0 -> 1 seconds from second 0: [5]
+  L =  1 -> 1 seconds from second 0: [5]
+  L =  2 -> 2 seconds from second 0: [5, 3]
+  L =  4 -> 3 seconds from second 0: [5, 3, 7]
+  L =  6 -> 6 seconds from second 0: [5, 3, 7, 2, 6, 1]
+  L =  8 -> 9 seconds from second 0: [5, 3, 7, 2, 6, 1, 9, 4, 8]
+  L = 99 -> 9 seconds from second 0: [5, 3, 7, 2, 6, 1, 9, 4, 8]
+  L = 0 on a flat run [4, 4, 4, 4, 4] -> 5 seconds, so L = 0 is not
+  trivially 1: it asks for the longest CONSTANT stretch, which is a real question.
+
+  at 100,000 seconds with L = 20: longest steady stretch 10 seconds from second 63,915,
+  found with 200,000 pushes, 199,997 pops and 99,998 left-edge steps --
+  every index enters each deque once and leaves at most once, and the left edge
+  only ever moves forward, so all three are bounded by the stream length.
+  the naive scan over the first 1,500 seconds alone measured 3,823 runs.
+
+all assertions passed
+```
+
 </details>
+
+</details>
+
+#### The whole program
+
+Everything above as one file you can run: no animation, no stack, no heap — the complete solution, every helper included, and the measurements at the bottom. It is **run by `tools/run_programs.sh` on every build** and asserts its own results, so if it stopped working this section could not be generated.
+
+```python
+#!/usr/bin/env python3
+"""The largest value in a window that slides -- and the watermark that needs it.
+
+A risk screen shows the highest value among the last W ticks and must update on
+every tick.  Millions of ticks a day, W up to 10^5, and you may not re-read the
+window.  Then: also warn when the last W ticks SPAN more than L, highest minus
+lowest.
+
+Why this sits in the watermark chapter: the usual heuristic watermark is
+`max event time seen so far - lag`, an UNBOUNDED running maximum.  One corrupt
+future timestamp raises it permanently and every later event is declared late,
+forever, with no recovery.  Bounding the maximum to the last W events fixes that
+-- and a bounded sliding maximum is exactly the problem above.  Both watermarks
+are implemented here and the corrupt event is fed to both.
+
+Run it:  python3 programs/ch03.py
+"""
+
+import random
+
+# Data, all from tools/gen_ch03_interview.js over tools/stream_seed.js.
+# TICKS: the seed events' values in arrival order.  The seed's event TIMES were the
+# obvious choice and are nearly increasing, which would make the deque hold one entry
+# almost always and nothing ever expire from the front -- hiding half the program.
+# These rise AND fall, which the assertions require, and are all distinct, so an
+# eviction can be attributed to the newer value.
+TICKS = [5, 3, 7, 2, 6, 1, 9, 4, 8]
+W = 3        # window size: small enough to trace, big enough to expire a front
+L = 6        # the spread to warn about: chosen so SOME windows exceed it and some do not
+
+# The watermark half.  ETS is the seed's event times in PROCESSING order (the
+# seed's pt order), which is deliberately not sorted by event time.  LAG = 60 is
+# the seed's own lag.  CORRUPT is one impossible future timestamp; TAIL continues
+# the stream afterwards so that "the unbounded watermark never recovers" is
+# demonstrated rather than asserted about a single event.
+ETS = [1, 3, 90, 130, 245, 260, 220, 50, 540]
+LAG = 60
+CORRUPT = 999_999
+CORRUPT_AT = 4
+TAIL = [600, 660, 720, 780, 840, 900]
+
+N = len(TICKS)
+NWIN = N - W + 1
+
+# The sliding maximum.
+
+def brute_max(xs, i, w=W):
+    """The answer everyone gives first: read all w values of window i."""
+    best = xs[i]
+    for k in range(1, w):
+        if xs[i + k] > best:
+            best = xs[i + k]
+    return best
+
+def evict_smaller(dq, xs, i):
+    """Drop from the BACK anything no larger than the arriving value, returning how
+    many went.  The whole trick in one sentence: the newcomer is both bigger AND
+    newer, so while either is in the window the newcomer is too and is the larger
+    -- the smaller one is not unlikely to matter, it is provably dead."""
+    popped = 0
+    while dq and xs[dq[-1]] <= xs[i]:
+        dq.pop()
+        popped += 1
+    return popped
+
+def evict_larger(dq, xs, i):
+    """The mirror of evict_smaller, for the MINIMUM: drop anything no smaller.  One
+    comparison left un-reversed here is the easiest possible bug and it produces
+    plausible numbers, which is why the minima are asserted against a scan too."""
+    while dq and xs[dq[-1]] >= xs[i]:
+        dq.pop()
+
+def expire(dq, i, w=W):
+    """Drop the FRONT if its index has left the window.  At most one can expire per
+    tick, because the window moves by one -- so this is an `if` and not a loop,
+    which is the whole argument for the per-tick cost being constant."""
+    if dq and dq[0] <= i - w:
+        dq.pop(0)
+        return 1
+    return 0
+
+def slide_max(xs, w=W):
+    """One pass.  The deque holds INDEXES, kept decreasing, so its front is the
+    answer in one read -- indexes rather than values, because only an index says
+    whether an entry has left the window.  Each index is pushed exactly once and
+    removed at most once, which is why the cost is amortised O(1) and independent
+    of w.  Returns (answers, pushes, pops, fronts, biggest_evict, cheap_ticks)."""
+    dq, out = [], []
+    pushes = pops = fronts = 0
+    biggest = cheap = 0
+    for i in range(len(xs)):
+        ev = evict_smaller(dq, xs, i)
+        pops += ev
+        biggest = max(biggest, ev)
+        if ev == 0 and i > 0:
+            cheap += 1
+        dq.append(i)
+        pushes += 1
+        fronts += expire(dq, i, w)
+        if i >= w - 1:
+            out.append(xs[dq[0]])
+    return out, pushes, pops, fronts, biggest, cheap
+
+def slide_spread(xs, w=W):
+    """The same machine twice: `hi` kept decreasing, `lo` kept increasing, both
+    advanced together.  The spread is just front(hi) - front(lo)."""
+    hi, lo, out = [], [], []
+    for i in range(len(xs)):
+        evict_smaller(hi, xs, i)
+        hi.append(i)
+        evict_larger(lo, xs, i)
+        lo.append(i)
+        expire(hi, i, w)
+        expire(lo, i, w)
+        if i >= w - 1:
+            out.append((xs[hi[0]], xs[lo[0]], xs[hi[0]] - xs[lo[0]]))
+    return out
+
+# The watermark: the same maximum, unbounded and bounded.
+
+def watermark_unbounded(ets, lag=LAG):
+    """`max event time so far - lag`: a running max over the WHOLE stream.  Monotonic
+    by construction, which is the property everyone wants -- and exactly why one
+    corrupt timestamp is permanent, since nothing may lower it again.  Returns
+    (watermark_seen_before_each_event, late_flags)."""
+    wms, late, run = [], [], None
+    for et in ets:
+        wm = None if run is None else run - lag
+        wms.append(wm)
+        late.append(wm is not None and et < wm)
+        run = et if run is None else max(run, et)
+    return wms, late
+
+def watermark_bounded(ets, w=W, lag=LAG):
+    """`max of the last w event times - lag`, kept by the monotonic deque above.  The
+    corrupt value is evicted by POSITION after w events, so the watermark recovers
+    on its own.  The price, which is real: this watermark can go BACKWARDS."""
+    dq, wms, late = [], [], []
+    for i, et in enumerate(ets):
+        wm = None if not dq else ets[dq[0]] - lag
+        wms.append(wm)
+        late.append(wm is not None and et < wm)
+        while dq and ets[dq[-1]] <= et:
+            dq.pop()
+        dq.append(i)
+        if dq[0] <= i - w:
+            dq.pop(0)
+    return wms, late
+
+# The three variations.
+
+def the_shortest_spike(counts, k):
+    """Variation 1, surface: load testing.  Shortest run whose total reaches K.
+
+    Non-obvious point: the window is no longer a fixed size, so `expire` disappears
+    entirely and `evict_smaller` is reversed and applied to running TOTALS -- a later
+    total no larger than the back makes the back useless, because it is both smaller
+    AND closer, so it always gives a shorter run.  Same argument, different quantity."""
+    pre = [0]
+    for c in counts:
+        pre.append(pre[-1] + c)
+    dq, best = [], None
+    for j, pj in enumerate(pre):
+        while dq and pj - pre[dq[0]] >= k:
+            i = dq.pop(0)
+            if best is None or j - i < best:
+                best = j - i
+        while dq and pre[dq[-1]] >= pj:      # smaller AND closer: evict
+            dq.pop()
+        dq.append(j)
+    return best
+
+def the_next_warmer_day(temps):
+    """Variation 2, surface: weather.  Days until the next warmer day, else 0.
+
+    Non-obvious point: there is no window at all, so `expire` is gone and only the
+    eviction remains -- and the evicted entries PRODUCE answers rather than being
+    discarded.  The trap is hunting for a window size that is not there."""
+    out = [0] * len(temps)
+    stack = []
+    for i, t in enumerate(temps):
+        while stack and temps[stack[-1]] < t:
+            j = stack.pop()
+            out[j] = i - j
+        stack.append(i)
+    return out
+
+def the_longest_steady_stretch(xs, limit):
+    """Variation 3, surface: manufacturing.  Longest run whose max-min <= limit.
+
+    Non-obvious point: the window size becomes the ANSWER rather than an input, so both
+    deques must expire by the actual left edge instead of by `i - W`.  Get that wrong
+    and the front is stale, the spread reads too small, and the answer is a longer
+    steady stretch than really happened."""
+    hi, lo, left, best = [], [], 0, 0
+    for i, v in enumerate(xs):
+        while hi and xs[hi[-1]] <= v:
+            hi.pop()
+        hi.append(i)
+        while lo and xs[lo[-1]] >= v:
+            lo.pop()
+        lo.append(i)
+        while xs[hi[0]] - xs[lo[0]] > limit:
+            left += 1
+            if hi[0] < left:
+                hi.pop(0)
+            if lo[0] < left:
+                lo.pop(0)
+        best = max(best, i - left + 1)
+    return best
+
+def main():
+    print("TICKS =", "  ".join(f"{i}:{v}" for i, v in enumerate(TICKS)), f"  W = {W}  L = {L}")
+    scan = [brute_max(TICKS, i) for i in range(NWIN)]
+    fast, pushes, pops, fronts, biggest, cheap = slide_max(TICKS)
+    brute_ops = NWIN * W
+    ops = pushes + pops + fronts
+    print(f"  scan     : {scan}   ({NWIN} windows x {W} = {brute_ops} reads)")
+    print(f"  deque    : {fast}   ({pushes}p + {pops}e + {fronts}f = {ops} steps)")
+
+    assert fast == scan, "the deque disagrees with the brute-force scan"
+    assert fast == [7, 7, 7, 6, 9, 9, 9], f"measured maxima {fast}"
+    assert (pushes, pops, fronts) == (9, 6, 1), f"measured {(pushes, pops, fronts)}"
+    assert ops == 16 and brute_ops == 21 and ops < brute_ops
+    assert pushes == N, "a value was pushed twice; the amortised argument needs exactly one each"
+    assert biggest == 2, f"the biggest single eviction was {biggest}, expected 2"
+    assert cheap >= 1, "no tick evicts nothing, so the cheap path is never shown"
+    assert any(TICKS[i] < TICKS[i - 1] for i in range(1, N)), "monotone input hides eviction"
+    assert fronts >= 1, "nothing ever expired from the front"
+
+    spreads = slide_spread(TICKS)
+    over = [s for *_, s in spreads if s > L]
+    under = [s for *_, s in spreads if s <= L]
+    print(f"  spreads  : {[s for *_, s in spreads]}   ({len(over)} over {L}, {len(under)} under)")
+    assert [s for *_, s in spreads] == [4, 5, 5, 5, 8, 8, 5], f"measured {[s for *_, s in spreads]}"
+    assert [m for m, _, _ in spreads] == scan
+    assert [m for _, m, _ in spreads] == [min(TICKS[i:i + W]) for i in range(NWIN)]
+    assert over and under, "the spread test must discriminate, not fire always or never"
+
+    # ---- the watermark, with one corrupt future timestamp
+    clean = ETS + TAIL
+    corrupt = ETS[:CORRUPT_AT] + [CORRUPT] + ETS[CORRUPT_AT:] + TAIL
+    _, clean_u = watermark_unbounded(clean)
+    _, clean_b = watermark_bounded(clean)
+    truly_late = {clean[i] for i, f in enumerate(clean_u) if f}
+    print(f"\n  clean stream, unbounded: {sum(clean_u)} late {sorted(truly_late)}")
+    print(f"  clean stream, bounded  : {sum(clean_b)} late "
+          f"{sorted(clean[i] for i, f in enumerate(clean_b) if f)}")
+    assert truly_late == {50}, f"the genuinely late event should be et=50, got {truly_late}"
+    assert [clean[i] for i, f in enumerate(clean_b) if f] == [50], "the bounded watermark must still catch it"
+
+    wm_u, late_u = watermark_unbounded(corrupt)
+    wm_b, late_b = watermark_bounded(corrupt)
+    false_u = [corrupt[i] for i, f in enumerate(late_u) if f and corrupt[i] not in truly_late]
+    false_b = [corrupt[i] for i, f in enumerate(late_b) if f and corrupt[i] not in truly_late]
+    print(f"  corrupt event {CORRUPT} at position {CORRUPT_AT}:")
+    print(f"    unbounded wm after it = {wm_u[CORRUPT_AT + 1]}, at the end = {wm_u[-1]}")
+    print(f"    bounded   wm after it = {wm_b[CORRUPT_AT + 1]}, at the end = {wm_b[-1]}")
+    print(f"    falsely late: unbounded {false_u}  ({len(false_u)})")
+    print(f"                  bounded   {false_b}  ({len(false_b)})")
+
+    assert len(false_u) == 10, f"measured {len(false_u)} false-lates unbounded"
+    assert len(false_b) == 3, f"measured {len(false_b)} false-lates bounded"
+    assert len(false_b) < len(false_u), "bounding must reduce the damage"
+    # the unbounded watermark never comes back down: every event after the corrupt
+    # one is declared late, including the tail
+    assert all(f for f in late_u[CORRUPT_AT + 1:]), "unbounded must poison EVERY later event"
+    assert wm_u[-1] == CORRUPT - LAG, "the unbounded watermark must still hold the corrupt value"
+    # the bounded one recovers after exactly W events, permanently
+    # ...and after W events the bounded watermark raises no FALSE lateness again.
+    # It does still flag corrupt[8] = 50, which is the genuinely late event -- the
+    # fix must not work by switching lateness detection off.
+    tail_flags = [(corrupt[i], f) for i, f in enumerate(late_b) if i > CORRUPT_AT + W]
+    assert [v for v, f in tail_flags if f] == [50], f"bounded tail flags {tail_flags}"
+    assert wm_b[-1] == max(corrupt[-W - 1:-1]) - LAG
+    # and the cost of bounding, asserted so it cannot be forgotten: it is NOT monotone
+    assert all(a <= b for a, b in zip(wm_u[1:], wm_u[2:])), "unbounded must be monotone"
+    assert any(a > b for a, b in zip(wm_b[1:], wm_b[2:])), (
+        "the bounded watermark must go backwards somewhere -- that is what it costs")
+
+    # ---- variations
+    assert the_shortest_spike([2, 0, 1, 4, 3], 5) == 2
+    assert the_shortest_spike([1, 1, 1], 99) is None, "unreachable K must report nothing"
+    assert the_next_warmer_day(TICKS) == [2, 1, 4, 1, 2, 1, 0, 1, 0], the_next_warmer_day(TICKS)
+    assert the_next_warmer_day([5, 4, 3]) == [0, 0, 0]
+    # MEASURED 6, not the 4 first expected: 5,3,7,2,6,1 spans 7-1 = 6, which is
+    # exactly L, so six of the nine ticks are one steady stretch.
+    assert the_longest_steady_stretch(TICKS, L) == 6, the_longest_steady_stretch(TICKS, L)
+    assert the_longest_steady_stretch(TICKS, 0) == 1, "with no tolerance every run is one long"
+    print(f"\n  shortest spike reaching 5 in [2,0,1,4,3] : {the_shortest_spike([2, 0, 1, 4, 3], 5)}")
+    print(f"  days to a warmer day                    : {the_next_warmer_day(TICKS)}")
+    print(f"  longest stretch spanning <= {L}            : {the_longest_steady_stretch(TICKS, L)}")
+
+    # ---- brute force over many inputs, not just the one example
+    rng = random.Random(20260303)
+    for _ in range(600):
+        w = rng.randint(1, 6)
+        n = rng.randint(w, 22)
+        xs = [rng.randint(-20, 20) for _ in range(n)]
+        want = [(max(xs[i:i + w]), min(xs[i:i + w])) for i in range(n - w + 1)]
+        assert slide_max(xs, w)[0] == [m for m, _ in want], (xs, w)
+        assert [(h, lo) for h, lo, _ in slide_spread(xs, w)] == want, (xs, w)
+        assert the_next_warmer_day(xs) == [
+            next((j - i for j in range(i + 1, n) if xs[j] > xs[i]), 0) for i in range(n)], xs
+        lim = rng.randint(0, 10)
+        assert the_longest_steady_stretch(xs, lim) == max(
+            (j - i + 1 for i in range(n) for j in range(i, n)
+             if max(xs[i:j + 1]) - min(xs[i:j + 1]) <= lim), default=0), (xs, lim)
+        pos, k = [abs(v) for v in xs], rng.randint(1, 30)
+        assert the_shortest_spike(pos, k) == min(
+            (j - i for i in range(n + 1) for j in range(i + 1, n + 1) if sum(pos[i:j]) >= k),
+            default=None), (pos, k)
+    print("\n  600 random inputs: deque == scan for max and min; all three variations")
+    print("  == their naive references.")
+
+    print("\nall assertions passed")
+
+if __name__ == "__main__":
+    main()
+```
+
+Running it prints:
+
+```
+TICKS = 0:5  1:3  2:7  3:2  4:6  5:1  6:9  7:4  8:8   W = 3  L = 6
+  scan     : [7, 7, 7, 6, 9, 9, 9]   (7 windows x 3 = 21 reads)
+  deque    : [7, 7, 7, 6, 9, 9, 9]   (9p + 6e + 1f = 16 steps)
+  spreads  : [4, 5, 5, 5, 8, 8, 5]   (2 over 6, 5 under)
+
+  clean stream, unbounded: 1 late [50]
+  clean stream, bounded  : 1 late [50]
+  corrupt event 999999 at position 4:
+    unbounded wm after it = 999939, at the end = 999939
+    bounded   wm after it = 999939, at the end = 780
+    falsely late: unbounded [245, 260, 220, 540, 600, 660, 720, 780, 840, 900]  (10)
+                  bounded   [245, 260, 220]  (3)
+
+  shortest spike reaching 5 in [2,0,1,4,3] : 2
+  days to a warmer day                    : [2, 1, 4, 1, 2, 1, 0, 1, 0]
+  longest stretch spanning <= 6            : 6
+
+  600 random inputs: deque == scan for max and min; all three variations
+  == their naive references.
+
+all assertions passed
+```
 
 #### The solution as a running program — stack and heap at every step
 

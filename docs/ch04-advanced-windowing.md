@@ -451,6 +451,349 @@ case the appealing first answer is to materialise a sequence you cannot afford.
 
 **Where it lands.** `touching` with G = 0 for the overlap test, and `absorb` kept — but the stored state changes from runs to members, which is a different program with the same lookup.
 
+
+<details>
+<summary><b>The whole program</b> for this variation — runnable, no animation</summary>
+
+This is **the calendar that will not double-book** solved on its own: a complete file, every helper included, asserting its own results. It is run on every build.
+
+```python
+#!/usr/bin/env python3
+"""Variation 2 — the calendar that will not double-book (looks like scheduling). Standalone
+and runnable.
+
+  Meetings are booked and cancelled continuously.  REJECT any booking that overlaps one
+  already held, and report the free gaps in the day.  A cancellation names the meeting -- in
+  practice "cancel my 10:30" -- not a span.
+
+Insertion is the chapter's `touching` with the gap set to zero, and the new operation is the
+hard one: CANCELLATION SPLITS A RUN, which nothing in the chapter can do.  Merging is easy
+because a merged run is determined by its two ends; splitting is not, because once two
+bookings have been merged into one busy block the boundary between them is gone.  So the
+stored state cannot be the merged runs at all -- it has to be the individual bookings, with
+the merge computed on read.  Recognising that the chapter's state shape is only valid for an
+append-only stream is the whole answer.
+
+Run it:  python3 programs/ch04_v2.py
+"""
+
+import random
+
+# Nine booking requests, in the order they come in.  The START times are the chapter's nine
+# arrival times, unchanged and deliberately not sorted -- a calendar takes requests in
+# whatever order people send them.  The durations are 30 minutes except the 90 one, which is
+# 40, so that the 130 request ABUTS it exactly: that pair is the one that merges on read and
+# therefore the one a merged state can no longer take apart.
+REQUESTS = [(1, 31), (3, 33), (90, 130), (130, 160), (245, 275),
+            (260, 290), (220, 250), (50, 80), (540, 570)]
+
+# Minutes from 09:00 to 19:00.  Intervals are HALF-OPEN, [start, end): a 10:00-11:00 meeting
+# and an 11:00-12:00 meeting do not clash, which is the only convention a human would accept
+# and the one place the overlap test's comparison is visible.
+DAY = (0, 600)
+
+# The cancellation the whole file turns on: the 90-minute-mark meeting, named by its start.
+CANCEL_START = 90
+
+
+def clashes(members, span):
+    """Every held booking the new span overlaps.  This is `touching` with the gap set to
+    zero, and with half-open intervals the test is STRICT on both sides: a.start < b.end and
+    b.start < a.end.  Using <= would reject back-to-back meetings, which is a calendar
+    nobody would use."""
+    s, e = span
+    return [m for m in members if s < m[1] and m[0] < e]
+
+
+def merged_view(members):
+    """The busy blocks a human is shown: the held bookings, sorted and absorbed.
+
+    Exactly the chapter's sweep with the gap at zero -- a block extends when the next
+    booking starts at or before its end, so two abutting meetings become one block.  This is
+    a VIEW, computed on read and thrown away, which is the whole design decision."""
+    out = []
+    for s, e in sorted(members):
+        if out and s <= out[-1][1]:
+            out[-1][1] = max(out[-1][1], e)
+        else:
+            out.append([s, e])
+    return [tuple(b) for b in out]
+
+
+def free_gaps(members, day=DAY):
+    """The complement of the busy blocks inside the day.  Zero-length gaps are dropped,
+    because "free from 11:00 to 11:00" is not a slot anyone can book."""
+    gaps, cursor = [], day[0]
+    for s, e in merged_view(members):
+        if s > cursor:
+            gaps.append((cursor, s))
+        cursor = max(cursor, e)
+    if cursor < day[1]:
+        gaps.append((cursor, day[1]))
+    return gaps
+
+
+def run_member_calendar(ops):
+    """The answer: keep the individual bookings and merge only on read.
+
+    Insert rejects on any clash; cancel removes the one booking with that start.  Nothing is
+    ever merged in the state, so nothing ever has to be unmerged.  Returns
+    (accepted_flags, members)."""
+    members, accepted = [], []
+    for kind, arg in ops:
+        if kind == "book":
+            if clashes(members, arg):
+                accepted.append(False)
+                continue
+            members.append(arg)
+            accepted.append(True)
+        else:
+            before = len(members)
+            members = [m for m in members if m[0] != arg]
+            accepted.append(len(members) < before)
+    return accepted, sorted(members)
+
+
+def run_merged_calendar(ops, on_cancel):
+    """The chapter's state shape applied where it does not belong: store the MERGED runs.
+
+    Booking is unchanged and correct -- a clash against the merged runs is the same test,
+    because the runs cover exactly the union of the members.  Cancelling is where it fails,
+    and the two available guesses fail in opposite directions:
+
+      "drop"  -- remove the whole run containing that start.  Time that another meeting still
+                 holds is handed out, so two people are sent to one room.
+      "keep"  -- leave the run alone, because the boundary needed to split it is gone.  The
+                 freed slot is never offered to anybody, forever.
+
+    Neither is a bug in the code; both are the only answers available from this state.
+    Returns (accepted_flags, runs)."""
+    runs, accepted = [], []
+    for kind, arg in ops:
+        if kind == "book":
+            s, e = arg
+            hit = [r for r in runs if s < r[1] and r[0] < e]
+            if hit:
+                accepted.append(False)
+                continue
+            touch = [r for r in runs if s <= r[1] and r[0] <= e]
+            rest = [r for r in runs if r not in touch]
+            lo = min([s] + [r[0] for r in touch])
+            hi = max([e] + [r[1] for r in touch])
+            runs = sorted(rest + [(lo, hi)])
+            accepted.append(True)
+        else:
+            owner = [r for r in runs if r[0] <= arg < r[1]]
+            if owner and on_cancel == "drop":
+                runs = [r for r in runs if r not in owner]
+            accepted.append(bool(owner))
+    return accepted, sorted(runs)
+
+
+def occupied_minutes(members, day=DAY):
+    """The brute-force truth: one boolean per minute of the day.  Slow, obviously correct,
+    and the only reference the rest of this file is checked against."""
+    grid = [False] * (day[1] - day[0])
+    for s, e in members:
+        for t in range(max(s, day[0]), min(e, day[1])):
+            grid[t - day[0]] = True
+    return grid
+
+
+def main():
+    ops = [("book", r) for r in REQUESTS]
+    accepted, members = run_member_calendar(ops)
+    print("REQUESTS (minutes from 09:00, half-open):")
+    held_so_far = []
+    for (s, e), ok in zip(REQUESTS, accepted):
+        # the clash is reported against the state AS IT WAS when the request arrived, not
+        # against the final set -- otherwise a later booking could be blamed for an earlier
+        # rejection, which is the same out-of-order confusion the chapter is about.
+        hit = clashes(held_so_far, (s, e))
+        assert bool(hit) != ok, ((s, e), hit, ok)
+        if ok:
+            held_so_far.append((s, e))
+        print(f"  {s:>3}..{e:<4} {'ACCEPTED' if ok else 'REJECTED'}"
+              f"{'' if ok else f'  clashes with {hit}'}")
+    assert sorted(held_so_far) == members, (held_so_far, members)
+    print(f"\n  held      : {members}")
+    print(f"  busy view : {merged_view(members)}")
+    print(f"  free gaps : {free_gaps(members)}")
+
+    assert accepted == [True, False, True, True, True, False, False, True, True], accepted
+    assert members == [(1, 31), (50, 80), (90, 130), (130, 160), (245, 275), (540, 570)], members
+    assert merged_view(members) == [(1, 31), (50, 80), (90, 160), (245, 275), (540, 570)], merged_view(members)
+    assert free_gaps(members) == [(0, 1), (31, 50), (80, 90), (160, 245), (275, 540), (570, 600)]
+    # six accepted, three rejected -- and the rejections must be real overlaps, not abutments
+    assert sum(accepted) == 6 and accepted.count(False) == 3
+    assert clashes([(90, 130)], (130, 160)) == [], "back-to-back meetings must NOT clash"
+    assert clashes([(90, 130)], (129, 160)) == [(90, 130)], "one minute of overlap must clash"
+    assert clashes([(90, 130)], (89, 90)) == [], "ending exactly where another starts is fine"
+    print(f"\n  the 90..130 and 130..160 pair abuts exactly: no clash, and the busy view shows")
+    print(f"  them as ONE block 90..160, which is what a person wants to read.")
+
+    # the brute-force check on the per-minute grid
+    grid = occupied_minutes(members)
+    for s, e in merged_view(members):
+        assert all(grid[t] for t in range(s, e)), (s, e)
+    for s, e in free_gaps(members):
+        assert not any(grid[t] for t in range(s, e)), (s, e)
+    assert sum(grid) == sum(e - s for s, e in members), "the blocks must cover the members exactly"
+    assert sum(grid) + sum(e - s for s, e in free_gaps(members)) == DAY[1] - DAY[0]
+    print(f"  per-minute grid: {sum(grid)} minutes busy + "
+          f"{sum(e - s for s, e in free_gaps(members))} free = {DAY[1] - DAY[0]} in the day.")
+
+    # ---- the cancellation, which is where the two state shapes part company
+    full = ops + [("cancel", CANCEL_START)]
+    acc_m, mem_after = run_member_calendar(full)
+    acc_d, runs_drop = run_merged_calendar(full, "drop")
+    acc_k, runs_keep = run_merged_calendar(full, "keep")
+    print(f"\n  cancel the meeting starting at {CANCEL_START} (which ran to 130):")
+    print(f"    members   -> busy {merged_view(mem_after)}")
+    print(f"    merged/drop -> busy {runs_drop}")
+    print(f"    merged/keep -> busy {runs_keep}")
+    assert acc_m[-1] is True and acc_d[-1] is True and acc_k[-1] is True
+    assert mem_after == [(1, 31), (50, 80), (130, 160), (245, 275), (540, 570)], mem_after
+    assert merged_view(mem_after) == [(1, 31), (50, 80), (130, 160), (245, 275), (540, 570)]
+    # "drop" hands out time the 130..160 meeting still holds
+    assert (90, 160) not in runs_drop and (130, 160) not in runs_drop, runs_drop
+    lost = [m for m in mem_after if not any(r[0] <= m[0] and m[1] <= r[1] for r in runs_drop)]
+    assert lost == [(130, 160)], lost
+    print(f"    drop loses {lost} from the busy view -- a meeting that was never cancelled is")
+    print(f"    now bookable, so two parties are sent to one room.")
+    # "keep" never offers the freed slot
+    assert (90, 160) in runs_keep, runs_keep
+    gaps_true = free_gaps(mem_after)
+    gaps_keep = [g for g in free_gaps([(r[0], r[1]) for r in runs_keep])]
+    missing = [g for g in gaps_true if g not in gaps_keep]
+    assert missing == [(80, 130)], missing
+    print(f"    keep never offers {missing} -- the freed 50 minutes are unbookable forever.")
+    # and the consequence, as a booking anyone would try to make
+    probe = (95, 125)
+    assert run_member_calendar(full + [("book", probe)])[0][-1] is True
+    assert run_merged_calendar(full + [("book", probe)], "keep")[0][-1] is False
+    assert run_merged_calendar(full + [("book", probe)], "drop")[0][-1] is True
+    print(f"    booking {probe[0]}..{probe[1]} afterwards: members ACCEPT, merged/keep REJECTS,")
+    print(f"    merged/drop accepts -- and accepts it on top of the meeting it lost.")
+    # the opposite outcome is forbidden: before the cancellation all three agree, so the
+    # disagreement is created by the cancel and not by the bookings
+    assert merged_view(members) == run_merged_calendar(ops, "keep")[1] == run_merged_calendar(ops, "drop")[1]
+    assert run_merged_calendar(ops, "keep")[0] == accepted
+    print(f"  before the cancellation all three states agree exactly, so it is the cancel --")
+    print(f"  not the booking -- that the merged shape cannot represent.")
+
+    # ---- a span-carrying cancel does not rescue it either
+    # subtracting the exact span works here only because no two held bookings overlap; it
+    # still cannot say WHICH booking a start belongs to, which is the interface people use.
+    ambiguous = [("book", (90, 130)), ("book", (130, 160))]
+    _, amb_runs = run_merged_calendar(ambiguous, "keep")
+    assert amb_runs == [(90, 160)], amb_runs
+    assert len({(90, 130), (130, 160)}) == 2
+    print(f"\n  from the single run {amb_runs[0]} there is no way to tell whether the meeting at 90")
+    print(f"  ends at 130 or at 160: the two bookings are {run_member_calendar(ambiguous)[1]}, and")
+    print(f"  that boundary is the fact the merge deleted.")
+
+    # ---- many random op sequences, against the per-minute grid
+    rng = random.Random(20260303)
+    drop_wrong = keep_wrong = cancels = 0
+    for _ in range(600):
+        day = (0, 60)
+        held, seq = [], []
+        for _ in range(rng.randint(1, 14)):
+            if held and rng.random() < 0.35:
+                seq.append(("cancel", rng.choice(held)[0]))
+                held = [m for m in held if m[0] != seq[-1][1]]
+            else:
+                s = rng.randint(0, 55)
+                span = (s, s + rng.randint(1, 5))
+                seq.append(("book", span))
+                if not [m for m in held if span[0] < m[1] and m[0] < span[1]]:
+                    held.append(span)
+        acc, mem = run_member_calendar(seq)
+        assert sorted(held) == mem, (seq, held, mem)
+        grid = occupied_minutes(mem, day)
+        for s, e in merged_view(mem):
+            assert all(grid[t] for t in range(s, min(e, day[1])))
+        for s, e in free_gaps(mem, day):
+            assert not any(grid[t] for t in range(s, e))
+        if any(k == "cancel" for k, _ in seq):
+            cancels += 1
+            if run_merged_calendar(seq, "drop")[1] != merged_view(mem):
+                drop_wrong += 1
+            if run_merged_calendar(seq, "keep")[1] != merged_view(mem):
+                keep_wrong += 1
+    print(f"\n  600 random book/cancel sequences: the member state always matches a per-minute")
+    print(f"  grid.  Of the {cancels} sequences containing a cancellation, the merged state is")
+    print(f"  wrong on {drop_wrong} with 'drop' and {keep_wrong} with 'keep'.")
+    assert drop_wrong > 0 and keep_wrong > 0, (drop_wrong, keep_wrong)
+    # and with NO cancellations the merged state is never wrong -- append-only is its domain
+    for _ in range(300):
+        seq = []
+        for _ in range(rng.randint(1, 10)):
+            s = rng.randint(0, 55)
+            seq.append(("book", (s, s + rng.randint(1, 5))))
+        acc, mem = run_member_calendar(seq)
+        assert run_merged_calendar(seq, "keep")[1] == merged_view(mem), seq
+        assert run_merged_calendar(seq, "keep")[0] == acc, seq
+    print(f"  on 300 append-only sequences it is never wrong at all, which is exactly the")
+    print(f"  condition the chapter's state shape was built under.")
+
+    print("\nall assertions passed")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+Running it prints:
+
+```
+REQUESTS (minutes from 09:00, half-open):
+    1..31   ACCEPTED
+    3..33   REJECTED  clashes with [(1, 31)]
+   90..130  ACCEPTED
+  130..160  ACCEPTED
+  245..275  ACCEPTED
+  260..290  REJECTED  clashes with [(245, 275)]
+  220..250  REJECTED  clashes with [(245, 275)]
+   50..80   ACCEPTED
+  540..570  ACCEPTED
+
+  held      : [(1, 31), (50, 80), (90, 130), (130, 160), (245, 275), (540, 570)]
+  busy view : [(1, 31), (50, 80), (90, 160), (245, 275), (540, 570)]
+  free gaps : [(0, 1), (31, 50), (80, 90), (160, 245), (275, 540), (570, 600)]
+
+  the 90..130 and 130..160 pair abuts exactly: no clash, and the busy view shows
+  them as ONE block 90..160, which is what a person wants to read.
+  per-minute grid: 190 minutes busy + 410 free = 600 in the day.
+
+  cancel the meeting starting at 90 (which ran to 130):
+    members   -> busy [(1, 31), (50, 80), (130, 160), (245, 275), (540, 570)]
+    merged/drop -> busy [(1, 31), (50, 80), (245, 275), (540, 570)]
+    merged/keep -> busy [(1, 31), (50, 80), (90, 160), (245, 275), (540, 570)]
+    drop loses [(130, 160)] from the busy view -- a meeting that was never cancelled is
+    now bookable, so two parties are sent to one room.
+    keep never offers [(80, 130)] -- the freed 50 minutes are unbookable forever.
+    booking 95..125 afterwards: members ACCEPT, merged/keep REJECTS,
+    merged/drop accepts -- and accepts it on top of the meeting it lost.
+  before the cancellation all three states agree exactly, so it is the cancel --
+  not the booking -- that the merged shape cannot represent.
+
+  from the single run (90, 160) there is no way to tell whether the meeting at 90
+  ends at 130 or at 160: the two bookings are [(90, 130), (130, 160)], and
+  that boundary is the fact the merge deleted.
+
+  600 random book/cancel sequences: the member state always matches a per-minute
+  grid.  Of the 492 sequences containing a cancellation, the merged state is
+  wrong on 35 with 'drop' and 492 with 'keep'.
+  on 300 append-only sequences it is never wrong at all, which is exactly the
+  condition the chapter's state shape was built under.
+
+all assertions passed
+```
+
+</details>
+
 </details>
 <details>
 <summary><b>Variation 3</b> — the island count <i>(looks like puzzles)</i></summary>
@@ -460,6 +803,305 @@ case the appealing first answer is to materialise a sequence you cannot afford.
 **Why it is not obvious.** It is this problem with G = 1 and only a count wanted, and dropping the detail makes a much better answer available: a new position can join at most **two** stretches, so the count changes by exactly +1, 0 or −1 and nothing has to be searched. The non-obvious part is that this is reachable with no interval structure at all — a map from each stretch's endpoints to its length, consulted at the two neighbours, which is O(1) per position against the chapter's O(log runs). Noticing that the question asked only for a count is where the saving comes from.
 
 **Where it lands.** `touching` reduced to checking the two adjacent positions, and `absorb` to arithmetic on a count. The 2-run merge in the trace is the −1 case.
+
+
+<details>
+<summary><b>The whole program</b> for this variation — runnable, no animation</summary>
+
+This is **the island count** solved on its own: a complete file, every helper included, asserting its own results. It is run on every build.
+
+```python
+#!/usr/bin/env python3
+"""Variation 3 — the island count (looks like puzzles). Standalone and runnable.
+
+  Positions on a line are turned on one at a time, in any order.  After each one, report HOW
+  MANY CONTIGUOUS STRETCHES are on.
+
+It is the chapter's problem with the gap set to 1 and only a count wanted, and dropping the
+detail makes a much better answer available.  A new position can join at most TWO stretches --
+the one ending at p-1 and the one starting at p+1 -- so the count changes by exactly +1, 0 or
+-1 and nothing has to be searched at all.  The non-obvious part is that this needs no interval
+structure whatsoever: a map from each stretch's ENDPOINTS to its length, consulted at the two
+neighbours, is O(1) per position against the chapter's O(log runs).  Noticing that the question
+asked only for a count is where the saving comes from.
+
+Run it:  python3 programs/ch04_v3.py
+"""
+
+import random
+
+# The chapter's own island sequence, with two positions appended.  5 then 7 then 6 is the
+# -1 case: 6 joins TWO stretches and the count goes DOWN, which is the move the whole
+# problem exists for.  4 at the end joins 1..3 to 5..7, a second -1, and the repeated 4
+# after it must change nothing at all.
+POSITIONS = [5, 7, 6, 1, 2, 3, 4, 4]
+
+# The chapter's nine arrival times, reused to show the opposite extreme: no two of them are
+# within 1 of each other, so every one is its own island and the count only ever rises.  It
+# is the same data the chapter merges runs over -- with G = 1 instead of 47, nothing merges.
+SPARSE = [1, 3, 90, 130, 245, 260, 220, 50, 540]
+
+
+def count_by_rescan(positions):
+    """The reference: after each position, count the stretches from scratch.
+
+    A stretch starts at every on position whose left neighbour is off, so counting starts is
+    the same as counting stretches.  Correct, obviously so, and it re-reads the whole set
+    every time.  Returns (counts, ops)."""
+    on, out, ops = set(), [], 0
+    for p in positions:
+        on.add(p)
+        ops += len(on)
+        out.append(sum(1 for q in on if q - 1 not in on))
+    return out, ops
+
+
+def count_by_runs(positions):
+    """The chapter's state, unchanged: keep the merged runs and report how many there are.
+
+    `touching` with the gap at 1 and `absorb` doing the merge, exactly as written for the
+    door log.  It is correct and it answers MORE than was asked -- it can also say where each
+    stretch is -- and that extra information is what costs a scan of the runs each time.
+    Returns (counts, ops, runs)."""
+    runs, out, ops = [], [], 0
+    for p in positions:
+        ops += len(runs)
+        hit = [r for r in runs if p >= r[0] - 1 and p <= r[1] + 1]
+        rest = [r for r in runs if r not in hit]
+        lo = min([p] + [r[0] for r in hit])
+        hi = max([p] + [r[1] for r in hit])
+        runs = sorted(rest + [(lo, hi)])
+        out.append(len(runs))
+    return out, ops, runs
+
+
+def count_by_endpoints(positions, verify=None):
+    """The answer: a map from a stretch's two ENDPOINTS to its length, and a running count.
+
+    The mechanism rests on one fact: when p is about to be turned on, p-1 (if on) must be the
+    RIGHT end of its stretch, because p itself is off -- and symmetrically p+1 must be a LEFT
+    end.  So the only two map entries ever read are guaranteed fresh, and the entries for
+    interior positions are allowed to go stale and are never consulted.
+
+    The count then moves by arithmetic: +1 for the new stretch, -1 for each neighbour it
+    swallows, so +1, 0 or -1 and never anything else.  Returns (counts, deltas, length_map).
+    `verify` is a brute-force length function used to check the freshness claim at every step
+    rather than asserting it once."""
+    length, on, count = {}, set(), 0
+    out, deltas = [], []
+    for p in positions:
+        if p in on:
+            out.append(count)
+            deltas.append(0)
+            continue
+        left = length.get(p - 1, 0)
+        right = length.get(p + 1, 0)
+        if verify is not None:
+            if p - 1 in on:
+                assert left == verify(on, p - 1), (p, left, verify(on, p - 1))
+            if p + 1 in on:
+                assert right == verify(on, p + 1), (p, right, verify(on, p + 1))
+        on.add(p)
+        delta = 1 - (1 if left else 0) - (1 if right else 0)
+        count += delta
+        total = left + 1 + right
+        length[p - left] = length[p + right] = total
+        out.append(count)
+        deltas.append(delta)
+    return out, deltas, length
+
+
+def true_stretch_length(on, q):
+    """Brute force: the length of the contiguous stretch containing q.  Used only to check
+    that the endpoint map is fresh where it is read."""
+    lo = hi = q
+    while lo - 1 in on:
+        lo -= 1
+    while hi + 1 in on:
+        hi += 1
+    return hi - lo + 1
+
+
+def main():
+    print(f"POSITIONS = {POSITIONS}")
+    want, rescan_ops = count_by_rescan(POSITIONS)
+    runs_counts, run_ops, runs = count_by_runs(POSITIONS)
+    got, deltas, length = count_by_endpoints(POSITIONS, verify=true_stretch_length)
+    print(f"  rescan    : {want}   ({rescan_ops} set reads)")
+    print(f"  chapter's runs : {runs_counts}   ({run_ops} run comparisons), ending {runs}")
+    print(f"  endpoints : {got}   (deltas {deltas})")
+    assert got == want == runs_counts, (got, want, runs_counts)
+    assert got == [1, 2, 1, 2, 2, 2, 1, 1], got
+    assert deltas == [1, 1, -1, 1, 0, 0, -1, 0], deltas
+    assert set(deltas) == {1, 0, -1}, "all three cases must appear or the claim is untested"
+    assert runs == [(1, 7)], runs
+    print(f"\n  position 6 joins the stretches at 5..5 and 7..7, so the count goes 2 -> 1; position")
+    print(f"  4 joins 1..3 and 5..7, the same -1 again; the repeated 4 moves nothing.")
+
+    # the counts are reachable with no interval structure, which is the point
+    assert len(length) >= 2
+    assert sum(1 for d in deltas if d == -1) == 2 and sum(1 for d in deltas if d == 0) == 3
+    # the stale interior entries, which the correctness argument says are never read
+    stale = {q: length[q] for q in sorted(length) if q not in (1, 7)}
+    assert stale, "no interior entry went stale, so the freshness argument is untested here"
+    assert length[1] == length[7] == 7, (length[1], length[7])
+    print(f"  the length map ends as {dict(sorted(length.items()))}:")
+    print(f"    the endpoints 1 and 7 both read 7, correctly, and the interior entries {sorted(stale)}")
+    print(f"    are stale -- they are never consulted, because a position's neighbour can only")
+    print(f"    be an ENDPOINT when that position is still off.  That was checked at every step.")
+
+    # ---- the sparse case: nothing ever merges
+    sparse_counts, _, _ = count_by_endpoints(SPARSE, verify=true_stretch_length)
+    sparse_want, _ = count_by_rescan(SPARSE)
+    assert sparse_counts == sparse_want == list(range(1, len(SPARSE) + 1)), sparse_counts
+    assert count_by_runs(SPARSE)[0] == sparse_counts
+    print(f"\n  SPARSE = {SPARSE} (the chapter's arrival times, G = 1):")
+    print(f"    {sparse_counts} -- no two are within 1, so every position is its own island and")
+    print(f"    the count only ever rises.  The same data merged four runs at the chapter's G = 47.")
+    # the opposite outcome is forbidden: a DENSE sequence must end at one island
+    dense = list(range(20))
+    assert count_by_endpoints(dense)[0] == [1] * 20, "consecutive positions must never add an island"
+    assert count_by_endpoints(list(range(0, 40, 2)))[0] == list(range(1, 21)), (
+        "every-other positions must each add one")
+    print(f"    0..19 in order -> all ones; 0,2,4,..,38 -> 1..20.  The two extremes bracket it.")
+
+    # ---- order must not matter to the final count, only to the path
+    rng = random.Random(20260303)
+    target = list(range(12)) + [20, 21, 30]
+    finals = set()
+    paths = set()
+    for _ in range(150):
+        shuffled = target[:]
+        rng.shuffle(shuffled)
+        counts, _, _ = count_by_endpoints(shuffled)
+        assert counts == count_by_rescan(shuffled)[0], shuffled
+        finals.add(counts[-1])
+        paths.add(tuple(counts))
+    assert finals == {3}, finals
+    assert len(paths) > 80, len(paths)
+    print(f"\n  150 shuffles of the same {len(target)} positions: the final count is always {finals.pop()}")
+    print(f"  (the three stretches 0..11, 20..21, 30), and {len(paths)} different count PATHS were")
+    print(f"  seen getting there -- the order decides the intermediate reports, nothing else.")
+
+    # ---- boundaries
+    assert count_by_endpoints([])[0] == []
+    assert count_by_endpoints([7])[0] == [1]
+    assert count_by_endpoints([7, 7, 7])[0] == [1, 1, 1], "repeats must be idempotent"
+    neg = [-3, -1, -2, 0]
+    assert count_by_endpoints(neg)[0] == count_by_rescan(neg)[0] == [1, 2, 1, 1], neg
+    assert count_by_endpoints([0, 2, 1])[0] == [1, 2, 1], "the middle position must merge both"
+    big_gap = [0, 10**9]
+    assert count_by_endpoints(big_gap)[0] == [1, 2], (
+        "the coordinates are keys, not array indexes, so a huge gap costs nothing")
+    print(f"\n  boundaries: repeats idempotent; negative positions {neg} -> {count_by_endpoints(neg)[0]};")
+    print(f"  and 0 together with {big_gap[1]:,} costs two map entries, not {big_gap[1]:,} array slots.")
+
+    # ---- the scale, and what each approach costs at it
+    BIG = 20_000
+    shuffled = list(range(BIG))
+    rng.shuffle(shuffled)
+    counts, deltas_big, length_big = count_by_endpoints(shuffled)
+    assert counts[-1] == 1, counts[-1]
+    assert set(deltas_big) <= {1, 0, -1}, set(deltas_big)
+    # CORRECTED twice.  The first expectation was that a delta of 0 means a repeated
+    # position; it does not -- 0 is the ordinary case of extending exactly ONE stretch (+1
+    # for the new position, -1 for the neighbour it absorbs), and a repeat also gives 0,
+    # which is why the two cannot be told apart from the count alone.  The second
+    # expectation was that 0 would then dominate.  Measured, the three deltas each occur
+    # close to n/3 times on a shuffle, because each of the two neighbours is already on with
+    # probability about a half and the three outcomes are the three ways that can land.
+    thirds = [deltas_big.count(d) / BIG for d in (1, 0, -1)]
+    assert all(abs(f - 1 / 3) < 0.02 for f in thirds), thirds
+    assert sum(deltas_big) == 1, sum(deltas_big)
+    assert deltas_big.count(1) - deltas_big.count(-1) == 1, (
+        "each -1 cancels a +1 exactly, so the two counts must differ by the one stretch left")
+    assert len(length_big) <= 2 * BIG
+    peak = max(c for c in counts)
+    small = shuffled[:800]
+    _, small_rescan_ops = count_by_rescan(small)
+    # both references are measured on short prefixes on purpose: the rescan is quadratic in
+    # the number of positions and the chapter's run structure re-sorts hundreds of runs on
+    # every arrival, so either one at the full 20,000 takes longer than everything else in
+    # this file put together.  That IS the finding.
+    tiny = shuffled[:300]
+    _, tiny_run_ops, _ = count_by_runs(tiny)
+    assert count_by_endpoints(small)[0] == count_by_rescan(small)[0]
+    print(f"\n  at {BIG:,} positions shuffled: the count peaks at {peak:,} islands and ends at")
+    print(f"  {counts[-1]}, and the three deltas split almost exactly into thirds: "
+          f"{deltas_big.count(1):,} isolated (+1),")
+    print(f"  {deltas_big.count(0):,} extending one stretch (0) and {deltas_big.count(-1):,} joining two (-1) "
+          f"-- {', '.join(f'{f:.3f}' for f in thirds)} of the stream.")
+    print(f"  on just the first {len(small):,} the rescan made {small_rescan_ops:,} set reads, and on the")
+    print(f"  first {len(tiny)} the chapter's run structure made {tiny_run_ops:,} run comparisons; the")
+    print(f"  endpoint map does a fixed two lookups and two writes per position -- {4 * BIG:,}")
+    print(f"  in all at {BIG:,}, and it never sorts anything.")
+    assert small_rescan_ops == sum(range(1, len(small) + 1)), small_rescan_ops
+    assert tiny_run_ops > 4 * len(tiny), (tiny_run_ops, 4 * len(tiny))
+
+    # ---- many random sequences, against the rescan and the chapter's runs
+    for _ in range(400):
+        n = rng.randint(0, 25)
+        xs = [rng.randint(-6, 12) for _ in range(n)]       # repeats and adjacency on purpose
+        want_x, _ = count_by_rescan(xs)
+        got_x, d_x, _ = count_by_endpoints(xs, verify=true_stretch_length)
+        assert got_x == want_x, xs
+        assert count_by_runs(xs)[0] == want_x, xs
+        assert set(d_x) <= {1, 0, -1}, (xs, d_x)
+        assert all(a + b == c for a, b, c in zip([0] + want_x, d_x, want_x)), (xs, d_x)
+    print(f"\n  400 random sequences with repeats and adjacency: the endpoint map equals the")
+    print(f"  rescan and the chapter's run structure every time, the delta is always in")
+    print(f"  {{+1, 0, -1}}, and the deltas always telescope into the counts.")
+
+    print("\nall assertions passed")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+Running it prints:
+
+```
+POSITIONS = [5, 7, 6, 1, 2, 3, 4, 4]
+  rescan    : [1, 2, 1, 2, 2, 2, 1, 1]   (35 set reads)
+  chapter's runs : [1, 2, 1, 2, 2, 2, 1, 1]   (11 run comparisons), ending [(1, 7)]
+  endpoints : [1, 2, 1, 2, 2, 2, 1, 1]   (deltas [1, 1, -1, 1, 0, 0, -1, 0])
+
+  position 6 joins the stretches at 5..5 and 7..7, so the count goes 2 -> 1; position
+  4 joins 1..3 and 5..7, the same -1 again; the repeated 4 moves nothing.
+  the length map ends as {1: 7, 2: 2, 3: 3, 5: 3, 7: 7}:
+    the endpoints 1 and 7 both read 7, correctly, and the interior entries [2, 3, 5]
+    are stale -- they are never consulted, because a position's neighbour can only
+    be an ENDPOINT when that position is still off.  That was checked at every step.
+
+  SPARSE = [1, 3, 90, 130, 245, 260, 220, 50, 540] (the chapter's arrival times, G = 1):
+    [1, 2, 3, 4, 5, 6, 7, 8, 9] -- no two are within 1, so every position is its own island and
+    the count only ever rises.  The same data merged four runs at the chapter's G = 47.
+    0..19 in order -> all ones; 0,2,4,..,38 -> 1..20.  The two extremes bracket it.
+
+  150 shuffles of the same 15 positions: the final count is always 3
+  (the three stretches 0..11, 20..21, 30), and 150 different count PATHS were
+  seen getting there -- the order decides the intermediate reports, nothing else.
+
+  boundaries: repeats idempotent; negative positions [-3, -1, -2, 0] -> [1, 2, 1, 1];
+  and 0 together with 1,000,000,000 costs two map entries, not 1,000,000,000 array slots.
+
+  at 20,000 positions shuffled: the count peaks at 4,986 islands and ends at
+  1, and the three deltas split almost exactly into thirds: 6,677 isolated (+1),
+  6,647 extending one stretch (0) and 6,676 joining two (-1) -- 0.334, 0.332, 0.334 of the stream.
+  on just the first 800 the rescan made 320,400 set reads, and on the
+  first 300 the chapter's run structure made 43,884 run comparisons; the
+  endpoint map does a fixed two lookups and two writes per position -- 80,000
+  in all at 20,000, and it never sorts anything.
+
+  400 random sequences with repeats and adjacency: the endpoint map equals the
+  rescan and the chapter's run structure every time, the delta is always in
+  {+1, 0, -1}, and the deltas always telescope into the counts.
+
+all assertions passed
+```
+
+</details>
 
 </details>
 <details>
@@ -471,7 +1113,683 @@ case the appealing first answer is to materialise a sequence you cannot afford.
 
 **Where it lands.** `absorb` unchanged, with the withdrawal in the traced frames reinterpreted as a page that should not have been sent — which is why the stable-identity point matters here most.
 
+
+<details>
+<summary><b>The whole program</b> for this variation — runnable, no animation</summary>
+
+This is **the deduplicated alert** solved on its own: a complete file, every helper included, asserting its own results. It is run on every build.
+
+```python
+#!/usr/bin/env python3
+"""Variation 4 — the deduplicated alert (looks like operations). Standalone and runnable.
+
+  A monitor fires repeatedly while a system is unhealthy.  Group the firings into INCIDENTS --
+  no gap longer than G -- and page once per incident.  Firings arrive out of order, because
+  they travel through a queue.
+
+The grouping is the chapter's, unchanged.  The PAGING is what breaks.  You must page while the
+incident is still open, which means acting on a run before you know it is finished, and then a
+later firing within G must not page again.  So the retraction from the chapter's trace becomes
+a paging problem: when two already-paged incidents merge, somebody was paged twice for what
+turned out to be one.  The useful answer is that G is now TWO decisions and not one -- how long
+to wait before paging, and how long before declaring the incident over -- and they need not be
+the same number.  Measured below: at this data no single pair of numbers gives both zero double
+pages and a page for every incident.
+
+Run it:  python3 programs/ch04_v4.py
+"""
+
+import random
+
+# The chapter's nine arrival times, unchanged, now read as monitor firings in the order the
+# pager receives them.  Deliberately not sorted: 220 arrives after 260, and 50 arrives second
+# to last -- and 50 is the firing that lands in the gap and bridges two incidents.
+FIRINGS = [1, 3, 90, 130, 245, 260, 220, 50, 540]
+
+# CLOSE_AFTER = 47 is the chapter's G: the quiet period after which an incident is over.  The
+# chapter chose it so that 50 bridges two runs instead of extending one, which is exactly the
+# case this program needs.  120 is the chapter's other gap, kept as the contrast: at 120
+# nothing bridges, so the double page cannot happen at all.
+CLOSE_AFTER = 47
+WIDE = 120
+
+# PAGE_AFTER = 2 minutes: how long the monitor must have been firing before a human is woken.
+# Chosen because the 1..3 firings span exactly 2, so this is the smallest value at which that
+# pair pages -- and therefore the smallest value at which the double page happens.
+PAGE_AFTER = 2
+
+
+def sweep(firings, close_after):
+    """The retrospective truth: sort, then walk.  These are the incidents as they will look in
+    the morning, and they are only computable once every firing has arrived -- which is the
+    thing a pager does not get to wait for."""
+    out = []
+    for t in sorted(firings):
+        if out and t - out[-1][1] <= close_after:
+            out[-1][1] = t
+        else:
+            out.append([t, t])
+    return [tuple(r) for r in out]
+
+
+def page_streaming(firings, page_after, close_after):
+    """The pager: the chapter's `absorb`, with a page emitted while the incident is still open.
+
+    An incident keeps the SMALLEST id of everything merged into it, so that identity survives
+    a merge -- the chapter's point about stable identity, which matters most here because the
+    id is what a human has already been shown.  `paged` is likewise carried through a merge
+    with `any`, which is what stops a second page for an incident that has already woken
+    somebody.  It cannot stop the FIRST pages from having been two.
+
+    A double page is recorded when a firing merges two or more incidents that have both
+    already paged: two humans were woken for one incident, and neither page can be recalled.
+
+    Returns (pages, incidents, doubles), where pages are (incident_start_at_page_time,
+    firing_that_triggered_it)."""
+    live, pages, doubles, next_id = [], [], 0, 0
+    for t in firings:
+        hit = [r for r in live
+               if t >= r["start"] - close_after and t <= r["end"] + close_after]
+        if sum(1 for r in hit if r["paged"]) >= 2:
+            doubles += 1
+        if hit:
+            m = {"id": min(r["id"] for r in hit),
+                 "start": min([t] + [r["start"] for r in hit]),
+                 "end": max([t] + [r["end"] for r in hit]),
+                 "paged": any(r["paged"] for r in hit)}
+            live = [r for r in live if r not in hit] + [m]
+        else:
+            m = {"id": next_id, "start": t, "end": t, "paged": False}
+            next_id += 1
+            live.append(m)
+        if not m["paged"] and m["end"] - m["start"] >= page_after:
+            m["paged"] = True
+            pages.append((m["start"], t))
+    live.sort(key=lambda r: r["start"])
+    return pages, [(r["start"], r["end"]) for r in live], doubles
+
+
+def coverage(pages, incidents):
+    """Which retrospective incidents got at least one page, and which got more than one.
+
+    A page belongs to the incident whose span contains the start it was sent for.  Returns
+    (covered, over_paged, uncovered)."""
+    counts = []
+    for s, e in incidents:
+        counts.append(sum(1 for ps, _ in pages if s <= ps <= e))
+    covered = sum(1 for c in counts if c >= 1)
+    return covered, sum(1 for c in counts if c > 1), [inc for inc, c in zip(incidents, counts) if c == 0]
+
+
+def apparent_latencies(pages):
+    """How long each page APPEARED to have waited at the moment it was sent: the triggering
+    firing minus the incident's start as the pager knew it then.  This is the number a pager's
+    own metrics would report, and it is the optimistic one."""
+    return [trigger - ps for ps, trigger in pages]
+
+
+def latencies(pages, incidents):
+    """How long each page waited: the triggering firing minus the incident's true start.
+
+    Measured against the RETROSPECTIVE start, because that is the moment the system actually
+    became unhealthy -- which is the number a human cares about and the one a pager cannot
+    know at the time."""
+    out = []
+    for ps, trigger in pages:
+        start = next(s for s, e in incidents if s <= ps <= e)
+        out.append(trigger - start)
+    return out
+
+
+def main():
+    print(f"FIRINGS = {FIRINGS}   (sorted: {sorted(FIRINGS)})")
+    print(f"CLOSE_AFTER = {CLOSE_AFTER}, PAGE_AFTER = {PAGE_AFTER}\n")
+    truth = sweep(FIRINGS, CLOSE_AFTER)
+    pages, incidents, doubles = page_streaming(FIRINGS, PAGE_AFTER, CLOSE_AFTER)
+    assert incidents == truth, (incidents, truth)
+    assert truth == [(1, 130), (220, 260), (540, 540)], truth
+    print(f"  incidents, in the morning : {truth}")
+    print(f"  pages actually sent       : {[p for p, _ in pages]} "
+          f"(triggered by firings {[t for _, t in pages]})")
+    print(f"  double pages              : {doubles}")
+
+    covered, over, uncovered = coverage(pages, truth)
+    lat = latencies(pages, truth)
+    assert pages == [(1, 3), (90, 130), (245, 260)], pages
+    assert doubles == 1, doubles
+    assert (covered, over) == (2, 1), (covered, over)
+    assert uncovered == [(540, 540)], uncovered
+    # CORRECTED.  The expectation was [2, 40, 15] -- each page's wait as the pager saw it.
+    # Measured against the TRUE start the middle page is 129 minutes late, not 40, because
+    # firing 50 arrived afterwards and moved that incident's start from 90 back to 1.  So the
+    # pager's own latency metric is optimistic by construction: it measures from a start that
+    # out-of-order firings can still move backwards.
+    app = apparent_latencies(pages)
+    assert app == [2, 40, 15], app
+    assert lat == [2, 129, 40], lat
+    assert all(t >= a for t, a in zip(lat, app)), (lat, app)
+    assert lat[1] - app[1] == 89 == 90 - 1, (lat[1], app[1])
+    print(f"\n  so three pages were sent for three incidents, and the mapping is still wrong:")
+    print(f"    incident {truth[0]} woke somebody TWICE, at {pages[0][0]} and at {pages[1][0]}, because")
+    print(f"    firing 50 arrived last and bridged two incidents that had each already paged;")
+    print(f"    incident {uncovered[0]} woke nobody at all, because it is a single firing and")
+    print(f"    spans 0 < PAGE_AFTER = {PAGE_AFTER}.")
+    print(f"  page latency as the pager measured it   : {app} (mean {sum(app) / len(app):.1f})")
+    print(f"  page latency against the TRUE start     : {lat} (mean {sum(lat) / len(lat):.1f})")
+    print(f"  the middle page looked like a {app[1]}-minute wait and was really {lat[1]}: firing 50 arrived")
+    print(f"  afterwards and moved that incident's start from 90 back to 1.  A pager cannot")
+    print(f"  measure its own lateness, because the start it measures from is still moving.")
+    # the identity point: the page was sent for "the incident starting at 90", and that
+    # incident no longer exists under that name
+    assert 90 not in [s for s, _ in truth], "the start a page was sent for must have been lost"
+    assert any(s < 90 <= e for s, e in truth), "and it must now be inside a wider incident"
+    print(f"  the second page named 'the incident starting at 90'.  No such incident exists by")
+    print(f"  morning -- it is inside {truth[0]} -- so the start is not a usable page identity.")
+
+    # ---- the wide close_after: the bridge cannot happen, so neither can the double page
+    wide_pages, wide_inc, wide_doubles = page_streaming(FIRINGS, PAGE_AFTER, WIDE)
+    assert wide_inc == sweep(FIRINGS, WIDE) == [(1, 260), (540, 540)], wide_inc
+    assert wide_doubles == 0, wide_doubles
+    w_cov, w_over, w_unc = coverage(wide_pages, wide_inc)
+    print(f"\n  at CLOSE_AFTER = {WIDE} (the chapter's other gap): incidents {wide_inc},")
+    print(f"  pages {[p for p, _ in wide_pages]}, double pages {wide_doubles} -- nothing bridges, so")
+    print(f"  nothing is paged twice.  The price is the other direction: {w_cov} of {len(wide_inc)} incidents")
+    print(f"  paged, and {truth[0]} and {truth[1]} are now reported as ONE, which is a different lie.")
+    assert w_cov == 1 and w_unc == [(540, 540)], (w_cov, w_unc)
+    assert len(wide_inc) < len(truth), "a wider close must merge incidents a human would separate"
+
+    # ---- the two decisions, swept
+    print(f"\n  PAGE_AFTER against CLOSE_AFTER, on the same nine firings:")
+    print(f"    {'close':>6} {'page':>6} {'incidents':>10} {'pages':>6} {'doubles':>8} "
+          f"{'uncovered':>10} {'mean lat':>9}")
+    rows = []
+    for close in (CLOSE_AFTER, WIDE):
+        for page_after in (0, 2, 3, 20, 100, 1000):
+            ps, inc, db = page_streaming(FIRINGS, page_after, close)
+            cov, ov, unc = coverage(ps, inc)
+            la = latencies(ps, inc)
+            rows.append((close, page_after, len(inc), len(ps), db, len(unc),
+                         sum(la) / len(la) if la else 0.0))
+            print(f"    {close:>6} {page_after:>6} {len(inc):>10} {len(ps):>6} {db:>8} "
+                  f"{len(unc):>10} {sum(la) / len(la) if la else 0.0:>9.1f}")
+    # the tradeoff, asserted: waiting longer before paging cannot increase double pages,
+    # and it cannot decrease the number of incidents left unpaged
+    for close in (CLOSE_AFTER, WIDE):
+        same = [r for r in rows if r[0] == close]
+        for a, b in zip(same, same[1:]):
+            assert b[4] <= a[4], (a, b, "a longer wait must not create MORE double pages")
+            assert b[5] >= a[5], (a, b, "a longer wait must not page MORE incidents")
+    assert rows[0][4] == 1 and rows[0][5] == 0, rows[0]        # close 47, page 0
+    assert rows[2][4] == 0 and rows[2][5] == 1, rows[2]        # close 47, page 3
+    assert rows[5][3] == 0, rows[5]                            # page 1000: nothing pages at all
+    print(f"  at PAGE_AFTER = 1000 nothing pages at all: zero double pages, and an alerting")
+    print(f"  system that never alerts.  That is the degenerate end of the same dial.")
+
+    # ---- is there a setting that gives everything?  Swept, not guessed.
+    CLOSES, PAGES = 121, 41
+    both = []
+    for close in range(CLOSES):
+        for page_after in range(PAGES):
+            ps, inc, db = page_streaming(FIRINGS, page_after, close)
+            cov, ov, unc = coverage(ps, inc)
+            if db == 0 and ov == 0 and not unc and inc == truth:
+                both.append((close, page_after))
+    print(f"\n  swept {CLOSES * PAGES:,} (CLOSE_AFTER, PAGE_AFTER) pairs looking for one that gives the")
+    print(f"  right incidents, pages every one, and pages none of them twice:")
+    print(f"    {len(both)} pairs work: {both}")
+    # CORRECTED.  The expectation was that none exists, from the argument that (540,540) is a
+    # single firing so only PAGE_AFTER = 0 pages it, and PAGE_AFTER = 0 pages 1..3 before 50
+    # arrives to bridge it.  Both halves are true and the conclusion was still wrong: three
+    # values of CLOSE_AFTER escape, and they escape for a reason the argument never considered.
+    assert both == [(87, 0), (88, 0), (89, 0)], both
+    assert CLOSE_AFTER < 87 and all(47 <= c <= 89 for c, _ in both)
+    ps0, inc0, db0 = page_streaming(FIRINGS, 0, CLOSE_AFTER)
+    assert coverage(ps0, inc0)[2] == [] and db0 == 1, (ps0, db0)
+    ps3, inc3, db3 = page_streaming(FIRINGS, 3, CLOSE_AFTER)
+    assert db3 == 0 and coverage(ps3, inc3)[2] == [(540, 540)], (ps3, db3)
+    print(f"  at CLOSE_AFTER = 87 the firing at 90 is within 87 of the firing at 3, so when 90")
+    print(f"  arrives it joins the open incident instead of starting a second one -- and then")
+    print(f"  there are never two paged incidents for 50 to bridge.  The window has to be wide")
+    print(f"  enough to swallow the gap the late firing was going to land in.")
+    print(f"  the band is {len(both)} wide out of {CLOSES}: it opens at 90 - 3 = {90 - 3}, where the bridge stops")
+    print(f"  forming, and closes at 220 - 130 = {220 - 130}, where two real incidents start merging into")
+    print(f"  one.  And it only works for THIS arrival order:")
+    assert min(c for c, _ in both) == 90 - 3 and max(c for c, _ in both) == 220 - 130 - 1
+
+    # the escape is fitted to one arrival order, which is the reason not to trust it
+    rng0 = random.Random(11)
+    broke = None
+    for _ in range(500):
+        order = FIRINGS[:]
+        rng0.shuffle(order)
+        ps, inc, db = page_streaming(order, 0, 87)
+        if inc == truth and db > 0:
+            broke = (order, db)
+            break
+    assert broke is not None, "no permutation broke the fitted pair, so the fragility is unproven"
+    assert page_streaming(FIRINGS, 0, 87)[2] == 0, "the given order must be the clean one"
+    print(f"    reorder the same nine firings to {broke[0]}")
+    print(f"    and (87, 0) double-pages {broke[1]} time(s) again.  So the pair that worked was fitted to")
+    print(f"    an arrival order nobody controls -- which is the honest answer to the question:")
+    print(f"    the two numbers are a product decision about which failure you prefer, and no")
+    print(f"    sweep can hand you a pair that has neither.")
+
+    # ---- many random firing orders and parameter pairs
+    rng = random.Random(20260303)
+    seen_double, seen_clean, orders = 0, 0, 0
+    for _ in range(600):
+        n = rng.randint(1, 14)
+        times = [rng.randint(0, 300) for _ in range(n)]
+        close = rng.randint(0, 60)
+        page_after = rng.randint(0, 40)
+        ps, inc, db = page_streaming(times, page_after, close)
+        # the chapter's invariant must survive the paging: grouping is unchanged
+        assert inc == sweep(times, close), (times, close)
+        cov, ov, unc = coverage(ps, inc)
+        assert cov + len(unc) == len(inc), (times, close, page_after)
+        assert ov <= db, (
+            "an incident cannot be over-paged without a merge of two paged incidents")
+        seen_double += db > 0
+        seen_clean += db == 0
+        # re-ordering the same firings must not change the incidents, only the pages
+        shuffled = times[:]
+        rng.shuffle(shuffled)
+        ps2, inc2, db2 = page_streaming(shuffled, page_after, close)
+        assert inc2 == inc, (times, shuffled, close)
+        if [p for p, _ in ps2] != [p for p, _ in ps]:
+            orders += 1
+    print(f"\n  600 random firing streams: the incidents always equal the sorted sweep, and they")
+    print(f"  are identical under re-ordering -- but the PAGES differ on {orders} of them, because the")
+    print(f"  pager has to act before the order is known.  {seen_double} streams double-paged and")
+    print(f"  {seen_clean} did not, so the failure is real and not universal.")
+    assert seen_double > 0 and seen_clean > 0, (seen_double, seen_clean)
+    assert orders > 0, "re-ordering never changed the pages, so the whole problem is invisible"
+
+    print("\nall assertions passed")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+Running it prints:
+
+```
+FIRINGS = [1, 3, 90, 130, 245, 260, 220, 50, 540]   (sorted: [1, 3, 50, 90, 130, 220, 245, 260, 540])
+CLOSE_AFTER = 47, PAGE_AFTER = 2
+
+  incidents, in the morning : [(1, 130), (220, 260), (540, 540)]
+  pages actually sent       : [1, 90, 245] (triggered by firings [3, 130, 260])
+  double pages              : 1
+
+  so three pages were sent for three incidents, and the mapping is still wrong:
+    incident (1, 130) woke somebody TWICE, at 1 and at 90, because
+    firing 50 arrived last and bridged two incidents that had each already paged;
+    incident (540, 540) woke nobody at all, because it is a single firing and
+    spans 0 < PAGE_AFTER = 2.
+  page latency as the pager measured it   : [2, 40, 15] (mean 19.0)
+  page latency against the TRUE start     : [2, 129, 40] (mean 57.0)
+  the middle page looked like a 40-minute wait and was really 129: firing 50 arrived
+  afterwards and moved that incident's start from 90 back to 1.  A pager cannot
+  measure its own lateness, because the start it measures from is still moving.
+  the second page named 'the incident starting at 90'.  No such incident exists by
+  morning -- it is inside (1, 130) -- so the start is not a usable page identity.
+
+  at CLOSE_AFTER = 120 (the chapter's other gap): incidents [(1, 260), (540, 540)],
+  pages [1], double pages 0 -- nothing bridges, so
+  nothing is paged twice.  The price is the other direction: 1 of 2 incidents
+  paged, and (1, 130) and (220, 260) are now reported as ONE, which is a different lie.
+
+  PAGE_AFTER against CLOSE_AFTER, on the same nine firings:
+     close   page  incidents  pages  doubles  uncovered  mean lat
+        47      0          3      4        1          0      28.5
+        47      2          3      3        1          1      57.0
+        47      3          3      2        0          1      84.5
+        47     20          3      2        0          1      64.5
+        47    100          3      1        0          2      49.0
+        47   1000          3      0        0          3       0.0
+       120      0          2      2        0          0       0.0
+       120      2          2      1        0          1       2.0
+       120      3          2      1        0          1      89.0
+       120     20          2      1        0          1      89.0
+       120    100          2      1        0          1     129.0
+       120   1000          2      0        0          2       0.0
+  at PAGE_AFTER = 1000 nothing pages at all: zero double pages, and an alerting
+  system that never alerts.  That is the degenerate end of the same dial.
+
+  swept 4,961 (CLOSE_AFTER, PAGE_AFTER) pairs looking for one that gives the
+  right incidents, pages every one, and pages none of them twice:
+    3 pairs work: [(87, 0), (88, 0), (89, 0)]
+  at CLOSE_AFTER = 87 the firing at 90 is within 87 of the firing at 3, so when 90
+  arrives it joins the open incident instead of starting a second one -- and then
+  there are never two paged incidents for 50 to bridge.  The window has to be wide
+  enough to swallow the gap the late firing was going to land in.
+  the band is 3 wide out of 121: it opens at 90 - 3 = 87, where the bridge stops
+  forming, and closes at 220 - 130 = 90, where two real incidents start merging into
+  one.  And it only works for THIS arrival order:
+    reorder the same nine firings to [90, 220, 1, 3, 260, 245, 130, 540, 50]
+    and (87, 0) double-pages 1 time(s) again.  So the pair that worked was fitted to
+    an arrival order nobody controls -- which is the honest answer to the question:
+    the two numbers are a product decision about which failure you prefer, and no
+    sweep can hand you a pair that has neither.
+
+  600 random firing streams: the incidents always equal the sorted sweep, and they
+  are identical under re-ordering -- but the PAGES differ on 192 of them, because the
+  pager has to act before the order is known.  22 streams double-paged and
+  578 did not, so the failure is real and not universal.
+
+all assertions passed
+```
+
 </details>
+
+</details>
+
+#### The whole program
+
+Everything above as one file you can run: no animation, no stack, no heap — the complete solution, every helper included, and the measurements at the bottom. It is **run by `tools/run_programs.sh` on every build** and asserts its own results, so if it stopped working this section could not be generated.
+
+```python
+#!/usr/bin/env python3
+"""Runs separated by a gap, built as the times arrive out of order.
+
+A door log gives one person's entry times.  A VISIT is a run of entries with no
+gap longer than G.  The times arrive OUT OF ORDER and they keep arriving, so
+there is no moment at which you may sort them -- and the visits must be reported
+after each arrival.  10^6 entries.
+
+The case the out-of-order clause exists for: one late time can land in the gap
+that was keeping two visits apart, so it joins BOTH of them, and two visits that
+were already reported stop existing.
+
+Run it:  python3 programs/ch04.py
+"""
+import random
+
+# Data, from tools/gen_ch04_interview.js over tools/stream_seed.js.
+# ARRIVALS: every event time in the log, in the order the pipeline sees them (the
+# seed's processing order).  Deliberately not sorted: 220 arrives after 260, and
+# 50 arrives next to last.
+ARRIVALS = [1, 3, 90, 130, 245, 260, 220, 50, 540]
+# G = 47 is a DECLARED parameter of this problem, not the chapter's gap of 120.
+# The generator says why, and it is worth repeating: at 120 every arrival in this
+# log joins at most ONE run, so the merge this program exists to show would never
+# happen.  G belongs to the QUESTION (a product decision about what counts as one
+# visit), so fixing it here chooses the example's parameter, not its data.  At 47
+# the seed's deliberately LATE event (50) is the one that bridges two runs.
+G = 47
+N = len(ARRIVALS)
+
+def ascending(times):
+    """A sorted copy.  Named because the batch answer is built on it."""
+    return sorted(times)
+
+def sweep(times, g=G):
+    """The batch answer: sort, then walk.  Each time extends the last run or starts
+    a new one, decided by one comparison.  O(n log n) + O(n) -- and correct only
+    once every time has arrived, which the question says will not happen."""
+    out = []
+    for t in ascending(times):
+        if out and t - out[-1][1] <= g:
+            out[-1][1] = t                     # set_end
+        else:
+            out.append([t, t])
+    return [tuple(r) for r in out]
+
+def touching(runs, t, g=G):
+    """Every run the time t could join: one whose end is within g before t, or whose
+    start is within g after it.  Two comparisons against a run's ENDS, not against
+    its members -- and it returns a LIST, because there may be several."""
+    return [r for r in runs if t >= r[0] - g and t <= r[1] + g]
+
+def absorb(runs, t, g=G):
+    """Replace every touched run, and t, with ONE run spanning all of them.
+
+    Taking the smallest start and the largest end over all touched runs plus t
+    handles one, two or ten of them in the same two lines.  An implementation that
+    stops at the FIRST match widens one run and leaves the other, so two runs then
+    claim overlapping time -- plausible output, wrong totals."""
+    hit = touching(runs, t, g)
+    rest = [r for r in runs if r not in hit]
+    lo = min([t] + [r[0] for r in hit])
+    hi = max([t] + [r[1] for r in hit])
+    return sorted(rest + [(lo, hi)]), hit
+
+def withdrawn(before, after):
+    """Runs the consumer was shown that no longer exist.  Not extended: GONE,
+    replaced by one run spanning both.  Nothing can un-send a report, so the
+    output cannot be a stream of appends -- it has to be revisable."""
+    return [r for r in before if r not in after]
+
+def incremental(times, g=G):
+    """The streaming answer: absorb each arrival in turn, recording what the
+    consumer would have to be told at each step."""
+    runs, trace = [], []
+    for t in times:
+        before = runs
+        runs, hit = absorb(runs, t, g)
+        act = "MERGE" if len(hit) >= 2 else "extend" if len(hit) == 1 else "new"
+        trace.append({"t": t, "act": act, "hit": hit, "runs": runs,
+                      "gone": withdrawn(before, runs)})
+    return runs, trace
+
+# The three variations.
+
+def the_calendar_that_will_not_double_book(ops):
+    """Variation 1, surface: scheduling.  Reject bookings that overlap; report gaps.
+
+    Non-obvious point: insertion is `touching` with g = 0, and CANCELLATION is the
+    operation nothing above can do -- merging is easy because a merged run is
+    determined by its ends, and splitting is not, because the information needed
+    to separate two merged bookings is gone.  So the stored state cannot be the
+    merged runs at all: it must be the individual bookings, with the merge
+    computed on read.
+
+    `ops` is [("book"|"cancel", (start, end)), ...].  Returns (accepted, members).
+    """
+    members, accepted = [], []
+    for kind, span in ops:
+        if kind == "book":
+            clash = [m for m in members if span[0] <= m[1] and m[0] <= span[1]]
+            if clash:
+                accepted.append(False)
+                continue
+            members.append(span)
+            accepted.append(True)
+        else:
+            members = [m for m in members if m != span]
+            accepted.append(True)
+    return accepted, sorted(members)
+
+def the_island_count(positions):
+    """Variation 2, surface: puzzles.  Positions turn on in any order; after each,
+    how many contiguous stretches are on?
+
+    Non-obvious point: the question asked only for a COUNT, and that buys a much
+    better answer -- a new position can join at most TWO stretches, so the count
+    moves by exactly +1, 0 or -1 and nothing has to be searched.  A map from a
+    stretch's endpoints to its length is enough: O(1) per position, with no
+    interval structure at all.  The two-run merge in the main trace is the -1 case.
+    """
+    length, count, out = {}, 0, []
+    on = set()
+    for p in positions:
+        if p in on:
+            out.append(count)
+            continue
+        on.add(p)
+        left = length.get(p - 1, 0)
+        right = length.get(p + 1, 0)
+        count += 1 - (1 if left else 0) - (1 if right else 0)
+        total = left + 1 + right
+        lo, hi = p - left, p + right
+        length[lo] = length[hi] = total
+        out.append(count)
+    return out
+
+def the_deduplicated_alert(firings, page_after, close_after):
+    """Variation 3, surface: operations.  Group firings into incidents and page once.
+
+    Non-obvious point: you must page while an incident is still OPEN -- acting on a
+    run before knowing it is finished -- so the withdrawal in the main trace becomes
+    a page that should not have been sent: when two already-paged incidents merge,
+    somebody was paged twice for what turned out to be one.  The useful answer is
+    that G is two decisions, not one: how long to wait before paging, and how long
+    before declaring the incident over, and they need not be the same number.
+
+    `absorb` is reused unchanged, with close_after as its gap.  Identity is a minted
+    id carried through every merge, which is the main trace's other lesson.
+    Returns (pages, incidents, double_pages).
+    """
+    live, pages, doubles, next_id = [], [], 0, 0
+    for t in firings:
+        hit = [r for r in live if t >= r["start"] - close_after and t <= r["end"] + close_after]
+        if sum(1 for r in hit if r["paged"]) >= 2:
+            doubles += 1                        # two pages, one incident
+        if hit:
+            m = {"id": min(r["id"] for r in hit),
+                 "start": min([t] + [r["start"] for r in hit]),
+                 "end": max([t] + [r["end"] for r in hit]),
+                 "paged": any(r["paged"] for r in hit)}
+            live = [r for r in live if r not in hit] + [m]
+        else:
+            m = {"id": next_id, "start": t, "end": t, "paged": False}
+            next_id += 1
+            live.append(m)
+        if not m["paged"] and m["end"] - m["start"] >= page_after:
+            m["paged"] = True
+            pages.append(m["start"])
+    live.sort(key=lambda r: r["start"])
+    return pages, [(r["start"], r["end"]) for r in live], doubles
+
+def main():
+    print(f"ARRIVALS = {ARRIVALS}   (sorted: {ascending(ARRIVALS)})   G = {G}")
+    batch = sweep(ARRIVALS)
+    final, trace = incremental(ARRIVALS)
+    for s in trace:
+        hit = " ".join(f"{a}..{b}" for a, b in s["hit"]) or "-"
+        runs = "  ".join(f"{a}..{b}" for a, b in s["runs"])
+        gone = " ".join(f"{a}..{b}" for a, b in s["gone"]) or "-"
+        print(f"  {s['t']:>3}  {s['act']:<6} touches [{hit}]  ->  {runs}   withdrawn: {gone}")
+    print(f"\n  sorted sweep : {batch}")
+    print(f"  incremental  : {final}")
+
+    assert final == batch, f"incremental {final} != batch {batch}"
+    assert final == [(1, 130), (220, 260), (540, 540)], f"measured {final}"
+    assert any(ARRIVALS[i] < ARRIVALS[i - 1] for i in range(1, N)), "the arrivals are in order"
+    assert len(batch) > 1, "everything collapsed into one run, so the gap does nothing"
+
+    merges = [s for s in trace if s["act"] == "MERGE"]
+    exts = [s for s in trace if s["act"] == "extend"]
+    news = [s for s in trace if s["act"] == "new"]
+    retracted = sum(len(s["gone"]) for s in trace)
+    assert len(merges) == 1 and merges[0]["t"] == 50, f"merges {[s['t'] for s in merges]}"
+    assert merges[0]["hit"] == [(1, 3), (90, 130)], merges[0]["hit"]
+    assert len(merges[0]["gone"]) == 2, "the merging arrival must remove two runs"
+    assert len(exts) == 4 and len(news) == 4, f"{len(exts)} extends, {len(news)} new"
+    # MEASURED 6, which is more than the merge alone: every `extend` also withdraws
+    # the run it widened, because a run is identified by its ENDS and both moved.
+    assert retracted == 6, f"measured {retracted} withdrawn runs"
+    # a run acquires an EARLIER start -- so "the run beginning at 245" is not a name
+    # that survives, which rules out keying the output on the start
+    backwards = [(g, r) for s in trace for g in s["gone"] for r in final
+                 if r[1] == g[1] and r[0] < g[0]]
+    # MEASURED two of them, not the one first expected: 245..260 became 220..260 when
+    # 220 arrived, AND 90..130 became 1..130 when the merge took the earlier start.
+    assert backwards == [((245, 260), (220, 260)), ((90, 130), (1, 130))], backwards
+    print(f"\n  {retracted} runs withdrawn; {backwards[0][0][0]}..{backwards[0][0][1]} later became "
+          f"{backwards[0][1][0]}..{backwards[0][1][1]} -- an EARLIER start, so the start is not a key")
+
+    # the opposite outcome is forbidden too: at the chapter's own gap of 120 the
+    # merge does NOT happen, which is why G is declared rather than inherited
+    _, t120 = incremental(ARRIVALS, 120)
+    assert not [s for s in t120 if s["act"] == "MERGE"], "at G = 120 nothing may join two runs"
+    assert incremental(ARRIVALS, 120)[0] == sweep(ARRIVALS, 120)
+    print(f"  at the chapter's G = 120: 0 merges, runs {sweep(ARRIVALS, 120)}")
+
+    # variations
+    ok, members = the_calendar_that_will_not_double_book(
+        [("book", (0, 10)), ("book", (5, 15)), ("book", (11, 20)),
+         ("cancel", (0, 10)), ("book", (5, 9))])
+    assert ok == [True, False, True, True, True], ok
+    assert members == [(5, 9), (11, 20)], members
+    # and the point: a merged-run state could not have produced that last booking,
+    # because cancelling 0..10 out of a merged 0..20 is not expressible
+    assert sweep([0, 10, 11, 20], 1) == [(0, 0), (10, 11), (20, 20)]
+    print(f"\n  calendar: accepted {ok}, members {members}")
+
+    islands = the_island_count([5, 7, 6, 1, 2, 3])
+    assert islands == [1, 2, 1, 2, 2, 2], islands
+    assert the_island_count([1, 2, 3]) == [1, 1, 1], "adjacent positions must not add islands"
+    assert the_island_count([1, 3, 5]) == [1, 2, 3], "isolated positions must each add one"
+    print(f"  islands : {islands}  (position 6 joins TWO stretches: the -1 case)")
+
+    pages, incidents, doubles = the_deduplicated_alert(
+        [0, 5, 10, 300, 305], page_after=5, close_after=47)
+    assert incidents == [(0, 10), (300, 305)], incidents
+    assert pages == [0, 300] and doubles == 0, (pages, doubles)
+    # the firing that arrives late and bridges two ALREADY-PAGED incidents: two pages
+    # were sent for what turns out to be one incident, and neither can be un-sent
+    late_pages, late_inc, late_dbl = the_deduplicated_alert([0, 5, 90, 95, 50], 5, 47)
+    assert late_inc == [(0, 95)] and late_pages == [0, 90] and late_dbl == 1, (late_inc, late_pages, late_dbl)
+    print(f"  alerts  : incidents {incidents}, paged at {pages}, double pages {doubles}")
+    print(f"            one late firing at 50: {late_inc} after paging at {late_pages} -> {late_dbl} double page")
+
+    # brute force over many inputs: the incremental answer must equal the sorted sweep
+    rng = random.Random(20260303)
+    merge_seen = 0
+    for _ in range(800):
+        g = rng.randint(0, 30)
+        times = [rng.randint(0, 120) for _ in range(rng.randint(1, 14))]
+        runs, tr = incremental(times, g)
+        assert runs == sweep(times, g), (times, g)
+        merge_seen += sum(1 for s in tr if s["act"] == "MERGE")
+        on = sorted(set(times))
+        want, cnt, seen = [], 0, set()
+        for p in times:                       # naive island count: rescan the set
+            seen.add(p)
+            cnt = sum(1 for q in sorted(seen) if q - 1 not in seen)
+            want.append(cnt)
+        assert the_island_count(times) == want, times
+    assert merge_seen > 0, "no random case merged, so the hard path was never retested"
+    print(f"\n  800 random (times, G) pairs: incremental == sorted sweep ({merge_seen} merges")
+    print("  among them), and the island count == a naive rescan of the set.")
+    print("\nall assertions passed")
+
+if __name__ == "__main__":
+    main()
+```
+
+Running it prints:
+
+```
+ARRIVALS = [1, 3, 90, 130, 245, 260, 220, 50, 540]   (sorted: [1, 3, 50, 90, 130, 220, 245, 260, 540])   G = 47
+    1  new    touches [-]  ->  1..1   withdrawn: -
+    3  extend touches [1..1]  ->  1..3   withdrawn: 1..1
+   90  new    touches [-]  ->  1..3  90..90   withdrawn: -
+  130  extend touches [90..90]  ->  1..3  90..130   withdrawn: 90..90
+  245  new    touches [-]  ->  1..3  90..130  245..245   withdrawn: -
+  260  extend touches [245..245]  ->  1..3  90..130  245..260   withdrawn: 245..245
+  220  extend touches [245..260]  ->  1..3  90..130  220..260   withdrawn: 245..260
+   50  MERGE  touches [1..3 90..130]  ->  1..130  220..260   withdrawn: 1..3 90..130
+  540  new    touches [-]  ->  1..130  220..260  540..540   withdrawn: -
+
+  sorted sweep : [(1, 130), (220, 260), (540, 540)]
+  incremental  : [(1, 130), (220, 260), (540, 540)]
+
+  6 runs withdrawn; 245..260 later became 220..260 -- an EARLIER start, so the start is not a key
+  at the chapter's G = 120: 0 merges, runs [(1, 260), (540, 540)]
+
+  calendar: accepted [True, False, True, True, True], members [(5, 9), (11, 20)]
+  islands : [1, 2, 1, 2, 2, 2]  (position 6 joins TWO stretches: the -1 case)
+  alerts  : incidents [(0, 10), (300, 305)], paged at [0, 300], double pages 0
+            one late firing at 50: [(0, 95)] after paging at [0, 90] -> 1 double page
+
+  800 random (times, G) pairs: incremental == sorted sweep (286 merges
+  among them), and the island count == a naive rescan of the set.
+
+all assertions passed
+```
 
 #### The solution as a running program — stack and heap at every step
 

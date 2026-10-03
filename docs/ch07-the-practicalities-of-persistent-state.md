@@ -457,6 +457,364 @@ case the appealing first answer is to materialise a sequence you cannot afford.
 
 **Where it lands.** `add` with a set in place of an integer, which is what makes `dropStale` insufficient and a sketch necessary.
 
+
+<details>
+<summary><b>The whole program</b> for this variation — runnable, no animation</summary>
+
+This is **the unique-visitor count** solved on its own: a complete file, every helper included, asserting its own results. It is run on every build.
+
+```python
+#!/usr/bin/env python3
+"""Variation 2 -- the unique-visitor count (looks like analytics). Standalone and runnable.
+
+  Page views arrive forever, each carrying a visitor id.  Report how many DISTINCT visitors
+  were seen today.  10**9 views a day, tens of millions of visitors.
+
+  The chapter's answer -- one accumulator per key, with an expiry to bound it -- does not
+  survive the word "distinct".
+
+The chapter's bound works because a sum is ONE NUMBER: a key's accumulator is the same size
+after a billion events as after one.  A distinct count is not one number -- to know whether
+this visitor is new you must have kept the visitors -- so the state is the CARDINALITY, which
+is the quantity you were asked to measure and therefore the one you cannot assume is small.
+The expiry does not rescue it either, and fails in the opposite direction from the chapter's:
+there a dropped accumulator UNDERSTATED a total, here a dropped visitor is recounted and
+OVERSTATES the distinct count.  The way out is to stop being exact: a sketch answers "how
+many distinct" in a fixed few kilobytes at any cardinality, with a small, measurable error.
+
+Run it:  python3 programs/ch07_v2.py
+"""
+import hashlib
+import random
+from bisect import insort
+
+# The chapter's nine seed events with the value column dropped -- what is left is a view log:
+# (visitor, event_time).  Two visitors, nine views, so the gap between "views" and "visitors"
+# is 9 vs 2 and a wrong answer can be attributed.  Visitor 'a' is silent from t=245 to t=540,
+# which is the chapter's longest gap of 295 and is what an expiry gets wrong.
+VIEWS = [("a", 1), ("a", 3), ("b", 50), ("b", 90), ("a", 130),
+         ("b", 220), ("a", 245), ("b", 260), ("a", 540)]
+TRUE_DISTINCT = 2
+DAY = 86_400           # the window the question names: distinct per DAY
+K = 256                # the sketch's size, in retained hash values
+INFINITY = float("inf")
+
+
+def exact_distinct(views):
+    """The correct answer, and the one that cannot be afforded: keep every visitor.
+
+    The state is one slot per DISTINCT visitor, so it is set by the answer's own size.  At
+    tens of millions of visitors this is tens of millions of slots per day, per counter, and
+    there is no constant to tune: the thing that makes it big is the thing being measured.
+    Returns (count, slots_held).
+    """
+    seen = set()
+    for v, _ in views:
+        seen.add(v)
+    return len(seen), len(seen)
+
+
+def count_the_views(views):
+    """The answer that arrives first because it is the chapter's: one accumulator, +1 per
+    event.  It is a perfectly good counter of VIEWS, which is a different question, and the
+    inflation is the average views per visitor -- invisible unless somebody checks."""
+    total = 0
+    for _ in views:
+        total += 1
+    return total
+
+
+def distinct_with_expiry(views, ttl):
+    """Exact counting with the chapter's bound bolted on: increment when the visitor is not
+    in the set, and drop any visitor untouched for longer than `ttl`.
+
+    This is the chapter's `dropStale` doing exactly what it did there, and the failure has
+    the OPPOSITE SIGN.  A visitor dropped a moment ago is indistinguishable from one never
+    seen, so when they come back they are counted again -- the count can only rise above the
+    truth, never fall below it.  Returns (count, max_slots_held, recounts).
+    """
+    seen, last = set(), {}
+    count, high_water, recounts = 0, 0, 0
+    ever = set()
+    for v, t in views:
+        for old in [k for k in seen if t - last[k] > ttl]:
+            seen.discard(old)
+            del last[old]
+        if v not in seen:
+            count += 1
+            if v in ever:
+                recounts += 1
+            seen.add(v)
+        ever.add(v)
+        last[v] = t
+        high_water = max(high_water, len(seen))
+    return count, high_water, recounts
+
+
+def hashed(visitor):
+    """A visitor id to a number in [0, 1).  sha1 so the result is identical on every run and
+    on every machine -- the sketch's error must be reproducible or it cannot be asserted."""
+    return int(hashlib.sha1(str(visitor).encode()).hexdigest()[:16], 16) / float(1 << 64)
+
+
+def kmv_sketch(views, k=K):
+    """A k-minimum-values sketch: keep the k SMALLEST distinct hashes and nothing else.
+
+    The mechanism is that hashing spreads n distinct visitors evenly over [0, 1), so the
+    k-th smallest hash lands near k/n.  Reading that backwards, n is about k divided by the
+    k-th smallest hash -- (k-1)/h is the unbiased form.  Repeats hash to a value already
+    held, so they change nothing, which is why no visitor has to be remembered.  The state is
+    k slots whatever the cardinality, so the memory question is answered once and for all.
+    Returns (estimate, slots_held).
+    """
+    mins, held = [], set()
+    for v, _ in views:
+        h = hashed(v)
+        if h in held:
+            continue
+        if len(mins) < k:
+            insort(mins, h)
+            held.add(h)
+        elif h < mins[-1]:
+            held.discard(mins.pop())
+            insort(mins, h)
+            held.add(h)
+    if len(mins) < k:
+        return len(mins), len(mins)          # fewer than k distinct: the sketch IS the set
+    return int((k - 1) / mins[-1]), len(mins)
+
+
+def held_at(views, ttl, t):
+    """How many visitors an expiring set holds at moment t, if no view arrives then.  The
+    end-of-run count is the wrong measurement, because an expiry is immediately followed by
+    the view that re-creates the entry; observing a quiet moment shows it."""
+    last = {}
+    for v, at in views:
+        if at <= t:
+            last[v] = at
+    return sum(1 for v in last if t - last[v] <= ttl)
+
+
+def stream_of(cardinality, repeats, seed=20260303):
+    """A day of views with a known number of distinct visitors, shuffled so arrival order
+    carries no information.  Seeded, so every number printed below is reproducible."""
+    rng = random.Random(seed)
+    views = [(f"visitor{i}", 0) for i in range(cardinality)] * repeats
+    rng.shuffle(views)
+    return views
+
+
+def main():
+    print("VIEWS =", "  ".join(f"{v}@{t}" for v, t in VIEWS), f"   ({len(VIEWS)} views)")
+    distinct, slots = exact_distinct(VIEWS)
+    views_count = count_the_views(VIEWS)
+    print(f"  distinct visitors      : {distinct}   ({slots} slots held)")
+    print(f"  +1 per event           : {views_count}   (1 slot held -- and the wrong question)")
+    assert (distinct, slots) == (TRUE_DISTINCT, TRUE_DISTINCT)
+    assert views_count == len(VIEWS) == 9
+    assert views_count / distinct == 4.5, "the inflation is the views per visitor"
+    print(f"  the chapter's accumulator inflates the answer {views_count / distinct:.1f}x here, and the")
+    print(f"  factor is the average views per visitor -- a number nobody reports, so the error")
+    print(f"  is not visible in the output at all.")
+
+    # the chapter's bound, applied here: it fails upward
+    gap = 540 - 245                      # visitor 'a' is silent for the chapter's 295
+    tight, tight_slots, recounts = distinct_with_expiry(VIEWS, gap - 1)
+    safe, safe_slots, safe_recounts = distinct_with_expiry(VIEWS, gap)
+    print(f"\n  ttl = {gap} (the longest silence) : {safe} distinct, {safe_recounts} recounts  (correct)")
+    print(f"  ttl = {gap - 1}                      : {tight} distinct, {recounts} recount   OVERSTATED")
+    assert safe == TRUE_DISTINCT and safe_recounts == 0
+    assert tight == 3 and recounts == 1, (tight, recounts)
+    assert tight > TRUE_DISTINCT, "a dropped visitor is recounted, so the count can only rise"
+    assert tight != TRUE_DISTINCT - 1, "and it must NOT understate -- that is the other failure"
+    print(f"  the chapter's tight allowance made a TOTAL too low by what it dropped; here it")
+    print(f"  makes a COUNT too high by what it dropped, because the dropped thing was the")
+    print(f"  evidence that the visitor was not new.")
+
+    # and the expiry buys nothing inside a day, measured at every moment
+    end = max(t for _, t in VIEWS)
+    saving = max(held_at(VIEWS, INFINITY, t) - held_at(VIEWS, DAY, t) for t in range(end + 1))
+    print(f"\n  visitors saved by a day-long ttl, at any moment in this example: {saving}")
+    assert saving == 0, "inside the window no visitor is ever stale, so there is nothing to drop"
+    print(f"  which is the real objection: the question says DISTINCT TODAY, so every visitor")
+    print(f"  seen today is still needed today.  The only thing that frees the state is the")
+    print(f"  day boundary, and that is a property of the question, not a bound you chose.")
+
+    # the day boundary IS the bound -- measured over three days
+    per_day = [stream_of(c, 2, seed=s) for s, c in ((1, 400), (2, 900), (3, 300))]
+    all_days = [(f"d{i}:{v}", t) for i, day in enumerate(per_day) for v, t in day]
+    worst_day = max(exact_distinct(d)[1] for d in per_day)
+    whole_run = exact_distinct(all_days)[1]
+    print(f"\n  three days of {[len(d) for d in per_day]} views: per-day states "
+          f"{[exact_distinct(d)[0] for d in per_day]},")
+    print(f"  so the exact answer needs {worst_day} slots at a time and not {whole_run} -- the window")
+    print(f"  bounds the state, and it bounds it at the busiest day's cardinality.")
+    assert worst_day == 900 and whole_run == 1600, (worst_day, whole_run)
+    assert worst_day < whole_run, "the day boundary must actually release state"
+
+    # the sketch: constant state at every cardinality
+    print(f"\n  k-minimum-values sketch, k = {K}:")
+    print(f"    {'distinct':>9} {'exact slots':>12} {'estimate':>9} {'sketch slots':>13} {'error':>7}")
+    rows = []
+    for c in (50, 255, 256, 1_000, 4_000, 20_000):
+        views = stream_of(c, 2)
+        exact, exact_slots = exact_distinct(views)
+        est, sketch_slots = kmv_sketch(views)
+        err = abs(est - exact) / exact
+        rows.append((exact, exact_slots, est, sketch_slots, err))
+        print(f"    {exact:>9,} {exact_slots:>12,} {est:>9,} {sketch_slots:>13} {err:>6.1%}")
+    assert all(r[1] == r[0] for r in rows), "the exact state is the cardinality, by definition"
+    assert {r[3] for r in rows} == {50, 255, K}, [r[3] for r in rows]
+    big = [r for r in rows if r[0] >= K]
+    assert all(r[3] == K for r in big), "the sketch state must not grow with the cardinality"
+    # the error bar is not a guess: a k-minimum-values sketch has a standard error of
+    # 1/sqrt(k), so at k = 256 that is 6.25%, and the rows have to sit inside a few of those
+    # rather than inside a threshold picked to make them pass.
+    se = K ** -0.5
+    assert max(r[4] for r in big) < 3 * se, (max(r[4] for r in big), se)
+    print(f"    the exact state grows {rows[-1][1] // rows[1][1]}x across these rows and the sketch state does not")
+    print(f"    grow at all; the worst error over the rows at or above k is "
+          f"{max(r[4] for r in big):.1%}, against the")
+    print(f"    sketch's own standard error of 1/sqrt({K}) = {se:.2%}.")
+
+    # boundaries: below k the sketch is the set, at k the estimator takes over
+    under = kmv_sketch(stream_of(K - 1, 3))
+    at_k = kmv_sketch(stream_of(K, 3))
+    assert under == (K - 1, K - 1), under
+    assert at_k[1] == K and at_k[0] != K, at_k
+    print(f"\n  boundaries: at {K - 1} distinct the sketch holds every hash and is EXACT ({under[0]}); at")
+    print(f"  {K} it is full, the estimator takes over, and it already disagrees ({at_k[0]}) -- so the")
+    print(f"  exactness ends one visitor before the memory does.")
+    assert kmv_sketch([]) == (0, 0), "an empty day is 0 distinct, not an error"
+    assert exact_distinct([]) == (0, 0)
+    assert kmv_sketch([("solo", 0)] * 1000) == (1, 1), "one visitor, a thousand views"
+    assert exact_distinct([("solo", 0)] * 1000) == (1, 1)
+    print(f"  an empty day gives 0 and a thousand views from one visitor give 1, in both the")
+    print(f"  exact set and the sketch -- repeats hash to a value already held, so a repeat")
+    print(f"  costs nothing and needs no lookup against the past.")
+
+    # many inputs: the sketch's error is bounded and the expiry's error has one sign
+    rng = random.Random(20260304)
+    errs, worst_case, overcounts = [], 0, 0
+    for trial in range(20):
+        c = rng.randint(300, 1_200)
+        views = stream_of(c, rng.randint(1, 2), seed=1000 + trial)
+        exact, _ = exact_distinct(views)
+        est, slots = kmv_sketch(views)
+        assert slots == K, (c, slots)
+        assert exact == c, (c, exact)
+        errs.append(abs(est - exact) / exact)
+        # the expiry is checked on a short stream of its own: `distinct_with_expiry` rescans
+        # the live set on every view, which is quadratic, and that cost is itself part of the
+        # objection to keeping the visitors at all.
+        small = [(f"v{rng.randrange(40)}", rng.randint(0, 500)) for _ in range(120)]
+        small.sort(key=lambda e: e[1])
+        exact_small = exact_distinct(small)[0]
+        # the allowance spans both regimes on purpose: 0 drops almost everybody and 600 is
+        # wider than any silence in a 500-hour day, so it drops nobody at all.
+        got, _, rec = distinct_with_expiry(small, rng.choice((0, 10, 40, 200, 600)))
+        assert got >= exact_small, (got, exact_small)              # it can only overstate
+        assert got == exact_small + rec, (got, exact_small, rec)   # by exactly the recounts
+        overcounts += got > exact_small
+    mean_err = sum(errs) / len(errs)
+    worst_case = max(errs)
+    print(f"\n  20 random days from 300 to 1,200 visitors: the sketch held {K} slots every time,")
+    print(f"  mean error {mean_err:.2%} against the predicted {se:.2%}, worst {worst_case:.2%}.")
+    # CORRECTED CLAIM.  The first version asserted the expiring counter overstates on EVERY
+    # random day, and the measurement refused it: an allowance wider than every silence in a
+    # day's stream drops nobody and is therefore exact.  What survives is the directional
+    # claim, which is the one that matters -- the expiry never understates, and when it is
+    # wrong it is wrong by exactly the number of visitors it met twice.
+    print(f"  the expiring exact counter overstated on {overcounts} of 20 days and understated on 0;")
+    print(f"  on the other {20 - overcounts} the allowance exceeded every silence in that day, so it dropped")
+    print(f"  nobody -- the bound is only ever as safe as the quietest visitor, and widening it")
+    print(f"  until it is safe is the same as not bounding it.")
+    assert 0.3 * se < mean_err < 2.0 * se, (mean_err, se)
+    assert worst_case < 4 * se, (worst_case, se)
+    assert 0 < overcounts < 20, overcounts
+
+    # the scale the question names, priced rather than argued
+    VISITORS_PER_DAY = 30_000_000
+    bytes_exact = VISITORS_PER_DAY * 16            # 16 bytes for a visitor id, hash set aside
+    bytes_sketch = K * 8                           # k doubles
+    print(f"\n  at {VISITORS_PER_DAY:,} distinct visitors a day:")
+    print(f"    exact  : {bytes_exact / 1e9:.2f} GB of visitor ids, per counter, per day")
+    print(f"    sketch : {bytes_sketch:,} bytes, whatever the cardinality")
+    print(f"    {bytes_exact // bytes_sketch:,}x, and the sketch's cost does not depend on the answer --")
+    print(f"    which is the property the chapter's one-number accumulator had and the exact")
+    print(f"    distinct count never did.")
+    assert bytes_exact // bytes_sketch == 234_375
+    assert bytes_sketch == 2048
+    print("\nall assertions passed")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+Running it prints:
+
+```
+VIEWS = a@1  a@3  b@50  b@90  a@130  b@220  a@245  b@260  a@540    (9 views)
+  distinct visitors      : 2   (2 slots held)
+  +1 per event           : 9   (1 slot held -- and the wrong question)
+  the chapter's accumulator inflates the answer 4.5x here, and the
+  factor is the average views per visitor -- a number nobody reports, so the error
+  is not visible in the output at all.
+
+  ttl = 295 (the longest silence) : 2 distinct, 0 recounts  (correct)
+  ttl = 294                      : 3 distinct, 1 recount   OVERSTATED
+  the chapter's tight allowance made a TOTAL too low by what it dropped; here it
+  makes a COUNT too high by what it dropped, because the dropped thing was the
+  evidence that the visitor was not new.
+
+  visitors saved by a day-long ttl, at any moment in this example: 0
+  which is the real objection: the question says DISTINCT TODAY, so every visitor
+  seen today is still needed today.  The only thing that frees the state is the
+  day boundary, and that is a property of the question, not a bound you chose.
+
+  three days of [800, 1800, 600] views: per-day states [400, 900, 300],
+  so the exact answer needs 900 slots at a time and not 1600 -- the window
+  bounds the state, and it bounds it at the busiest day's cardinality.
+
+  k-minimum-values sketch, k = 256:
+     distinct  exact slots  estimate  sketch slots   error
+           50           50        50            50   0.0%
+          255          255       255           255   0.0%
+          256          256       257           256   0.4%
+        1,000        1,000       983           256   1.7%
+        4,000        4,000     3,721           256   7.0%
+       20,000       20,000    20,004           256   0.0%
+    the exact state grows 78x across these rows and the sketch state does not
+    grow at all; the worst error over the rows at or above k is 7.0%, against the
+    sketch's own standard error of 1/sqrt(256) = 6.25%.
+
+  boundaries: at 255 distinct the sketch holds every hash and is EXACT (255); at
+  256 it is full, the estimator takes over, and it already disagrees (257) -- so the
+  exactness ends one visitor before the memory does.
+  an empty day gives 0 and a thousand views from one visitor give 1, in both the
+  exact set and the sketch -- repeats hash to a value already held, so a repeat
+  costs nothing and needs no lookup against the past.
+
+  20 random days from 300 to 1,200 visitors: the sketch held 256 slots every time,
+  mean error 3.43% against the predicted 6.25%, worst 8.54%.
+  the expiring exact counter overstated on 19 of 20 days and understated on 0;
+  on the other 1 the allowance exceeded every silence in that day, so it dropped
+  nobody -- the bound is only ever as safe as the quietest visitor, and widening it
+  until it is safe is the same as not bounding it.
+
+  at 30,000,000 distinct visitors a day:
+    exact  : 0.48 GB of visitor ids, per counter, per day
+    sketch : 2,048 bytes, whatever the cardinality
+    234,375x, and the sketch's cost does not depend on the answer --
+    which is the property the chapter's one-number accumulator had and the exact
+    distinct count never did.
+
+all assertions passed
+```
+
+</details>
+
 </details>
 <details>
 <summary><b>Variation 3</b> — the abandoned shopping cart <i>(looks like commerce)</i></summary>
@@ -466,6 +824,404 @@ case the appealing first answer is to materialise a sequence you cannot afford.
 **Why it is not obvious.** Here the expiry is the *feature* and the chapter's silent restart is the specified behaviour — which inverts everything and leaves one real problem: the user who returns after the allowance expects their cart back, so the state cannot simply be dropped. The answer is the model's second escape, made concrete: write the cart to durable storage on expiry and read it back on return, so memory is bounded by **active** users while correctness is bounded by nothing. Noticing that "expire" and "forget" were conflated is the whole move.
 
 **Where it lands.** `dropStale` writing the accumulator out rather than deleting it, and `add` reading it back when a key reappears.
+
+
+<details>
+<summary><b>The whole program</b> for this variation — runnable, no animation</summary>
+
+This is **the abandoned shopping cart** solved on its own: a complete file, every helper included, asserting its own results. It is run on every build.
+
+```python
+#!/usr/bin/env python3
+"""Variation 3 -- the abandoned shopping cart (looks like commerce). Standalone and runnable.
+
+  Hold each shopper's cart while they shop.  Carts that have been inactive for a week are
+  expired, because there are far more shoppers than active ones.  A shopper comes back after
+  ten days and expects their cart to be there.
+
+Here the expiry is the FEATURE, not the compromise -- the chapter's silent restart is the
+specified behaviour -- and that inverts the whole problem, leaving one real contradiction:
+the cart must be bounded in memory and unbounded in time.  The move is to notice that EXPIRE
+and FORGET were conflated.  Dropping a cart from memory writes it out; a shopper who comes
+back reads it in.  Then memory is bounded by ACTIVE shoppers and correctness is bounded by
+nothing -- and the honest price, measured below, is that durable storage is now bounded by
+nothing either.  The fix does not shrink the data, it moves it to where growth is affordable.
+
+Run it:  python3 programs/ch07_v3.py
+"""
+import random
+
+# The chapter's nine seed events, read as cart additions: (shopper, item_price, hour).  The
+# prices are the chapter's values, so the true cart totals are its 24 and 21.  Shopper 'a' is
+# silent from hour 245 to hour 540 -- the chapter's longest gap, 295 hours, which is ten days
+# and is exactly the shopper the product requirement is about.
+ADDITIONS = [("a", 5, 1), ("a", 3, 3), ("b", 4, 50), ("b", 7, 90), ("a", 2, 130),
+             ("b", 9, 220), ("a", 6, 245), ("b", 1, 260), ("a", 8, 540)]
+WEEK = 168                 # the inactivity allowance the product chose: a week in hours
+TRUE_CARTS = {"a": [5, 3, 2, 6, 8], "b": [4, 7, 9, 1]}
+TRUE_VALUE = {"a": 24, "b": 21}
+INFINITY = float("inf")
+# The scale at which bounding memory is worth anything, from the chapter's asymptotic case:
+# many shoppers who visit once, plus one who never leaves.
+ONEOFF = 2_000
+BIG_TTL = 100
+
+
+def longest_silence(additions, shopper):
+    """The longest gap between two additions by one shopper.  A property of the DATA, not of
+    the design, and knowable only afterwards -- which is why the week is a guess about
+    shoppers rather than a derivation from anything."""
+    worst, prev = 0, None
+    for s, _, t in additions:
+        if s == shopper:
+            if prev is not None:
+                worst = max(worst, t - prev)
+            prev = t
+    return worst
+
+
+def add(carts, last, event):
+    """One item onto one cart.  The whole computation, and never the problem."""
+    s, price, t = event
+    carts.setdefault(s, []).append(price)
+    last[s] = t
+
+
+def expire_by_deleting(carts, last, now, ttl):
+    """The expiry as written when "expire" is read as "forget": the cart is deleted.
+
+    It needs `last`, a second number per live cart whose only purpose is this comparison.
+    Afterwards a shopper who returns is indistinguishable from a new one, because the thing
+    that would have told them apart is what was deleted.  Returns the carts dropped.
+    """
+    gone = {s: carts[s] for s in list(carts) if now - last[s] > ttl}
+    for s in gone:
+        del carts[s]
+        del last[s]
+    return gone
+
+
+def expire_by_writing_out(carts, last, store, now, ttl):
+    """The same expiry with one line changed: the cart is written to durable storage on its
+    way out of memory.
+
+    Nothing about the bound changes -- memory still holds only active shoppers -- but the
+    deletion has become a MOVE, so the information needed to recognise a returning shopper
+    still exists somewhere.  Returns the carts moved.
+    """
+    gone = {s: carts[s] for s in list(carts) if now - last[s] > ttl}
+    for s, items in gone.items():
+        store[s] = store.get(s, []) + items
+        del carts[s]
+        del last[s]
+    return gone
+
+
+def run(additions, ttl, store=None):
+    """The whole stream at one allowance, with or without a store behind it.
+
+    Without a store, a returning shopper starts from an empty cart.  With one, a cart absent
+    from memory is read back before the item is added, which is the only difference and is the
+    entire answer.  Returns (carts_in_memory, store, peak_carts_held, reloads).
+    """
+    carts, last, reloads = {}, {}, 0
+    peak = 0
+    for event in additions:
+        s, _, t = event
+        if store is None:
+            expire_by_deleting(carts, last, t, ttl)
+        else:
+            expire_by_writing_out(carts, last, store, t, ttl)
+            if s not in carts and s in store:
+                carts[s] = store.pop(s)        # the shopper came back: read the cart in
+                reloads += 1
+        add(carts, last, event)
+        peak = max(peak, len(carts))
+    return carts, store, peak, reloads
+
+
+def final_carts(additions, ttl, use_store):
+    """What each shopper is shown the next time they look, which is memory plus whatever is
+    in the store -- the only measurement the shopper can actually make."""
+    store = {} if use_store else None
+    carts, store, peak, reloads = run(additions, ttl, store)
+    out = {s: list(items) for s, items in carts.items()}
+    if store:
+        for s, items in store.items():
+            out[s] = items + out.get(s, [])
+    return out, peak, reloads
+
+
+def carts_held_at(additions, ttl, t):
+    """How many carts memory holds at hour t, if nothing arrives then.
+
+    Counting at the end of the run is the wrong measurement: an expiry is immediately followed
+    by the addition that re-creates the cart, so the saving is invisible there.  A quiet moment
+    shows it."""
+    last = {}
+    for s, _, at in additions:
+        if at <= t:
+            last[s] = at
+    return sum(1 for s in last if t - last[s] <= ttl)
+
+
+def is_suffix(part, whole):
+    """Whether `part` is a tail of `whole`.  The precise shape of the damage a deletion does:
+    the shopper keeps what they added after the cart was dropped and nothing before it."""
+    return part == whole[len(whole) - len(part):] if part else True
+
+
+def main():
+    silences = {s: longest_silence(ADDITIONS, s) for s in ("a", "b")}
+    print("ADDITIONS =", "  ".join(f"{s}@{t}:{p}" for s, p, t in ADDITIONS))
+    print(f"  true carts {TRUE_CARTS}, values {TRUE_VALUE}")
+    print(f"  longest silence per shopper {silences}, allowance {WEEK} hours (a week)\n")
+
+    deleting, peak_del, _ = final_carts(ADDITIONS, WEEK, use_store=False)
+    writing, peak_wr, reloads = final_carts(ADDITIONS, WEEK, use_store=True)
+    keeping, peak_keep, _ = final_carts(ADDITIONS, INFINITY, use_store=False)
+    print(f"  never expire          : {keeping}   ({peak_keep} carts held)")
+    print(f"  expire by deleting    : {deleting}   ({peak_del} carts held)")
+    print(f"  expire by writing out : {writing}   ({peak_wr} carts held, {reloads} reload)")
+
+    assert keeping == TRUE_CARTS, keeping
+    assert writing == TRUE_CARTS, "writing the cart out and reading it back must be exact"
+    assert deleting != TRUE_CARTS, "deleting must lose the cart, or there is no problem here"
+    # CORRECTED CLAIM.  The first expectation was {"a": [8], "b": [4, 7, 9, 1]} -- shopper 'b'
+    # untouched, because b's longest silence (130) is inside the allowance.  The measurement
+    # refused it: b's LAST addition is at hour 260 and the sweep runs when a's addition
+    # arrives at hour 540, so b has been quiet 280 hours by then and the cart is swept.  There
+    # are two distinct losses here, not one: 'a' is dropped and comes back, which restarts the
+    # cart, and 'b' is dropped and does not come back, which erases it.  A silence inside the
+    # allowance is no protection -- what matters is the silence at the moment somebody else's
+    # event triggers the sweep.
+    assert deleting == {"a": [8]}, deleting
+    assert "b" not in deleting, "b's cart is swept when a's hour-540 addition arrives"
+    assert reloads == 1, reloads
+    lost_a = TRUE_CARTS["a"][:-1]
+    quiet_b = 540 - 260
+    assert sum(lost_a) == 16 and sum(deleting["a"]) == 8
+    print(f"\n  shopper 'a' was silent {silences['a']} hours, {silences['a'] - WEEK} past the allowance, so they return to a")
+    print(f"  cart holding {sum(deleting['a'])} instead of {TRUE_VALUE['a']}: {len(lost_a)} items worth {sum(lost_a)} silently gone.")
+    print(f"  shopper 'b''s longest silence is only {silences['b']} hours and the cart is lost anyway: by the")
+    print(f"  time a's hour-540 addition triggers a sweep, b has been quiet {quiet_b} hours, so b's")
+    print(f"  whole cart is erased with nothing to come back to.  Two different losses -- a")
+    print(f"  restart and an erasure -- and only the first one looks like the chapter's.")
+    assert quiet_b > WEEK and silences["b"] <= WEEK, (quiet_b, silences["b"])
+
+    # the damage has a shape, and it is always this shape
+    for s, items in deleting.items():   # only 'a' survives in memory at all
+        assert is_suffix(items, TRUE_CARTS[s]), (s, items)
+        assert sum(items) <= TRUE_VALUE[s], (s, items)
+    assert not is_suffix([5, 3], TRUE_CARTS["a"]), "a prefix is NOT what survives"
+    print(f"\n  what survives is always a SUFFIX of the true cart -- the items added since the")
+    print(f"  drop -- so the error is one-directional: a cart can only ever be too small.")
+
+    # and the store makes it exact at ANY allowance, including none at all
+    for ttl in (0, 1, WEEK, silences["a"] - 1, INFINITY):
+        got, peak, _ = final_carts(ADDITIONS, ttl, use_store=True)
+        assert got == TRUE_CARTS, (ttl, got)
+    zero, zero_peak, zero_reloads = final_carts(ADDITIONS, 0, use_store=True)
+    assert zero == TRUE_CARTS and zero_peak == 1, (zero, zero_peak)
+    print(f"  with a store, every allowance from 0 to never is exact; at ttl = 0 memory holds")
+    print(f"  {zero_peak} cart at a time and the answer is still {zero['a'] == TRUE_CARTS['a'] and 'right' or 'wrong'} after {zero_reloads} reloads.")
+    assert zero_reloads == 7, zero_reloads
+
+    # the boundary the comparison decides
+    tight, _, _ = final_carts(ADDITIONS, silences["a"] - 1, use_store=False)
+    exact, _, _ = final_carts(ADDITIONS, silences["a"], use_store=False)
+    assert exact == TRUE_CARTS, "an allowance equal to the longest silence drops nobody"
+    assert tight != TRUE_CARTS, tight
+    # and this allowance isolates the two failure modes: at 294 hours only 'a' is dropped and
+    # restarted, while 'b' -- quiet 280 hours when the sweep runs -- is still inside it.  The
+    # erasure of 'b' needs an allowance tighter than 280, which the week-long one is.
+    assert tight == {"a": [8], "b": [4, 7, 9, 1]}, tight
+    print(f"\n  boundary: ttl = {silences['a']} (the silence itself) keeps every cart; ttl = {silences['a'] - 1} loses one.")
+    print(f"  The comparison is `now - last > ttl`, so a silence EQUAL to the allowance is")
+    print(f"  inside it -- one hour decides whether a shopper's cart exists.  At {silences['a'] - 1} hours only")
+    print(f"  'a' is lost: {tight}, with 'b' kept because 280 hours of")
+    print(f"  quiet is inside a 294-hour allowance and outside a 168-hour one.")
+
+    # the memory saving at this scale, measured at every hour -- and measured twice, because
+    # where you stop looking changes the number.
+    end = max(t for *_, t in ADDITIONS)
+    def saving_at(ttl, horizon):
+        return max(carts_held_at(ADDITIONS, INFINITY, t) - carts_held_at(ADDITIONS, ttl, t)
+                   for t in range(horizon + 1))
+    def best_hour(ttl, horizon):
+        return max(range(horizon + 1),
+                   key=lambda t: carts_held_at(ADDITIONS, INFINITY, t) - carts_held_at(ADDITIONS, ttl, t))
+    beyond = end + WEEK + 2
+    print(f"\n  carts the allowance saves, as a maximum over every hour:")
+    print(f"    {'allowance':>12} {'up to hour ' + str(end):>16} {'up to hour ' + str(beyond):>16}")
+    for ttl in (WEEK, 294):
+        print(f"    {ttl:>12} {saving_at(ttl, end):>16} {saving_at(ttl, beyond):>16}")
+    # MEASURED, and the first write-up of this said ZERO on the strength of the chapter's
+    # figure.  Both halves are true and they are different allowances: at the chapter's
+    # 294-hour allowance the saving really is 0 for every hour up to the last addition, which
+    # is the chapter's own measurement reproduced.  At the week-long allowance the saving is 2,
+    # reached at hour {h} -- and the hour is the whole story, because by then BOTH carts have
+    # already been erased.  The memory the bound reclaims is the cart the shopper lost, so the
+    # saving and the damage are one measurement seen from two sides.
+    h = best_hour(WEEK, end)
+    assert saving_at(294, end) == 0, saving_at(294, end)
+    assert saving_at(294, beyond) == 1, saving_at(294, beyond)
+    assert saving_at(WEEK, end) == 2, saving_at(WEEK, end)
+    assert h == 429, h
+    assert carts_held_at(ADDITIONS, WEEK, h) == 0 and carts_held_at(ADDITIONS, INFINITY, h) == 2
+    assert h > 245 + WEEK and h > 260 + WEEK, "both carts are already past their allowance"
+    print(f"  at the chapter's 294-hour allowance the saving is 0 for every hour up to the last")
+    print(f"  addition -- the chapter's own figure -- so the correctness cost arrives before any")
+    print(f"  memory benefit.  At the week-long allowance it is 2, reached at hour {h}, and the hour")
+    print(f"  is the whole story: shopper 'a' expired at {245 + WEEK} and 'b' at {260 + WEEK}, so the two carts the")
+    print(f"  bound has stopped holding are precisely the two the shoppers no longer have.  A")
+    print(f"  saving visible only after the data is gone is the damage, measured from the other")
+    print(f"  side.  The real case for the bound is asymptotic, and the honest thing is to go")
+    print(f"  and measure it there.")
+
+    # ...measured there
+    big = [(f"once{i}", 1, i) for i in range(1, ONEOFF + 1)]
+    big += [("regular", 1, t) for t in range(5, ONEOFF, 10)]
+    big.sort(key=lambda e: e[2])
+    big_end = max(t for *_, t in big)
+    unbounded = carts_held_at(big, INFINITY, big_end)
+    bounded = carts_held_at(big, BIG_TTL, big_end)
+    big_del, _, _ = final_carts(big, BIG_TTL, use_store=False)
+    big_store_carts, big_peak, big_reloads = final_carts(big, BIG_TTL, use_store=True)
+    truth_big = {}
+    for s, p, _ in big:
+        truth_big.setdefault(s, []).append(p)
+    print(f"\n  at {ONEOFF:,} one-visit shoppers plus one regular, observed at hour {big_end}:")
+    print(f"    never expire : {unbounded:,} carts in memory")
+    print(f"    ttl = {BIG_TTL}    : {bounded} carts in memory  "
+          f"({unbounded - bounded:,} saved, {bounded / unbounded:.1%} of the state)")
+    assert (unbounded, bounded) == (2001, 102), (unbounded, bounded)
+    assert bounded < unbounded, "the asymptotic case must actually save memory"
+    assert bounded / unbounded < 0.06
+    assert big_store_carts == truth_big, "and the store keeps it exact at scale"
+    assert big_del != truth_big, "while deleting does not"
+    print(f"    with a store the carts are exact ({big_reloads} reloads); by deleting they are not.")
+
+    # the honest price of the fix, which is not that it is free
+    store_after = {}
+    run(big, BIG_TTL, store_after)
+    print(f"\n  and the price: the store now holds {len(store_after):,} carts while memory holds {big_peak}.")
+    print(f"  Memory is bounded by ACTIVE shoppers; durable storage is bounded by nothing at")
+    print(f"  all, because every shopper who ever visited is still in it.  The fix did not")
+    print(f"  shrink the data, it moved the growth to the place where growth is affordable --")
+    print(f"  and a store that is never pruned is the next version of this same conversation.")
+    assert len(store_after) > big_peak * 10, (len(store_after), big_peak)
+    assert len(store_after) == 1_899, len(store_after)
+
+    # many inputs: the store is always exact, deleting always loses a suffix and never more
+    rng = random.Random(20260303)
+    lost_cases, exact_cases = 0, 0
+    for _ in range(400):
+        n = rng.randint(1, 18)
+        ev = sorted(((rng.choice("abcd"), rng.randint(1, 9), rng.randint(0, 400))
+                     for _ in range(n)), key=lambda e: e[2])
+        truth = {}
+        for s, p, _ in ev:
+            truth.setdefault(s, []).append(p)
+        gap = max((longest_silence(ev, s) for s in truth), default=0)
+        for ttl in (0, 1, gap // 2, max(gap - 1, 0), gap, INFINITY):
+            with_store, _, _ = final_carts(ev, ttl, use_store=True)
+            assert with_store == truth, (ev, ttl)
+            plain, _, _ = final_carts(ev, ttl, use_store=False)
+            for s, items in plain.items():
+                assert is_suffix(items, truth[s]), (ev, ttl, s, items)
+                assert sum(items) <= sum(truth[s]), (ev, ttl, s)
+            if plain == truth:
+                exact_cases += 1
+            else:
+                lost_cases += 1
+        # CORRECTED CLAIM.  "An allowance equal to the longest silence reproduces every cart"
+        # is FALSE, and a random stream falsified it: a shopper whose last addition is more
+        # than the allowance before the stream ends is swept by somebody ELSE's addition, so
+        # their cart is absent rather than short.  What is true, and is the stronger statement,
+        # is that at ttl >= the longest silence no cart is ever dropped AND re-created -- so
+        # every cart still in memory holds its WHOLE history, never a suffix of it.
+        at_gap = final_carts(ev, gap, use_store=False)[0]
+        assert all(at_gap[sh] == truth[sh] for sh in at_gap), (ev, gap, at_gap)
+    print(f"\n  400 random streams at six allowances each: the store reproduced the true cart")
+    print(f"  every single time; plain expiry was exact in {exact_cases:,} of {exact_cases + lost_cases:,} runs and in the other")
+    print(f"  {lost_cases:,} it returned a strict suffix -- never a wrong item, never an extra one, only")
+    print(f"  a shorter cart.  At an allowance equal to the longest silence no cart was ever")
+    print(f"  restarted: every cart still in memory held its whole history, and the ones missing")
+    print(f"  were missing entirely.")
+    assert lost_cases > 0 and exact_cases > 0
+    assert (exact_cases, lost_cases) == (677, 1_723), (exact_cases, lost_cases)
+    print("\nall assertions passed")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+Running it prints:
+
+```
+ADDITIONS = a@1:5  a@3:3  b@50:4  b@90:7  a@130:2  b@220:9  a@245:6  b@260:1  a@540:8
+  true carts {'a': [5, 3, 2, 6, 8], 'b': [4, 7, 9, 1]}, values {'a': 24, 'b': 21}
+  longest silence per shopper {'a': 295, 'b': 130}, allowance 168 hours (a week)
+
+  never expire          : {'a': [5, 3, 2, 6, 8], 'b': [4, 7, 9, 1]}   (2 carts held)
+  expire by deleting    : {'a': [8]}   (2 carts held)
+  expire by writing out : {'a': [5, 3, 2, 6, 8], 'b': [4, 7, 9, 1]}   (2 carts held, 1 reload)
+
+  shopper 'a' was silent 295 hours, 127 past the allowance, so they return to a
+  cart holding 8 instead of 24: 4 items worth 16 silently gone.
+  shopper 'b''s longest silence is only 130 hours and the cart is lost anyway: by the
+  time a's hour-540 addition triggers a sweep, b has been quiet 280 hours, so b's
+  whole cart is erased with nothing to come back to.  Two different losses -- a
+  restart and an erasure -- and only the first one looks like the chapter's.
+
+  what survives is always a SUFFIX of the true cart -- the items added since the
+  drop -- so the error is one-directional: a cart can only ever be too small.
+  with a store, every allowance from 0 to never is exact; at ttl = 0 memory holds
+  1 cart at a time and the answer is still right after 7 reloads.
+
+  boundary: ttl = 295 (the silence itself) keeps every cart; ttl = 294 loses one.
+  The comparison is `now - last > ttl`, so a silence EQUAL to the allowance is
+  inside it -- one hour decides whether a shopper's cart exists.  At 294 hours only
+  'a' is lost: {'b': [4, 7, 9, 1], 'a': [8]}, with 'b' kept because 280 hours of
+  quiet is inside a 294-hour allowance and outside a 168-hour one.
+
+  carts the allowance saves, as a maximum over every hour:
+       allowance   up to hour 540   up to hour 710
+             168                2                2
+             294                0                1
+  at the chapter's 294-hour allowance the saving is 0 for every hour up to the last
+  addition -- the chapter's own figure -- so the correctness cost arrives before any
+  memory benefit.  At the week-long allowance it is 2, reached at hour 429, and the hour
+  is the whole story: shopper 'a' expired at 413 and 'b' at 428, so the two carts the
+  bound has stopped holding are precisely the two the shoppers no longer have.  A
+  saving visible only after the data is gone is the damage, measured from the other
+  side.  The real case for the bound is asymptotic, and the honest thing is to go
+  and measure it there.
+
+  at 2,000 one-visit shoppers plus one regular, observed at hour 2000:
+    never expire : 2,001 carts in memory
+    ttl = 100    : 102 carts in memory  (1,899 saved, 5.1% of the state)
+    with a store the carts are exact (0 reloads); by deleting they are not.
+
+  and the price: the store now holds 1,899 carts while memory holds 102.
+  Memory is bounded by ACTIVE shoppers; durable storage is bounded by nothing at
+  all, because every shopper who ever visited is still in it.  The fix did not
+  shrink the data, it moved the growth to the place where growth is affordable --
+  and a store that is never pruned is the next version of this same conversation.
+
+  400 random streams at six allowances each: the store reproduced the true cart
+  every single time; plain expiry was exact in 677 of 2,400 runs and in the other
+  1,723 it returned a strict suffix -- never a wrong item, never an extra one, only
+  a shorter cart.  At an allowance equal to the longest silence no cart was ever
+  restarted: every cart still in memory held its whole history, and the ones missing
+  were missing entirely.
+
+all assertions passed
+```
+
+</details>
 
 </details>
 <details>
@@ -477,7 +1233,697 @@ case the appealing first answer is to materialise a sequence you cannot afford.
 
 **Where it lands.** `acc` moved out of memory entirely, so `dropStale` has nothing to drop — the one variation where the traced program is the wrong shape rather than a tunable one.
 
+
+<details>
+<summary><b>The whole program</b> for this variation — runnable, no animation</summary>
+
+This is **the fraud score over a lifetime** solved on its own: a complete file, every helper included, asserting its own results. It is run on every build.
+
+```python
+#!/usr/bin/env python3
+"""Variation 4 -- the fraud score over a lifetime (looks like risk). Standalone and runnable.
+
+  Every account carries a risk score: the sum of the points its events have ever earned.
+  Score each account on its ENTIRE history.  Accounts lie dormant for years and must come
+  back with the score they left with.
+
+The requirement forbids every bound, which makes this the one variation where the chapter's
+answer is simply unavailable -- and the useful response is to stop treating the score as
+stream state at all.  It belongs in a store keyed by account, read and written per event, so
+the streaming layer holds NOTHING between events and the memory question disappears: state
+that must outlive the stream is not stream state.  What makes this worth running rather than
+asserting is the sequel.  A store read per event is expensive, so a bounded CACHE goes in
+front of it -- and that cache is bounded by exactly the rule the chapter used on the state,
+with the opposite consequence, because a cache miss RE-READS and a state expiry RESTARTS.
+The same bound is safe in one place and a published laundering schedule in the other.
+
+Run it:  python3 programs/ch07_v4.py
+"""
+import random
+
+# The chapter's nine seed events, read as risk signals: (account, points, day).  The points
+# are the chapter's values, so the true lifetime scores are its 24 and 21.  Account 'a' is
+# silent for 295 days -- the chapter's longest gap -- which is the dormancy the requirement
+# is about.
+SIGNALS = [("a", 5, 1), ("a", 3, 3), ("b", 4, 50), ("b", 7, 90), ("a", 2, 130),
+           ("b", 9, 220), ("a", 6, 245), ("b", 1, 260), ("a", 8, 540)]
+TRUE = {"a": 24, "b": 21}
+DORMANCY = 295              # 540 - 245: how long account 'a' goes quiet
+INFINITY = float("inf")
+# The scale at which any of this matters: many accounts seen once, one that never stops.
+ONEOFF = 2_000
+BIG_TTL = 100
+
+
+def true_scores(signals):
+    """The requirement, written out directly: every point an account ever earned."""
+    out = {}
+    for acct, pts, _ in signals:
+        out[acct] = out.get(acct, 0) + pts
+    return out
+
+
+def score_in_memory_forever(signals):
+    """Answer one: keep every account's score in memory and never release it.
+
+    Correct, and it is the answer the requirement literally asks for, which is why it is the
+    one to put first.  Its state is one number per account EVER SEEN, and that count only
+    rises, so the process is a slow leak with a correct output.  Returns (scores, peak_held).
+    """
+    acc, peak = {}, 0
+    for acct, pts, _ in signals:
+        acc[acct] = acc.get(acct, 0) + pts
+        peak = max(peak, len(acc))
+    return acc, peak
+
+
+def score_with_expiry(signals, ttl):
+    """Answer two: the chapter's bound, applied to the score.
+
+    Memory becomes bounded by active accounts, and a dormant account's score is deleted.  The
+    next event from it looks like a first event, so the score restarts at zero -- which is not
+    a degraded answer but the WRONG answer to the question asked, and an answer an adversary
+    can arrange.  Returns (scores_in_memory, peak_held, restarts).
+    """
+    acc, last, restarts, peak = {}, {}, 0, 0
+    seen_before = set()
+    for acct, pts, t in signals:
+        for old in [k for k in acc if t - last[k] > ttl]:
+            del acc[old]
+            del last[old]
+        if acct not in acc and acct in seen_before:
+            restarts += 1
+        acc[acct] = acc.get(acct, 0) + pts
+        last[acct] = t
+        seen_before.add(acct)
+        peak = max(peak, len(acc))
+    return acc, peak, restarts
+
+
+def score_in_a_store(signals):
+    """Answer three: the score is not stream state.  Read it, add to it, write it back, and
+    hold nothing.
+
+    The mechanism is that the streaming layer's memory no longer depends on the account count
+    at all -- between two events it holds zero scores, so there is no quantity to bound and
+    the memory question has been dissolved rather than answered.  The cost moves to the store:
+    one read and one write per event.  Returns (store, held_between_events, store_ops).
+    """
+    store, high_water, ops = {}, 0, 0
+    for acct, pts, _ in signals:
+        held = {}                                  # the streaming layer, between events
+        high_water = max(high_water, len(held))
+        held[acct] = store.get(acct, 0) + pts      # read
+        ops += 1
+        store[acct] = held.pop(acct)               # update, write, forget
+        ops += 1
+    return store, high_water, ops
+
+
+def score_with_cache(signals, capacity):
+    """Answer three with the obvious optimisation: a cache of `capacity` accounts in front of
+    the store, evicting the least recently used.
+
+    This is the chapter's bound again -- a fixed number of accounts in memory and the rest
+    dropped -- and it is CORRECT at every capacity, including zero.  The difference is one
+    line: an evicted account is written to the store on its way out, so the next event for it
+    reads the score back rather than starting from nothing.  A miss costs a read; an expiry
+    cost the answer.  Returns (scores, store_reads, store_writes, peak_held).
+    """
+    store, cache = {}, {}
+    reads = writes = peak = 0
+    for acct, pts, _ in signals:
+        if acct in cache:
+            val = cache.pop(acct)                  # a hit, and it becomes most-recent below
+        else:
+            reads += 1
+            val = store.get(acct, 0)               # a miss: the score is still there
+        cache[acct] = val + pts
+        while len(cache) > capacity:
+            oldest = next(iter(cache))             # dicts keep insertion order: LRU first
+            store[oldest] = cache.pop(oldest)
+            writes += 1
+        peak = max(peak, len(cache))
+    for acct, val in cache.items():
+        store[acct] = val
+        writes += 1
+    return store, reads, writes, peak
+
+
+def held_at(signals, ttl, t):
+    """How many scores an expiring memory holds on day t, if nothing arrives then.  Counting
+    at the end of the run is the wrong measurement, because an expiry is immediately followed
+    by the event that re-creates the entry."""
+    last = {}
+    for acct, _, at in signals:
+        if at <= t:
+            last[acct] = at
+    return sum(1 for a in last if t - last[a] <= ttl)
+
+
+def main():
+    truth = true_scores(SIGNALS)
+    print("SIGNALS =", "  ".join(f"{a}@{t}:+{p}" for a, p, t in SIGNALS))
+    print(f"  true lifetime scores {truth};  account 'a' is dormant for {DORMANCY} days\n")
+
+    forever, peak_forever = score_in_memory_forever(SIGNALS)
+    expired, peak_exp, restarts = score_with_expiry(SIGNALS, DORMANCY - 1)
+    stored, held_between, ops = score_in_a_store(SIGNALS)
+    cached, reads, writes, peak_cache = score_with_cache(SIGNALS, capacity=1)
+    print(f"  in memory forever   : {forever}   ({peak_forever} scores held, grows forever)")
+    print(f"  with a {DORMANCY - 1}-day expiry : {expired}   ({peak_exp} held, {restarts} restart)   WRONG")
+    print(f"  in a store          : {stored}   ({held_between} held between events, {ops} store ops)")
+    print(f"  store + 1-slot cache: {cached}   ({peak_cache} held, {reads} reads, {writes} writes)")
+
+    assert forever == truth == {"a": 24, "b": 21}, forever
+    assert stored == truth, "the store must be exact; that is the only reason to accept it"
+    assert cached == truth, "and a one-account cache must not change the answer"
+    assert expired != truth and expired["a"] == 8, expired
+    assert restarts == 1 and truth["a"] - expired["a"] == 16
+    assert held_between == 0, "the streaming layer must hold nothing between events"
+    assert ops == 2 * len(SIGNALS), ops
+    print(f"\n  the expiry lost {truth['a'] - expired['a']} of account 'a''s {truth['a']} points because it was quiet for {DORMANCY}")
+    print(f"  days and the allowance was {DORMANCY - 1}.  The store holds {held_between} scores between events, so its")
+    print(f"  memory does not depend on the account count at all -- the question is dissolved,")
+    print(f"  not answered, and the price is {ops} store operations for {len(SIGNALS)} events.")
+
+    # the expiry's error is one-directional, and that direction is the whole problem
+    for acct in truth:
+        assert expired.get(acct, 0) <= truth[acct], acct
+    assert not any(expired.get(a, 0) > truth[a] for a in truth), "it can only understate"
+    laundering = [("mule", 20, 0), ("mule", 4, DORMANCY)]
+    washed, _, _ = score_with_expiry(laundering, DORMANCY - 1)
+    kept, _, _ = score_with_expiry(laundering, DORMANCY)
+    assert washed == {"mule": 4} and kept == {"mule": 24}, (washed, kept)
+    print(f"\n  and the direction matters: a score can only come out too LOW.  An account that")
+    print(f"  earns 20 points, waits {DORMANCY} days and earns 4 more scores {washed['mule']} at a {DORMANCY - 1}-day allowance")
+    print(f"  and {kept['mule']} at a {DORMANCY}-day one -- so the allowance is a published schedule for")
+    print(f"  resetting a risk score, which is the one thing a risk score must not have.")
+
+    # the cache is the same bound with the opposite consequence, at every capacity
+    print(f"\n  the same bound, on a cache instead of on the state:")
+    print(f"    {'capacity':>9} {'scores':>18} {'held':>5} {'reads':>6} {'writes':>7}")
+    sweep = []
+    for cap in (0, 1, 2, 3, 10):
+        got, r, w, pk = score_with_cache(SIGNALS, cap)
+        sweep.append((cap, r, w, pk))
+        print(f"    {cap:>9} {str(got):>18} {pk:>5} {r:>6} {w:>7}")
+        assert got == truth, (cap, got)
+    assert all(sweep[i][1] >= sweep[i + 1][1] for i in range(len(sweep) - 1)), sweep
+    assert sweep[0][1] == len(SIGNALS), "capacity 0 means every event reads the store"
+    assert sweep[-1][1] == len(truth), "a cache bigger than the data reads once per account"
+    assert sweep[0][3] == 0 and sweep[-1][3] == len(truth)
+    print(f"    every capacity is EXACT, and the reads fall from {sweep[0][1]} to {sweep[-1][1]} as the cache grows.")
+    print(f"    Bounding the cache costs store reads; bounding the state cost the answer.  The")
+    print(f"    difference is one line -- the evicted score is written out instead of deleted.")
+
+    # ...including for the dormant account the whole requirement is about
+    cap1, _, _, _ = score_with_cache(SIGNALS, 1)
+    assert cap1["a"] == TRUE["a"] if False else cap1["a"] == truth["a"]
+    assert cap1["a"] == 24, cap1
+    print(f"\n  account 'a' is evicted from a 1-slot cache repeatedly and still scores {cap1['a']}: its")
+    print(f"  dormancy evicts it from MEMORY and not from the store, which is the distinction")
+    print(f"  the word 'expire' was hiding.")
+
+    # boundaries
+    assert score_in_a_store([]) == ({}, 0, 0), "an empty stream has no scores and no ops"
+    assert score_with_cache([], 5)[0] == {}, "and no cache contents"
+    assert score_with_expiry(SIGNALS, 0)[0] == {"a": 8}, score_with_expiry(SIGNALS, 0)[0]
+    assert score_with_cache(SIGNALS, 0)[0] == truth, "a zero-capacity cache is write-through"
+    one_event = [("solo", 7, 0)]
+    assert score_in_a_store(one_event)[0] == {"solo": 7}
+    assert score_with_cache(one_event, 0) == ({"solo": 7}, 1, 1, 0)
+    print(f"\n  boundaries: an empty stream gives no scores and no store operations; a ttl of 0")
+    print(f"  reduces the expiring version to {score_with_expiry(SIGNALS, 0)[0]}, i.e. the last event only, while a")
+    print(f"  zero-capacity cache is a write-through store and is still exact.")
+
+    # many inputs: the cache is exact at every capacity, the expiry never is safe
+    rng = random.Random(20260303)
+    exact_runs, wrong_runs = 0, 0
+    for _ in range(400):
+        n = rng.randint(1, 18)
+        ev = sorted(((rng.choice("abcde"), rng.randint(1, 9), rng.randint(0, 400))
+                     for _ in range(n)), key=lambda e: e[2])
+        want = true_scores(ev)
+        assert score_in_memory_forever(ev)[0] == want, ev
+        assert score_in_a_store(ev)[0] == want, ev
+        prev_reads = None
+        for cap in range(0, 7):
+            got, r, w, pk = score_with_cache(ev, cap)
+            assert got == want, (ev, cap)
+            assert pk <= cap, (ev, cap, pk)
+            if prev_reads is not None:
+                assert r <= prev_reads, (ev, cap, r, prev_reads)   # LRU: more cache, fewer reads
+            prev_reads = r
+        for ttl in (0, 5, 50, 400):
+            got, _, _ = score_with_expiry(ev, ttl)
+            assert all(got.get(a, 0) <= want[a] for a in want), (ev, ttl)
+            if got == want:
+                exact_runs += 1
+            else:
+                wrong_runs += 1
+    print(f"\n  400 random signal streams: the store and every cache capacity from 0 to 6 returned")
+    print(f"  the true lifetime score every single time, with reads falling monotonically as the")
+    print(f"  cache grew.  The expiring version was right in {exact_runs:,} of {exact_runs + wrong_runs:,} runs and too low in {wrong_runs:,},")
+    print(f"  never once too high -- so it is not noisy, it is biased, and biased the way an")
+    print(f"  attacker would choose.")
+    assert (exact_runs, wrong_runs) == (481, 1119), (exact_runs, wrong_runs)
+    assert wrong_runs > 0 and exact_runs > 0
+
+    # the scale that forces the decision
+    big = [(f"once{i}", 1, i) for i in range(1, ONEOFF + 1)]
+    big += [("regular", 1, t) for t in range(5, ONEOFF, 10)]
+    big.sort(key=lambda e: e[2])
+    big_true = true_scores(big)
+    big_end = max(t for *_, t in big)
+    unbounded_held = held_at(big, INFINITY, big_end)
+    bounded_held = held_at(big, BIG_TTL, big_end)
+    _, store_held, store_ops = score_in_a_store(big)
+    _, cache_reads, cache_writes, cache_peak = score_with_cache(big, 64)
+    big_expired, _, big_restarts = score_with_expiry(big, BIG_TTL)
+    print(f"\n  at {ONEOFF:,} accounts seen once plus one regular, on day {big_end}:")
+    print(f"    in memory forever : {unbounded_held:,} scores held")
+    print(f"    with a {BIG_TTL}-day expiry: {bounded_held} held, {big_restarts} restarts -- and every score still in")
+    print(f"      memory is CORRECT, while {len(big_true) - len(big_expired):,} accounts' scores are simply gone")
+    print(f"    in a store        : {store_held} held between events, {store_ops:,} store operations")
+    print(f"    64-slot cache     : {cache_peak} held, {cache_reads:,} reads, {cache_writes:,} writes")
+    assert (unbounded_held, bounded_held) == (2001, 102), (unbounded_held, bounded_held)
+    assert store_held == 0 and store_ops == 2 * len(big)
+    assert cache_peak == 64 and cache_reads < store_ops // 2
+    assert score_with_cache(big, 64)[0] == big_true, "exact at scale"
+    assert big_expired.get("regular") == big_true["regular"], "the regular account is never idle"
+    # MEASURED, and it is the uncomfortable half of the story: at this scale the expiry
+    # restarts NOTHING and every score it still holds is exact, because an account seen once
+    # cannot be restarted and the regular account never goes quiet.  So the scale that
+    # justifies the bound is precisely the scale at which its cost is invisible -- the damage
+    # needs a dormant-then-returning account, which is the small example, not this one.
+    assert big_restarts == 0, big_restarts
+    assert all(big_expired[a] == big_true[a] for a in big_expired), "the live scores are exact"
+    assert len(big_expired) < len(big_true), "but most accounts are no longer anywhere"
+    print(f"    the expiry restarts nothing HERE, because a one-visit account cannot be restarted")
+    print(f"    and the regular one never goes quiet -- the scale that justifies the bound is the")
+    print(f"    scale at which its cost is invisible.  The cache holds {cache_peak} and is exact for all")
+    print(f"    {len(big_true):,} accounts, trading {cache_reads:,} store reads for the {unbounded_held - cache_peak:,} scores it does not hold.")
+    print("\nall assertions passed")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+Running it prints:
+
+```
+SIGNALS = a@1:+5  a@3:+3  b@50:+4  b@90:+7  a@130:+2  b@220:+9  a@245:+6  b@260:+1  a@540:+8
+  true lifetime scores {'a': 24, 'b': 21};  account 'a' is dormant for 295 days
+
+  in memory forever   : {'a': 24, 'b': 21}   (2 scores held, grows forever)
+  with a 294-day expiry : {'b': 21, 'a': 8}   (2 held, 1 restart)   WRONG
+  in a store          : {'a': 24, 'b': 21}   (0 held between events, 18 store ops)
+  store + 1-slot cache: {'a': 24, 'b': 21}   (1 held, 7 reads, 7 writes)
+
+  the expiry lost 16 of account 'a''s 24 points because it was quiet for 295
+  days and the allowance was 294.  The store holds 0 scores between events, so its
+  memory does not depend on the account count at all -- the question is dissolved,
+  not answered, and the price is 18 store operations for 9 events.
+
+  and the direction matters: a score can only come out too LOW.  An account that
+  earns 20 points, waits 295 days and earns 4 more scores 4 at a 294-day allowance
+  and 24 at a 295-day one -- so the allowance is a published schedule for
+  resetting a risk score, which is the one thing a risk score must not have.
+
+  the same bound, on a cache instead of on the state:
+     capacity             scores  held  reads  writes
+            0 {'a': 24, 'b': 21}     0      9       9
+            1 {'a': 24, 'b': 21}     1      7       7
+            2 {'b': 21, 'a': 24}     2      2       2
+            3 {'b': 21, 'a': 24}     2      2       2
+           10 {'b': 21, 'a': 24}     2      2       2
+    every capacity is EXACT, and the reads fall from 9 to 2 as the cache grows.
+    Bounding the cache costs store reads; bounding the state cost the answer.  The
+    difference is one line -- the evicted score is written out instead of deleted.
+
+  account 'a' is evicted from a 1-slot cache repeatedly and still scores 24: its
+  dormancy evicts it from MEMORY and not from the store, which is the distinction
+  the word 'expire' was hiding.
+
+  boundaries: an empty stream gives no scores and no store operations; a ttl of 0
+  reduces the expiring version to {'a': 8}, i.e. the last event only, while a
+  zero-capacity cache is a write-through store and is still exact.
+
+  400 random signal streams: the store and every cache capacity from 0 to 6 returned
+  the true lifetime score every single time, with reads falling monotonically as the
+  cache grew.  The expiring version was right in 481 of 1,600 runs and too low in 1,119,
+  never once too high -- so it is not noisy, it is biased, and biased the way an
+  attacker would choose.
+
+  at 2,000 accounts seen once plus one regular, on day 2000:
+    in memory forever : 2,001 scores held
+    with a 100-day expiry: 102 held, 0 restarts -- and every score still in
+      memory is CORRECT, while 1,899 accounts' scores are simply gone
+    in a store        : 0 held between events, 4,400 store operations
+    64-slot cache     : 64 held, 2,001 reads, 2,001 writes
+    the expiry restarts nothing HERE, because a one-visit account cannot be restarted
+    and the regular one never goes quiet -- the scale that justifies the bound is the
+    scale at which its cost is invisible.  The cache holds 64 and is exact for all
+    2,001 accounts, trading 2,001 store reads for the 1,937 scores it does not hold.
+
+all assertions passed
+```
+
 </details>
+
+</details>
+
+#### The whole program
+
+Everything above as one file you can run: no animation, no stack, no heap — the complete solution, every helper included, and the measurements at the bottom. It is **run by `tools/run_programs.sh` on every build** and asserts its own results, so if it stopped working this section could not be generated.
+
+```python
+#!/usr/bin/env python3
+"""A running total per key, with the state bounded -- and what the bound costs.
+
+Events carry a key and a value, forever.  Report a running total per key.  Keys
+never stop arriving, so the state cannot grow without bound: bound it.  What does
+the bound cost, and how do you choose it?
+
+The computation is one addition per event, so nothing about the computation is the
+problem.  The state is: its size is set by how many DISTINCT keys have been seen,
+which is not a quantity you control.
+
+Run it:  python3 programs/ch07.py
+"""
+import hashlib
+import random
+
+# Data, from tools/gen_ch07_interview.js over tools/stream_seed.js: the seed events
+# as (key, value, event_time), in time order.  Two keys, so one can survive an
+# expiry while the other does not, and their true totals differ (24 vs 21) so a
+# wrong one can be attributed.
+EVENTS = [("a", 5, 1), ("a", 3, 3), ("b", 4, 50), ("b", 7, 90), ("a", 2, 130),
+          ("b", 9, 220), ("a", 6, 245), ("b", 1, 260), ("a", 8, 540)]
+KEYS = sorted({k for k, _, _ in EVENTS})
+TRUE = {k: sum(v for kk, v, _ in EVENTS if kk == k) for k in KEYS}
+END = max(t for *_, t in EVENTS)
+INFINITY = float("inf")
+# The asymptotic case.  The small example cannot show a memory saving at all (the
+# measurement below is exactly zero), so the claim is also measured at a scale where
+# it does show: ONEOFF keys seen once each, plus one key that keeps arriving.
+ONEOFF = 2000
+BIG_TTL = 100
+
+def longest_gap(events, k):
+    """The longest silence key k takes between events.  A property of the DATA rather
+    than of the design, and knowable only after the fact -- which is why the
+    allowance has to be a guess about the future."""
+    worst, prev = 0, None
+    for key, _, t in events:
+        if key == k:
+            if prev is not None:
+                worst = max(worst, t - prev)
+            prev = t
+    return worst
+
+def drop_stale(acc, last, now, ttl):
+    """Remove any key untouched for longer than ttl.  The only thing standing between
+    the state and unbounded growth -- and it needs `last`, a SECOND number per live
+    key that exists solely so this comparison can be made.  Returns what was dropped."""
+    gone = {k: acc[k] for k in list(acc) if now - last[k] > ttl}
+    for k in gone:
+        del acc[k]
+        del last[k]
+    return gone
+
+def add(acc, last, event):
+    """The whole computation: one number per key, one addition per event."""
+    k, v, t = event
+    acc[k] = acc.get(k, 0) + v
+    last[k] = t
+
+def on_event(acc, last, event, ttl):
+    """Drop first, then add.  The order is why the restart happens -- a key dropped a
+    moment ago is INDISTINGUISHABLE from a key never seen, and no ordering fixes it,
+    because the information that would tell them apart is what was deleted."""
+    gone = drop_stale(acc, last, event[2], ttl)
+    fresh = event[0] not in acc
+    add(acc, last, event)
+    return gone, fresh
+
+def totals(events, ttl, spill=None):
+    """Run the whole stream at one allowance.
+
+    There is deliberately NO final sweep: releasing a key's state after the stream
+    has ended is expected and is not an error, since its total was already reported.
+    Sweeping at the end made every total look wrong in the generator, conflating "the
+    aggregate restarted mid-stream" with "the state was released at the end".
+
+    `spill` (a dict) turns the deletion into a write-out-and-reload, which is the
+    variation-2 escape; with it, the totals come out exact at any allowance.
+    """
+    acc, last, resets = {}, {}, []
+    for e in events:
+        gone, _ = drop_stale(acc, last, e[2], ttl), None
+        for k, v in gone.items():
+            if spill is not None:
+                spill[k] = spill.get(k, 0) + v
+        if e[0] not in acc and any(x[0] == e[0] and x[2] < e[2] for x in events):
+            resets.append((e[0], e[2]))
+            if spill is not None and e[0] in spill:
+                acc[e[0]] = spill.pop(e[0])        # reload instead of restarting at 0
+        add(acc, last, e)
+    for k, v in acc.items():                       # whatever is still live at the end
+        if spill is not None:
+            spill[k] = spill.get(k, 0) + v
+    return acc, resets
+
+def held_at(events, ttl, t):
+    """How many keys are held at moment t, if no event arrives then.
+
+    The end-of-run count is the WRONG measurement: an expiry is immediately followed
+    by the event that re-creates the key, so the saving is invisible there.  Observing
+    a moment shows it."""
+    last = {}
+    for k, _, at in events:
+        if at <= t:
+            last[k] = at
+    return sum(1 for k in last if t - last[k] <= ttl)
+
+# The three variations.
+
+def the_unique_visitor_count(visitors, k=256):
+    """Variation 1, surface: analytics.  Count DISTINCT visitors, not a sum.
+
+    Non-obvious point: `add` now needs a SET rather than an integer, so the state is
+    the size of the visitor set and `drop_stale` is no help -- every visitor must be
+    remembered for the whole day.  The way out is to give up exactness: a sketch
+    answers "how many distinct" in a fixed space whatever the cardinality.  The
+    chapter's bound works because a sum is ONE number and a distinct count is not.
+
+    A k-minimum-values sketch, hashed with sha1 so it is deterministic.  Returns
+    (exact_count, exact_state_size, estimate, sketch_state_size).
+    """
+    exact = set()
+    mins = []
+    for v in visitors:
+        exact.add(v)
+        h = int(hashlib.sha1(str(v).encode()).hexdigest()[:16], 16) / float(1 << 64)
+        if h not in mins:
+            mins.append(h)
+            mins.sort()
+            del mins[k:]
+    if len(mins) < k:
+        est = len(mins)
+    else:
+        est = int((k - 1) / mins[-1])
+    return len(exact), len(exact), est, len(mins)
+
+def the_abandoned_shopping_cart(events, ttl):
+    """Variation 2, surface: commerce.  Hold each user's cart, expire inactive ones,
+    and a user who returns after a week still expects their cart.
+
+    Non-obvious point: here the expiry is the FEATURE and the silent restart is the
+    specified behaviour -- which leaves one real problem: "expire" and "forget" were
+    conflated.  `drop_stale` writes the accumulator out instead of deleting it and
+    `add` reads it back, so memory is bounded by ACTIVE users while correctness is
+    bounded by nothing.
+
+    Returns (totals_with_spill, totals_without_spill, spill_store).
+    """
+    spill = {}
+    live, _ = totals(events, ttl, spill=spill)
+    plain, _ = totals(events, ttl)
+    return dict(spill), plain, live
+
+def the_fraud_score_over_a_lifetime(events):
+    """Variation 3, surface: risk.  Score each account on its ENTIRE history; accounts
+    lie dormant for years and must keep their score.
+
+    Non-obvious point: the requirement forbids every bound, so the chapter's answer is
+    unavailable -- and the response is to stop treating the score as stream state.
+    It belongs in a store keyed by account, read and written per event, so the
+    streaming layer holds NOTHING between events and the memory question disappears.
+    State that must outlive the stream is not stream state.
+
+    Returns (store, max_keys_held_in_the_streaming_layer).
+    """
+    store, high_water = {}, 0
+    for k, v, _ in events:
+        held = {}                       # the streaming layer, between events
+        high_water = max(high_water, len(held))
+        held[k] = store.get(k, 0) + v   # read, update, write, forget
+        store[k] = held.pop(k)
+    return store, high_water
+
+def main():
+    print("EVENTS =", "  ".join(f"{k}@{t}:{v}" for k, v, t in EVENTS))
+    print(f"  true totals {TRUE}   longest gap per key "
+          f"{ {k: longest_gap(EVENTS, k) for k in KEYS} }")
+    worst_gap = max(longest_gap(EVENTS, k) for k in KEYS)
+    safe_ttl, tight_ttl = worst_gap, worst_gap - 1
+    free, _ = totals(EVENTS, INFINITY)
+    safe, _ = totals(EVENTS, safe_ttl)
+    tight, resets = totals(EVENTS, tight_ttl)
+    print(f"  ttl = INFINITY : {free}  (correct, {held_at(EVENTS, INFINITY, END)} keys held forever)")
+    print(f"  ttl = {safe_ttl}      : {safe}  (correct)")
+    print(f"  ttl = {tight_ttl}      : {tight}  <- restarted {resets}")
+
+    assert worst_gap == 295 and (safe_ttl, tight_ttl) == (295, 294)
+    assert free == TRUE == {"a": 24, "b": 21}, free
+    assert safe == TRUE, "an allowance equal to the worst gap must be enough"
+    assert resets == [("a", 540)], resets
+    wrong = [k for k in KEYS if tight.get(k, 0) != TRUE[k]]
+    right = [k for k in KEYS if tight.get(k, 0) == TRUE[k]]
+    assert wrong == ["a"] and right == ["b"], (wrong, right)
+    assert tight["a"] == 8 and TRUE["a"] == 24, tight
+    # the error is one-directional: too LOW, by exactly what was dropped
+    assert all(tight.get(k, 0) <= TRUE[k] for k in KEYS)
+    assert TRUE["a"] - tight["a"] == 16, "the dropped accumulator held 16 from 4 events"
+    assert longest_gap(EVENTS, "b") == 130 <= tight_ttl, "b must survive the tight allowance"
+    # the single step, through on_event: "a" is dropped holding 16 from 4 events, and the
+    # very next thing that happens is the event that re-creates it from zero
+    acc = {"a": 16, "b": 21}
+    last = {"a": 245, "b": 260}
+    gone, fresh = on_event(acc, last, ("a", 8, 540), tight_ttl)
+    assert gone == {"a": 16} and fresh is True and acc["a"] == 8, (gone, fresh, acc)
+    print(f"  on_event(('a', 8, 540), ttl={tight_ttl}): dropped {gone}, "
+          f"key looked new ({fresh}), so a restarts at {acc['a']}")
+
+    # The memory saving at this scale, measured at every moment: it is ZERO.
+    saving = max(held_at(EVENTS, INFINITY, t) - held_at(EVENTS, tight_ttl, t)
+                 for t in range(END + 1))
+    print(f"\n  keys saved by the bound, at any moment in this example: {saving}")
+    assert saving == 0, (
+        f"the bound saves up to {saving} keys here; the claim 'the correctness cost "
+        f"arrives before any memory benefit' would have to be rewritten")
+    # so the case for bounding is purely asymptotic -- measured at a scale where it shows
+    big = [(f"one{i}", 1, i) for i in range(1, ONEOFF + 1)]
+    big += [("hot", 1, t) for t in range(5, ONEOFF, 10)]
+    big.sort(key=lambda e: e[2])
+    big_end = max(t for *_, t in big)
+    unbounded_keys = held_at(big, INFINITY, big_end)
+    bounded_keys = held_at(big, BIG_TTL, big_end)
+    big_free, _ = totals(big, INFINITY)
+    big_bound, _ = totals(big, BIG_TTL)
+    print(f"  at {ONEOFF} one-off keys + 1 recurring key, observed at t = {big_end}:")
+    print(f"    ttl = INFINITY : {unbounded_keys} keys held")
+    print(f"    ttl = {BIG_TTL}      : {bounded_keys} keys held  "
+          f"({unbounded_keys - bounded_keys} saved, {bounded_keys / unbounded_keys:.1%} of the state)")
+    # MEASURED 102, not the handful first guessed: the allowance keeps every key
+    # touched within the last 100 time units -- 100 one-off keys, the recurring key,
+    # and the one sitting exactly on the boundary.  So the bound holds 5.1% of the
+    # state, and the saving grows with the key count while 102 stays put.
+    assert (unbounded_keys, bounded_keys) == (2001, 102), (unbounded_keys, bounded_keys)
+    assert unbounded_keys - bounded_keys == 1899
+    assert bounded_keys / unbounded_keys < 0.06 < 1.0
+    # the opposite outcome is forbidden: at this scale the saving may NOT be zero
+    assert bounded_keys < unbounded_keys, "the asymptotic case must actually save keys"
+    # and the recurring key is still exact, because its gap (10) is inside the allowance
+    assert big_free["hot"] == big_bound["hot"] == 200, (big_free["hot"], big_bound.get("hot"))
+    assert longest_gap(big, "hot") == 10 <= BIG_TTL
+
+    # variations
+    exact, exact_state, est, sketch_state = the_unique_visitor_count(
+        [f"user{i % 5000}" for i in range(20000)])
+    err = abs(est - exact) / exact
+    print(f"\n  unique visitors: exact {exact} in {exact_state} slots, sketch {est} in "
+          f"{sketch_state} slots ({err:.1%} error)")
+    assert (exact, exact_state) == (5000, 5000)
+    assert sketch_state == 256 and err < 0.12, (sketch_state, est, err)
+    # the opposite outcome is forbidden: the sketch must NOT be exact, or it is not a sketch
+    assert est != exact, "a sketch that is exact here would make the trade-off invisible"
+
+    spilled, plain, live = the_abandoned_shopping_cart(EVENTS, tight_ttl)
+    print(f"  carts: spilled-and-reloaded {spilled}, plain expiry {plain}, live at end {live}")
+    assert spilled == TRUE, "writing the cart out and reading it back must be exact"
+    assert plain != TRUE and plain == tight, "and plain expiry must still be wrong"
+
+    store, high_water = the_fraud_score_over_a_lifetime(EVENTS)
+    print(f"  lifetime score: store {store}, keys ever held between events {high_water}")
+    assert store == TRUE and high_water == 0, (store, high_water)
+
+    # brute force over many inputs, not just the one example
+    rng = random.Random(20260303)
+    for _ in range(500):
+        n = rng.randint(1, 20)
+        ev = sorted(((rng.choice("abcd"), rng.randint(1, 9), rng.randint(0, 400))
+                     for _ in range(n)), key=lambda e: e[2])
+        truth = {}
+        for k, v, _ in ev:
+            truth[k] = truth.get(k, 0) + v
+        assert totals(ev, INFINITY)[0] == truth, ev
+        gap = max((longest_gap(ev, k) for k in truth), default=0)
+        # CORRECTED CLAIM.  "An allowance equal to the worst gap reproduces the true
+        # totals" is FALSE in general, and a random case falsified it: a key whose last
+        # event is more than ttl before the stream's end is released at the end, so it
+        # is simply absent from `acc` -- its total was already reported, which is why
+        # `totals` has no final sweep.  What is actually true is the stronger and more
+        # useful statement: at ttl >= the worst gap NO key is ever dropped and
+        # re-created, so no aggregate is ever restarted, and every key still live holds
+        # its true total.
+        acc_gap, resets_gap = totals(ev, gap)
+        assert resets_gap == [], (ev, gap, resets_gap)
+        assert all(acc_gap[k] == truth[k] for k in acc_gap), (ev, gap)
+        sp = {}
+        totals(ev, 0, spill=sp)
+        assert sp == truth, (ev, sp)                         # spilling is exact at ANY ttl
+        for ttl in (0, 1, gap - 1 if gap else 0):            # and a tight one never overstates
+            assert all(totals(ev, ttl)[0].get(k, 0) <= truth[k] for k in truth), (ev, ttl)
+    print("\n  500 random streams: unbounded == the true totals; at an allowance equal to")
+    print("  the worst gap NOTHING is ever dropped and re-created (0 restarts) and every")
+    print("  live key is exact; spilling is exact at any allowance; and a tight allowance")
+    print("  never overstates a total -- it only ever loses.")
+    print("\nall assertions passed")
+
+if __name__ == "__main__":
+    main()
+```
+
+Running it prints:
+
+```
+EVENTS = a@1:5  a@3:3  b@50:4  b@90:7  a@130:2  b@220:9  a@245:6  b@260:1  a@540:8
+  true totals {'a': 24, 'b': 21}   longest gap per key {'a': 295, 'b': 130}
+  ttl = INFINITY : {'a': 24, 'b': 21}  (correct, 2 keys held forever)
+  ttl = 295      : {'a': 24, 'b': 21}  (correct)
+  ttl = 294      : {'b': 21, 'a': 8}  <- restarted [('a', 540)]
+  on_event(('a', 8, 540), ttl=294): dropped {'a': 16}, key looked new (True), so a restarts at 8
+
+  keys saved by the bound, at any moment in this example: 0
+  at 2000 one-off keys + 1 recurring key, observed at t = 2000:
+    ttl = INFINITY : 2001 keys held
+    ttl = 100      : 102 keys held  (1899 saved, 5.1% of the state)
+
+  unique visitors: exact 5000 in 5000 slots, sketch 5307 in 256 slots (6.1% error)
+  carts: spilled-and-reloaded {'b': 21, 'a': 24}, plain expiry {'b': 21, 'a': 8}, live at end {'b': 21, 'a': 24}
+  lifetime score: store {'a': 24, 'b': 21}, keys ever held between events 0
+
+  500 random streams: unbounded == the true totals; at an allowance equal to
+  the worst gap NOTHING is ever dropped and re-created (0 restarts) and every
+  live key is exact; spilling is exact at any allowance; and a tight allowance
+  never overstates a total -- it only ever loses.
+
+all assertions passed
+```
 
 #### The solution as a running program — stack and heap at every step
 
