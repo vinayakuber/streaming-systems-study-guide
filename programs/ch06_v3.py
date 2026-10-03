@@ -18,6 +18,13 @@ usually different storage.  There is no recovery scheme, so "these were never th
 is the answer -- and the second-best outcome is a system that KNOWS it cannot answer rather
 than one that answers from the present and sounds certain.
 
+WORKED EXAMPLES: the EXAMPLES table below holds 19 input/output pairs -- the audit log and
+the compacted one asked the same questions, both sides of every boundary (an effective date
+and the day before it, each record's surviving edge and the day before that), the day before
+a record existed and an unknown record, which have no answer at all, a one-entry log, an
+empty log, and the 5,000-change scale.  Every row is ASSERTED twice, so the table cannot
+drift from the code: change the answer and this file stops running.
+
 Run it:  python3 programs/ch06_v3.py
 """
 import random
@@ -35,6 +42,44 @@ ASKED_RECORD = "a"
 ASKED_DAY = 300               # "two years ago": between record a's 8 and its 10
 TODAY = 1000
 UNANSWERABLE = "UNANSWERABLE"  # not a value: the question cannot be answered
+
+# A one-entry log, an empty log, the log the retention job leaves behind (checked against
+# retained() in show_examples, so it cannot drift), and the scale at which the job gets
+# approved.  These are inputs for the examples table, not alternative versions of the
+# problem.
+ONE_ENTRY_LOG = [("a", 5, 40)]
+EMPTY_LOG = []
+STATE_LOG = [("a", 16, 500), ("b", 8, 560), ("b", 17, 700), ("b", 21, 760), ("a", 24, 900)]
+BIG_RECORD_COUNT, BIG_CHANGE_COUNT, BIG_DAY_COUNT = 50, 5_000, 3_650
+BIG_AUDIT = [(f"r{i % BIG_RECORD_COUNT}", i, (i * BIG_DAY_COUNT) // BIG_CHANGE_COUNT)
+             for i in range(BIG_CHANGE_COUNT)]
+
+# ------------------------------------------------------------------- WORKED EXAMPLES
+# (what it exercises, log, record, day, expected value).  Every row is asserted by
+# show_examples(), which is why the table is data and not a comment: a comment can go stale
+# silently, and this cannot.  U is UNANSWERABLE -- a refusal, not a value.
+U = UNANSWERABLE
+EXAMPLES = [
+    ("audit: the day before 'a' exists",   RECORD_LOG,    "a",  39,    U),
+    ("audit: a's first effective day",     RECORD_LOG,    "a",  40,    5),
+    ("audit: the day before a change",     RECORD_LOG,    "a",  189,   5),
+    ("audit: the effective day itself",    RECORD_LOG,    "a",  190,   8),
+    ("audit: the regulator's own day",     RECORD_LOG,    "a",  300,   8),
+    ("audit: today",                       RECORD_LOG,    "a",  1000,  24),
+    ("audit: an unknown record",           RECORD_LOG,    "zz", 1000,  U),
+    ("state: the regulator's own day",     STATE_LOG,     "a",  300,   U),
+    ("state: the day before a's edge",     STATE_LOG,     "a",  499,   U),
+    ("state: a's edge day",                STATE_LOG,     "a",  500,   16),
+    ("state: the day before b's edge",     STATE_LOG,     "b",  559,   U),
+    ("state: b's edge day",                STATE_LOG,     "b",  560,   8),
+    ("state: today, still answerable",     STATE_LOG,     "a",  1000,  24),
+    ("one entry: the day before it",       ONE_ENTRY_LOG, "a",  39,    U),
+    ("one entry: that very day",           ONE_ENTRY_LOG, "a",  40,    5),
+    ("an empty log answers nothing",       EMPTY_LOG,     "a",  1000,  U),
+    ("5,000 changes: day 0",               BIG_AUDIT,     "r1", 0,     1),
+    ("5,000 changes: mid-history",         BIG_AUDIT,     "r0", 1825,  2500),
+    ("5,000 changes: today",               BIG_AUDIT,     "r49", 3650, 4999),
+]
 
 
 def shown(day):
@@ -127,7 +172,42 @@ def earliest_answerable(log, record):
     return min(days) if days else None
 
 
+def show_examples():
+    """Print the examples table and assert every row.
+
+    Each row is checked TWO ways, and usually three: the scan must return the expected
+    value, a max over the candidate entries must agree, and where it is affordable the
+    day-by-day replay must agree as well.  Both costs are printed -- the scan reads every
+    entry once, the replay reads every entry once PER day -- so a reader can see that on
+    the first day of a long log the two cost the same, and that the gap opens up only as
+    the question moves away from the beginning of the log.  The `present` column is the
+    answer the service could give for free out of its current table.
+    """
+    assert retained(RECORD_LOG, COMPACTED_ON) == STATE_LOG, "STATE_LOG must be what the job leaves"
+    print(f"{'what it exercises':34s} {'entries':>8} {'record':>7} {'date':>12} "
+          f"{'answer':>13} {'present':>13} {'scan':>6} {'replay':>9}  verdict")
+    for label, log, record, day, want in EXAMPLES:
+        got = value_as_of(log, record, day)
+        assert got == want, (label, got, want)
+        candidates = [(d, v) for r, v, d in log if r == record and d <= day]
+        by_max = max(candidates)[1] if candidates else UNANSWERABLE
+        assert by_max == want, (label, "the max over candidates disagrees", by_max, want)
+        scan, replay = len(log), (day + 1) * len(log)
+        if replay <= 100_000:          # materialising history is affordable only when tiny
+            tables = replay_tables(log, day)
+            assert tables[day].get(record, UNANSWERABLE) == want, (label, "the replay disagrees")
+        present = answer_from_current_state(log, record, day)
+        verdict = ("scan wins" if scan < replay else "tie") + \
+                  (", present agrees" if present == want else ", present WRONG")
+        print(f"{label:34s} {len(log):>8} {record:>7} {shown(day):>12} "
+              f"{str(got):>13} {str(present):>13} {scan:>6} {replay:>9}  {verdict}")
+    print(f"all {len(EXAMPLES)} examples agree with a max over the surviving entries, and with a "
+          f"day-by-day replay wherever one is affordable")
+    print()
+
+
 def main():
+    show_examples()
     records = sorted({r for r, _, _ in RECORD_LOG})
     audit_log = RECORD_LOG                             # never compacted
     state_log = retained(RECORD_LOG, COMPACTED_ON)     # compacted on COMPACTED_ON

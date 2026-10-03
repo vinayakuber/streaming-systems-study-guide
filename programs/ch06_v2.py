@@ -15,6 +15,13 @@ the fold reached is the thing that has to be carried across.  Subscribing from "
 instead of from the snapshot's version is the bug, and it is silent: the copy answers
 every read confidently with a value that stopped being true during start-up.
 
+WORKED EXAMPLES: the EXAMPLES table below holds 14 input/output pairs -- the correct
+handover, both sides of the version boundary (one entry of overlap, one entry of gap), a
+gap that a live entry silently repairs, a delete inside the gap, an empty log, a one-entry
+log, a log with no repeated keys where the warm start reads MORE than a cold one, and the
+20,000-change scale.  Every row is ASSERTED against a cold start, so the table cannot
+drift from the code: change the answer and this file stops running.
+
 Run it:  python3 programs/ch06_v2.py
 """
 import random
@@ -32,6 +39,44 @@ ABSENT = object()             # not a value: the key is not in the table at all
 # The snapshot was taken two changes before the end of the log.  A real snapshot is
 # always behind: it is written periodically, not at the instant of a crash.
 SNAPSHOT_VERSION = 7
+
+# An empty log, a one-entry log, a log whose keys never repeat (so compaction has nothing
+# to drop), the chapter's log with a delete appended, a different live entry, and the scale
+# at which a snapshot is worth writing.  These are inputs for the examples table, not
+# alternative versions of the problem.
+EMPTY_LOG = []
+ONE_ENTRY = [("a", 5)]
+DISTINCT_LOG = [("a", 1), ("b", 2), ("c", 3), ("d", 4), ("e", 5)]
+LOG_DEL = LOG + [("b", TOMBSTONE)]
+LIVE_B = [("b", 99)]
+BIG_KEY_COUNT, BIG_CHANGE_COUNT = 50, 20_000
+BIG_LOG = [(f"k{i % BIG_KEY_COUNT}", i) for i in range(BIG_CHANGE_COUNT)]
+
+# The tables those inputs fold to, written out so the EXAMPLES rows stay one line each.
+DISTINCT_TABLE = {"a": 1, "b": 2, "c": 3, "d": 4, "e": 5}
+BIG_TABLE = {f"k{i}": 19_950 + i for i in range(BIG_KEY_COUNT)}   # the last change per key
+BIG_STALE = {f"k{i}": 19_900 + i for i in range(BIG_KEY_COUNT)}   # one change per key behind
+
+# ------------------------------------------------------------------- WORKED EXAMPLES
+# (what it exercises, log, snapshot_version, subscribe_from, live, expected table).  Every
+# row is asserted by show_examples() against a cold start, which is why the table is data
+# and not a comment: a comment can go stale silently, and this cannot.
+EXAMPLES = [
+    ("empty log, nothing live",            EMPTY_LOG,    0,      0,      [],     {}),
+    ("one entry, no snapshot yet",         ONE_ENTRY,    0,      0,      [],     {"a": 5}),
+    ("one entry, snapshot at the tail",    ONE_ENTRY,    1,      1,      [],     {"a": 5}),
+    ("snapshot at v0 = a cold start",      LOG,          0,      0,      LIVE,   {"a": 30, "b": 21}),
+    ("the correct handover, v7 -> v7",     LOG,          7,      7,      LIVE,   {"a": 30, "b": 21}),
+    ("one entry of OVERLAP, v7 -> v6",     LOG,          7,      6,      LIVE,   {"a": 30, "b": 21}),
+    ("one entry of GAP, v7 -> v8",         LOG,          7,      8,      LIVE,   {"a": 30, "b": 17}),
+    ("subscribe from NOW, v7 -> v9",       LOG,          7,      9,      LIVE,   {"a": 30, "b": 17}),
+    ("a gap a live entry overwrites",      LOG,          7,      8,      LIVE_B, {"a": 24, "b": 99}),
+    ("a delete inside the gap",            LOG_DEL,      7,      10,     [],     {"a": 16, "b": 17}),
+    ("keys never repeat, max overlap",     DISTINCT_LOG, 5,      0,      [],     DISTINCT_TABLE),
+    ("keys never repeat, exact handover",  DISTINCT_LOG, 5,      5,      [],     DISTINCT_TABLE),
+    ("20,000 changes, snapshot at tail",   BIG_LOG,      20_000, 20_000, [],     BIG_TABLE),
+    ("20,000 changes, a 50-entry gap",     BIG_LOG,      19_950, 20_000, [],     BIG_STALE),
+]
 
 
 def fold(entries):
@@ -120,7 +165,44 @@ def gap_is_harmful(log, snapshot_version, subscribe_from, live):
     return False
 
 
+def _tbl(t):
+    """A table narrow enough for a column.  Fifty keys print as their count and first key."""
+    if not t:
+        return "{}"
+    if len(t) <= 3:
+        return " ".join(f"{k}={v}" for k, v in sorted(t.items()))
+    k, v = min(t.items())
+    return f"{len(t)} keys, {k}={v}"
+
+
+def show_examples():
+    """Print the examples table and assert every row.
+
+    Each row is checked TWO ways: the warm start must produce the expected table, and the
+    cold start -- the brute-force fold of every entry ever written -- must agree about
+    whether anything was lost.  The costs of both are printed, because the warm start is
+    not always the cheaper one: a log whose keys never repeat has nothing for compaction
+    to drop, so an overlapping handover reads the history twice.
+    """
+    print(f"{'what it exercises':34s} {'log':>6} {'snap':>6} {'sub':>6} {'slack':>6} "
+          f"{'the table':>18} {'warm':>6} {'cold':>6}  verdict")
+    for label, log, snap_v, sub_from, live, want in EXAMPLES:
+        table, warm_read, slack = warm_start(log, snap_v, sub_from, live)
+        truth, cold_read = cold_start(log, live)
+        assert table == want, (label, table, want)
+        assert (table != truth) == gap_is_harmful(log, snap_v, sub_from, live), (label, table, truth)
+        verdict = ("warm wins" if warm_read < cold_read else
+                   "warm LOSES" if warm_read > cold_read else "tie")
+        if table != truth:
+            verdict += ", STALE"
+        print(f"{label:34s} {len(log):>6} {snap_v:>6} {sub_from:>6} {slack:>6} "
+              f"{_tbl(table):>18} {warm_read:>6} {cold_read:>6}  {verdict}")
+    print(f"all {len(EXAMPLES)} examples match a cold start exactly where the gap predicate says they must")
+    print()
+
+
 def main():
+    show_examples()
     truth, cold_read = cold_start(LOG, LIVE)
     snap = compact(LOG[:SNAPSHOT_VERSION])
     print("LOG  =", "  ".join(f"{k}={v}" for k, v in LOG), f"   ({N} entries)")

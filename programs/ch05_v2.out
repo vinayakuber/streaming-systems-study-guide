@@ -1,3 +1,25 @@
+what it exercises                       chunks        policy  crash     visible  rec  scratch  resume
+rename, no crash -> committed                9        rename   none    COMPLETE False       45      45
+rename, killed before chunk 0                9        rename      0      absent False       45      45
+rename, killed before chunk 1                9        rename      1      absent False       50      45
+rename, killed before the LAST chunk         9        rename      8      absent False       82      45
+rename, bytes all up, commit not run         9        rename      9      absent False       90      45
+crash point past the end never fires         9        rename     16    COMPLETE False       45      45
+direct, killed before chunk 0                9        direct      0      absent False       45      45
+direct, killed before chunk 1                9        direct      1     5B part False       50      45
+direct, killed before the LAST chunk         9        direct      8    37B part False       82      45
+direct, bytes all up, record not set         9        direct      9    COMPLETE False       90      45
+record_first, killed before chunk 0          9  record_first      0      absent True       45      45
+record_first, killed before chunk 1          9  record_first      1     5B part True        5       5
+record_first, bytes all up                   9  record_first      9    COMPLETE True       45      45
+zero-chunk backup, rename -> empty           0        rename   none       empty False        0       0
+zero-chunk backup, direct -> no file         0        direct   none      absent True        0       0
+one chunk, killed before its only one        1        rename      0      absent False        1       1
+one chunk, no crash                          1        rename   none    COMPLETE False        1       1
+5,000 chunks, rename, no crash            5000        rename   none    COMPLETE False    19995   19995
+5,000 chunks, rename, killed midway       5000        rename   2500      absent False    29992   19995
+all 19 examples agree with the rule they claim to implement
+
 CHUNKS = ['aaaaa', 'bbb', 'ccccccc', 'dd', 'eeeeee', 'f', 'ggggggggg', 'hhhh', 'iiiiiiii']
 the finished file is 45 bytes: 'aaaaabbbcccccccddeeeeeefggggggggghhhhiiiiiiii'
 

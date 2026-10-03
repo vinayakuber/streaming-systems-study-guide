@@ -1,3 +1,19 @@
+what it exercises                      views    ttl  distinct  estimate  set slots  sketch  expiry  saved
+the chapter's 9 views, 2 visitors          9      -         2         2          2       2       -      -
+ttl = 295, the longest silence             9    295         2         2          2       2       2      0
+ttl = 294, one hour tighter                9    294         2         2          2       2       3      0
+ttl = a whole day: saves nothing           9  86400         2         2          2       2       2      0
+ttl = 0: saves 2, overstates to 9          9      0         2         2          2       2       9      2
+an empty day -> 0, not an error            0      -         0         0          0       0       -      -
+a single view                              1      -         1         1          1       1       -      -
+1 visitor, 1,000 views                 1,000      -         1         1          1       1       -      -
+255 distinct: no estimate, the set       765      -       255       255        255     255       -      -
+256 distinct: estimator takes over       768      -       256       257        256     256       -      -
+1,000 distinct, mid-range              2,000      -     1,000       983      1,000     256       -      -
+4,000 distinct (generated)             4,000      -     4,000     3,721      4,000     256       -      -
+12,000 distinct (generated)           12,000      -    12,000    11,544     12,000     256       -      -
+all 13 examples agree with the exact set
+
 VIEWS = a@1  a@3  b@50  b@90  a@130  b@220  a@245  b@260  a@540    (9 views)
   distinct visitors      : 2   (2 slots held)
   +1 per event           : 9   (1 slot held -- and the wrong question)

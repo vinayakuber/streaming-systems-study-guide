@@ -1,3 +1,24 @@
+what it exercises                      secs           K  answer        pairs  list ops  verdict
+smallest K that is reachable              9           0       1           45        20  list wins
+ordinary K, mid-range                     9          15       3           45        20  list wins
+K = 21, three seconds reach it            9          21       3           45        20  list wins
+K = 22, three no longer enough            9          22       4           45        20  list wins
+K = the whole load test                   9          45       9           45        20  list wins
+one past the whole total -> none          9          46    none           45        20  list wins
+far beyond reach -> none                  9         999    none           45        20  list wins
+idle seconds spliced in                  12          15       3           78        26  list wins
+idle seconds, across the boundary        12          22       4           78        26  list wins
+empty stream -> none                      0           1    none            0         2  list LOSES
+one second, exactly K                     1           7       1            1         4  list LOSES
+one second, one short of K                1           8    none            1         4  list LOSES
+all-idle stream, K = 0                    3           0       1            6         8  list LOSES
+all-idle stream, K = 1 -> none            3           1    none            6         8  list LOSES
+four seconds: the two costs tie           4          15       3           10        10  tie
+signed data: two-pointer is wrong         3           4       1            6         8  list LOSES
+20,000 seconds, K = 2000              20000        2000      80  200,010,000    40,002  list wins
+20,000 seconds, K unreachable         20000  1000000000    none  200,010,000    40,002  list wins
+all 18 examples agree with the pair scan
+
 COUNTS = 0:5  1:3  2:7  3:2  4:6  5:1  6:9  7:4  8:8
 prefix  = [0, 5, 8, 15, 17, 23, 24, 33, 37, 45]
 

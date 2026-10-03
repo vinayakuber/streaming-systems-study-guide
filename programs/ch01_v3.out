@@ -1,3 +1,25 @@
+what it exercises                         now    span      n    average  count   reads   ticks
+before anything arrives -> None             0      60      9       None      0       9       1
+the first sample's own instant              1      60      9      5.000      1       9       2
+ordinary arrival, two in window             3      60      9      4.000      2       9       4
+three samples in the window                50      60      9      5.000      3       9      51
+the arrival that retires TWO               90      60      9      4.500      2       9      91
+quiet stream, one survivor                180      60      9      6.000      1       9     181
+quiet stream, window EMPTY -> None        191      60      9       None      0       9     192
+the last arrival of all                   540      60      9      8.000      1       9     541
+far future -> None, not the last v      10000      60      9       None      0       9     101
+edge: 1s inside, t=0 still counts          59      60      2     10.000      1       2      60
+edge: exactly span old, t=0 gone           60      60      2     20.000      1       2      61
+span = 1s, the sample's own second          3       1      9      3.000      1       9       4
+span = 1s, one second later                 4       1      9       None      0       9       5
+span longer than the whole stream         540   10000      9      5.000      9       9     541
+two probes in the SAME second              10      60      3      6.000      2       3      11
+one sample, ever                            7      60      1     12.000      1       1       8
+flat stream, six identical samples         60      60      7      4.000      6       7      61
+20,000 samples, mid-stream              10000      60  20000     21.523     65   20000     101
+20,000 samples, past the end            20100      60  20000       None      0   20000     202
+all 19 examples agree with the rescan and the timer-driven scan
+
 SAMPLES (t seconds, v ms) = [(1, 5), (3, 3), (50, 7), (90, 2), (130, 6), (220, 1), (245, 9), (260, 4), (540, 8)]
 SPAN = 60s   window = (now - 60, now]
 

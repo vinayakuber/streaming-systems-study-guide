@@ -15,6 +15,15 @@ or neither.  Get that wrong and a front goes stale, the spread reads too small, 
 answer is a longer steady stretch than really occurred -- which on a factory floor is a
 quality claim nobody made.
 
+WORKED EXAMPLES: the EXAMPLES table below holds 15 input/output pairs -- the smallest
+tolerance and the largest, an ordinary middle one, both sides of the L = 6 boundary the
+chapter's nine readings sit on (L = 5 gives 5 seconds, L = 6 gives 6), both sides of the full
+spread (L = 7 still gives 6, L = 8 takes the whole series), the one extra tolerance that buys
+nothing, an empty log and the 0 it returns instead of a guess, a single reading, a two-second
+log either side of its own gap, a flat run where L = 0 is a real question, and two rows at
+20,000 seconds.  Every row is ASSERTED against the brute-force scan as well, so the table
+cannot drift from the code: change an answer and this file stops running.
+
 Run it:  python3 programs/ch03_v4.py
 """
 
@@ -30,6 +39,72 @@ READINGS = [5, 3, 7, 2, 6, 1, 9, 4, 8]
 L = 6
 
 N = len(READINGS)
+
+# An empty log, a single reading, a two-second log, a flat run, and the 20,000-second scale
+# (seeded, so the answers below are reproducible).  These are inputs for the examples table,
+# not alternative versions of the problem.
+EMPTY = []
+ONE = [4]
+PAIR = [5, 3]                                      # one gap of 2, and nothing else
+FLAT_RUN = [4, 4, 4, 4, 4]
+BIG_READINGS = random.Random(20260304).choices(range(100), k=20_000)
+
+# ------------------------------------------------------------------- WORKED EXAMPLES
+# (what it exercises, readings, L, expected length).  Every row is asserted by
+# show_examples() against the brute-force scan -- length AND starting second -- which is why
+# the table is data and not a comment: a comment can go stale silently, and this cannot.
+EXAMPLES = [
+    ("L = 0, distinct readings: every run is 1", READINGS,      0,   1),
+    ("L = 2, an ordinary tolerance",             READINGS,      2,   2),
+    ("L = 4, the middle of the range",           READINGS,      4,   3),
+    ("L = 5, one below the chapter's L",         READINGS,      5,   5),
+    ("L = 6, the stretch spans exactly L",       READINGS,      6,   6),
+    ("L = 7, one more buys nothing",             READINGS,      7,   6),
+    ("L = 8 = the full spread: everything",      READINGS,      8,   9),
+    ("L = 99, far above the full spread",        READINGS,      99,  9),
+    ("L = 0 on a flat run: a real question",     FLAT_RUN,      0,   5),
+    ("an empty log -> 0, not a guess",           EMPTY,         5,   0),
+    ("a single reading, no tolerance",           ONE,           0,   1),
+    ("two seconds, L below their gap",           PAIR,          1,   1),
+    ("two seconds, L exactly their gap",         PAIR,          2,   2),
+    ("20,000 seconds, L = 0 (constant runs)",    BIG_READINGS,  0,   3),
+    ("20,000 seconds, L = 20",                   BIG_READINGS,  20,  8),
+]
+
+
+def show_examples():
+    """Print the examples table and assert every row, two ways.
+
+    Every row is checked against the two deques and against the brute-force scan, and both
+    the LENGTH and the STARTING SECOND must match -- a right length at a wrong start would be
+    a different stretch, which is the error the stale-front bug produces.
+
+    The two cost columns are measured, not asserted into existence: `runs` is the number of
+    stretches the brute-force scan measured, and `dq ops` is everything the two deques did
+    (pushes, back-pops, front-pops and left-edge steps).  They are counts of DIFFERENT units
+    and the table says which is smaller, not which program is faster: a measured run costs
+    time proportional to its length, because the scan takes the max and the min of a slice,
+    while every deque op is constant work.  So the deques come out with MORE ops on short logs
+    -- they pay two pushes a second whether or not anything happens -- and even at 20,000
+    seconds with L = 20 their op count is the larger of the two, while the work behind each of
+    those ops is not.  Printing both is the only honest way to show that.
+    """
+    print(f"{'what it exercises':42s} {'secs':>6} {'L':>4} {'answer':>7} {'from':>7} "
+          f"{'runs':>9} {'dq ops':>9}  fewer steps")
+    for label, xs, limit, want in EXAMPLES:
+        got, start, pushes, back, front, steps = longest_steady(xs, limit)
+        ref, rstart, ops = longest_naive(xs, limit)
+        assert got == want, (label, got, want)
+        assert ref == want, (label, 'the brute-force scan disagrees', ref, want)
+        assert start == rstart, (label, 'different starting second', start, rstart)
+        if want:
+            assert spread(xs[start:start + want]) <= limit, (label, 'the run does not fit')
+        ops_dq = pushes + back + front + steps
+        fewer = ("deques" if ops_dq < ops else "naive" if ops_dq > ops else "tie")
+        print(f"{label:42s} {len(xs):>6} {limit:>4} {want:>7} {start:>7,} "
+              f"{ops:>9,} {ops_dq:>9,}  {fewer}")
+    print(f"all {len(EXAMPLES)} examples agree with the brute-force scan")
+    print()
 
 
 def spread(xs):
@@ -139,6 +214,7 @@ def longest_fixed_offset(xs, limit):
 
 
 def main():
+    show_examples()
     print("READINGS =", "  ".join(f"{i}:{v}" for i, v in enumerate(READINGS)), f"   L = {L}")
     want, wstart, ops = longest_naive(READINGS, L)
     got, start, pushes, back, front, steps = longest_steady(READINGS, L)

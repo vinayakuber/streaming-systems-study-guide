@@ -13,6 +13,16 @@ so a correct implementation must be able to recompute on a timer and not only on
 That is the same clock-versus-arrival split the batching problem turns on, and a dashboard
 driven only by arrivals shows a number that was true minutes ago.
 
+WORKED EXAMPLES: the EXAMPLES table below holds 19 input/output pairs -- the instant before
+the first sample and the instant of the last, an ordinary arrival, both sides of the
+(now - span, now] edge on two samples exactly span apart, the arrival that retires two at
+once, a quiet instant where the window is EMPTY (so the answer is None rather than 0.0), a
+span of one second, a span longer than the whole stream, two probes inside the same second,
+a single sample, a flat stream, and a generated 20,000-sample stream.  Each row prints the
+rescan's reads beside the timer's ticks, so the rows where the timer costs more are visible.
+Every row is ASSERTED twice -- the rescan and the timer-driven scan -- so the table cannot
+drift from the code: change an answer and this file stops running.
+
 Run it:  python3 programs/ch01_v3.py
 """
 
@@ -37,6 +47,49 @@ W = 3
 # exactly SPAN: these two are 60 apart to the second, which is the only place the
 # inclusive-or-exclusive choice is visible at all.
 EDGE = [(0, 10), (60, 20)]
+
+# Inputs for the examples table, not alternative versions of the problem: two probes that
+# answer in the same second, a stream with exactly one sample, a perfectly regular flat
+# stream (same value, same gap), and one GENERATED stream at the 20,000-sample scale a real
+# dashboard sees, with gaps of 0, 1 or 2 seconds so that same-second ties occur throughout.
+TIE_SAMPLES = [(10, 4), (10, 8), (80, 2)]
+ONE_SAMPLE = [(7, 12)]
+FLAT_SAMPLES = [(i * 10, 4) for i in range(7)]
+_BIG_RNG = random.Random(20260303)         # seeded, so the expected values below are fixed
+BIG_SAMPLES = []
+_t = 0
+for _ in range(20_000):
+    _t += _BIG_RNG.choice([0, 1, 1, 2])
+    BIG_SAMPLES.append((_t, _BIG_RNG.randint(1, 40)))
+
+# ------------------------------------------------------------------- WORKED EXAMPLES
+# (what it exercises, samples, now, span, expected (average, count)).  `now` is a CLOCK
+# instant and need not be an arrival: that is the whole point of a time window, and the
+# rows at 180s and 191s are instants at which nothing arrives and the answer moves anyway.
+# An empty window has no average, so the expected value is None and not 0.0.  Every row is
+# asserted by show_examples() against both the rescan and the timer-driven scan, which is
+# why this table is data and not a comment: a comment can go stale silently, this cannot.
+EXAMPLES = [
+    ("before anything arrives -> None",      SAMPLES,      0,      60,     (None, 0)),
+    ("the first sample's own instant",       SAMPLES,      1,      60,     (5.0, 1)),
+    ("ordinary arrival, two in window",      SAMPLES,      3,      60,     (4.0, 2)),
+    ("three samples in the window",          SAMPLES,      50,     60,     (5.0, 3)),
+    ("the arrival that retires TWO",         SAMPLES,      90,     60,     (4.5, 2)),
+    ("quiet stream, one survivor",           SAMPLES,      180,    60,     (6.0, 1)),
+    ("quiet stream, window EMPTY -> None",   SAMPLES,      191,    60,     (None, 0)),
+    ("the last arrival of all",              SAMPLES,      540,    60,     (8.0, 1)),
+    ("far future -> None, not the last v",   SAMPLES,      10_000, 60,     (None, 0)),
+    ("edge: 1s inside, t=0 still counts",    EDGE,         59,     60,     (10.0, 1)),
+    ("edge: exactly span old, t=0 gone",     EDGE,         60,     60,     (20.0, 1)),
+    ("span = 1s, the sample's own second",   SAMPLES,      3,      1,      (3.0, 1)),
+    ("span = 1s, one second later",          SAMPLES,      4,      1,      (None, 0)),
+    ("span longer than the whole stream",    SAMPLES,      540,    10_000, (5.0, 9)),
+    ("two probes in the SAME second",        TIE_SAMPLES,  10,     60,     (6.0, 2)),
+    ("one sample, ever",                     ONE_SAMPLE,   7,      60,     (12.0, 1)),
+    ("flat stream, six identical samples",   FLAT_SAMPLES, 60,     60,     (4.0, 6)),
+    ("20,000 samples, mid-stream",           BIG_SAMPLES,  10_000, 60,     (21.523076923076925, 65)),
+    ("20,000 samples, past the end",         BIG_SAMPLES,  20_100, 60,     (None, 0)),
+]
 
 
 def window_at(samples, now, span=SPAN):
@@ -166,7 +219,42 @@ def timer_driven_scan(samples, until, span=SPAN, tick=1):
     return out
 
 
+def show_examples():
+    """Print the examples table and assert every row.
+
+    Each row is checked TWO ways: the rescan (average_at, which re-reads every sample) and
+    the timer-driven scan (one incremental window advanced by the clock), which is written
+    without reference to the rescan, so agreement is a check and not a tautology.  The two
+    costs are printed side by side -- the rescan's reads against the timer's ticks.  The
+    tick column counts ticks at THIS row's tick size (1s up to 1000s, 100s beyond, which is
+    exact at `now` because every tick admits all due arrivals and expires everything old
+    enough), and the quiet rows are where the timer loses: 101 ticks at a 100s tick, or
+    10,001 at a 1s one, to hold an answer a 9-sample rescan reproduces in 9 reads.
+    """
+    print(f"{'what it exercises':37s} {'now':>7} {'span':>7} {'n':>6} {'average':>10} "
+          f"{'count':>6} {'reads':>7} {'ticks':>7}")
+    for label, samples, now, span, want in EXAMPLES:
+        avg, count = average_at(samples, now, span)
+        tick = 1 if now <= 1000 else 100          # coarser ticks past a quiet stretch
+        assert now % tick == 0, (label, now, tick)
+        scan_avg, scan_count = timer_driven_scan(samples, now, span, tick)[now]
+        want_avg, want_count = want
+        assert count == want_count, (label, count, want_count)
+        assert (avg is None) == (want_avg is None), (label, avg, want_avg)
+        assert avg is None or abs(avg - want_avg) <= 1e-9 * max(1.0, abs(want_avg)), (
+            label, avg, want_avg)
+        assert scan_count == want_count, (label, 'the timer scan disagrees', scan_count)
+        assert (scan_avg is None and avg is None) or abs(scan_avg - avg) < 1e-9, (
+            label, 'the timer scan disagrees', scan_avg, avg)
+        shown = 'None' if avg is None else f"{avg:.3f}"
+        print(f"{label:37s} {now:>7} {span:>7} {len(samples):>6} {shown:>10} "
+              f"{count:>6} {len(samples):>7} {now // tick + 1:>7}")
+    print(f"all {len(EXAMPLES)} examples agree with the rescan and the timer-driven scan")
+    print()
+
+
 def main():
+    show_examples()
     print(f"SAMPLES (t seconds, v ms) = {SAMPLES}")
     print(f"SPAN = {SPAN}s   window = (now - {SPAN}, now]\n")
 

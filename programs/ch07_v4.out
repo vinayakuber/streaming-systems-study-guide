@@ -1,3 +1,19 @@
+what it exercises                     events    ttl  cap   true  expiry  restarts   held   +ttl  saved  reads  writes
+never expire: the true score               9  never    1     45      45         0      2      2      0      7       7
+ttl = 295, the dormancy itself             9    295    1     45      45         0      2      2      0      7       7
+ttl = 294, one day tighter                 9    294    1     45      29         1      2      2      0      7       7
+ttl = 100: four restarts                   9    100    2     45       8         4      2      1      1      2       2
+ttl = 0: the last event only               9      0    0     45       8         7      2      1      1      9       9
+an empty stream -> no score at all         0  never    5      0       0         0      0      0      0      0       0
+a single signal                            1  never    0      7       7         0      1      1      0      1       1
+the mule at ttl = 294: washed              2    294    1     24       4         1      1      1      0      1       1
+the mule at ttl = 295: kept                2    295    1     24      24         0      1      1      0      1       1
+cache of 0 slots: write-through            9  never    0     45      45         0      2      2      0      9       9
+cache bigger than the data                 9  never   10     45      45         0      2      2      0      2       2
+2,000 accounts, ttl 100, 64 slots      2,200    100   64  2,200     301         0  2,001    102  1,899  2,001   2,001
+2,000 accounts, ttl 0, no cache        2,200      0    0  2,200       1       199  2,001      1  2,000  2,200   2,200
+all 13 examples agree with the true lifetime score
+
 SIGNALS = a@1:+5  a@3:+3  b@50:+4  b@90:+7  a@130:+2  b@220:+9  a@245:+6  b@260:+1  a@540:+8
   true lifetime scores {'a': 24, 'b': 21};  account 'a' is dormant for 295 days
 

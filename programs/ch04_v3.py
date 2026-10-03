@@ -12,6 +12,12 @@ structure whatsoever: a map from each stretch's ENDPOINTS to its length, consult
 neighbours, is O(1) per position against the chapter's O(log runs).  Noticing that the question
 asked only for a count is where the saving comes from.
 
+WORKED EXAMPLES: the EXAMPLES table below holds 15 input/output pairs -- an empty stream with
+no count to report, a single position, a repeat, both sides of the adjacency test (a gap of 1
+merges, a gap of 2 does not), the position that joins two islands, negative and
+billion-apart coordinates, and 10,000 generated positions.  Every row is ASSERTED against
+the rescan AND the chapter's run structure, so the table cannot drift from the code.
+
 Run it:  python3 programs/ch04_v3.py
 """
 
@@ -27,6 +33,39 @@ POSITIONS = [5, 7, 6, 1, 2, 3, 4, 4]
 # within 1 of each other, so every one is its own island and the count only ever rises.  It
 # is the same data the chapter merges runs over -- with G = 1 instead of 47, nothing merges.
 SPARSE = [1, 3, 90, 130, 245, 260, 220, 50, 540]
+
+# A fully dense stretch, negative coordinates, two positions a billion apart, and the scale
+# the file measures at.  These are inputs for the examples table, not alternative versions of
+# the problem.
+DENSE = list(range(20))                     # every position adjacent: never more than one island
+NEGATIVES = [-3, -1, -2, 0]                 # the coordinates are keys, so they may be negative
+FAR_APART = [0, 10**9]                      # two entries in a map, not a billion array slots
+BIG_N = 10_000
+BIG_SHUFFLED = list(range(BIG_N))
+random.Random(20260303).shuffle(BIG_SHUFFLED)          # 0..9,999 in random order -> one stretch
+BIG_ALTERNATE = [2 * i for i in range(BIG_N)]          # every other position -> never merges
+
+# ------------------------------------------------------------------- WORKED EXAMPLES
+# (what it exercises, positions, the island count after the LAST position).  Every row is
+# asserted by show_examples(), which is why the table is data and not a comment: a comment
+# can go stale silently, and this cannot.
+EXAMPLES = [
+    ("empty stream -> no count to report",        [],              None),
+    ("a single position",                         [7],             1),
+    ("the same position three times",             [7, 7, 7],       1),
+    ("a gap of 2: nothing merges",                [5, 7],          2),
+    ("a gap of 1: adjacency merges",              [5, 6],          1),
+    ("the position between two islands",          [5, 7, 6],       1),
+    ("descending arrival",                        [3, 2, 1],       1),
+    ("the chapter's first seven",                 POSITIONS[:7],   1),
+    ("the chapter's sequence",                    POSITIONS,       1),
+    ("the chapter's arrivals at G = 1",           SPARSE,          9),
+    ("0..19 in order: one island throughout",     DENSE,           1),
+    ("negative coordinates",                      NEGATIVES,       1),
+    ("0 and a billion: two map entries",          FAR_APART,       2),
+    ("10,000 shuffled -> one stretch",            BIG_SHUFFLED,    1),
+    ("10,000 every other -> 10,000 islands",      BIG_ALTERNATE,   BIG_N),
+]
 
 
 def count_by_rescan(positions):
@@ -109,7 +148,56 @@ def true_stretch_length(on, q):
     return hi - lo + 1
 
 
+def show_examples():
+    """Print the examples table and assert every row, two independent ways.
+
+    Every row's count is checked against `count_by_rescan` -- the from-scratch reference --
+    and, on the small rows, against the chapter's run structure as well, so three
+    implementations have to agree before this file will run.  The deltas are checked to
+    telescope into the counts on every row.
+
+    The three cost columns are the point of printing it: `map ops` is the endpoint map's fixed
+    two lookups and two writes per position, `rescan` is the reference's set reads, and `runs`
+    is the chapter's run comparisons.  The endpoint map LOSES on short streams (4 ops for one
+    position against the rescan's 1) and TIES at exactly seven positions, where 4n = n(n+1)/2;
+    only past that does it win, and at 10,000 it wins by four orders of magnitude.  A rescan
+    count marked * was not run -- the identity main() asserts, n(n+1)/2, is reported instead,
+    because actually running it at 10,000 would take longer than everything else here.
+    """
+    print(f"{'what it exercises':42s} {'n':>6} {'islands':>8} {'deltas':>14} "
+          f"{'map ops':>9} {'rescan':>14} {'runs':>8}")
+    for label, positions, want in EXAMPLES:
+        small = len(positions) <= 60
+        counts, deltas, _ = count_by_endpoints(
+            positions, verify=true_stretch_length if small else None)
+        got = counts[-1] if counts else None
+        assert got == want, (label, got, want)
+        assert set(deltas) <= {1, 0, -1}, (label, set(deltas))
+        assert all(a + b == c for a, b, c in zip([0] + counts, deltas, counts)), (label, deltas)
+        n = len(positions)
+        if small:
+            want_counts, reads = count_by_rescan(positions)
+            run_counts, runs, _ = count_by_runs(positions)
+            assert counts == want_counts, (label, counts, want_counts)
+            assert run_counts == want_counts, (label, run_counts, want_counts)
+            reads_shown, runs_shown = f"{reads:,}", f"{runs:,}"
+        else:
+            # the rescan's own formula, applied once to the final set instead of after every
+            # position: a stretch starts at every on position whose left neighbour is off
+            on = set(positions)
+            assert sum(1 for q in on if q - 1 not in on) == want, label
+            reads_shown, runs_shown = f"{n * (n + 1) // 2:,}*", "-"
+        counted = {d: deltas.count(d) for d in (1, 0, -1)}
+        shown = f"+{counted[1]}/{counted[0]}/-{counted[-1]}"
+        print(f"{label:42s} {n:>6} {str(got):>8} {shown:>14} "
+              f"{4 * n:>9,} {reads_shown:>14} {runs_shown:>8}")
+    print("  (deltas are counted as +1 isolated / 0 extending one / -1 joining two)")
+    print(f"all {len(EXAMPLES)} examples agree with the rescan")
+    print()
+
+
 def main():
+    show_examples()
     print(f"POSITIONS = {POSITIONS}")
     want, rescan_ops = count_by_rescan(POSITIONS)
     runs_counts, run_ops, runs = count_by_runs(POSITIONS)

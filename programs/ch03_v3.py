@@ -15,6 +15,16 @@ question -- the shared idea is the eviction, not the window.
 The unresolved days are also the watermark's backlog in miniature: they are precisely the
 events the running maximum has not yet passed.
 
+WORKED EXAMPLES: the EXAMPLES table below holds 15 input/output pairs -- the first day of the
+series and the last, an ordinary middle day, both sides of the strict `<` comparison (equal
+days wait, strictly warmer days resolve), a day whose warmer day never comes and the 0 that
+is returned instead of a guess, a single day, an all-cooling run, an all-warming run, a flat
+run, one late record high that resolves ten waiting days at once, and three rows at 20,000
+days including the longest wait in the series.  Every row also pins down the lookahead
+boundary from both sides: a bounded lookahead equal to the true wait is right, and one day
+shorter reports 0.  Every row is ASSERTED, so the table cannot drift from the code: change an
+answer and this file stops running.
+
 Run it:  python3 programs/ch03_v3.py
 """
 
@@ -30,6 +40,85 @@ TEMPS = [5, 3, 7, 2, 6, 1, 9, 4, 8]
 TIED = [5, 5, 5, 6]
 
 N = len(TEMPS)
+
+# One day, a monotone cooling run, a monotone warming run, a flat run, a long slide ending in
+# a single record high, and the 20,000-day scale the program measures at the end (seeded, so
+# the answers below are reproducible).  These are inputs for the examples table, not
+# alternative versions of the problem.
+SINGLE = [7]
+COOLING = [9, 7, 5, 3, 1]
+WARMING = [1, 3, 5, 7, 9]
+FLAT = [4, 4, 4, 4]
+SPIKE = list(range(10, 0, -1)) + [99]              # ten cooling days, then one record high
+BIG_TEMPS = random.Random(20260304).choices(range(1000), k=20_000)
+
+# ------------------------------------------------------------------- WORKED EXAMPLES
+# (what it exercises, temps, day, expected days until the next warmer one).  Every row is
+# asserted by show_examples() against the forward scan AND against the bounded lookahead on
+# both sides of the true wait, which is why the table is data and not a comment: a comment
+# can go stale silently, and this cannot.
+EXAMPLES = [
+    ("day 0, the first day of all",          TEMPS,      0,       2),
+    ("an ordinary day, mid-series",          TEMPS,      4,       2),
+    ("the longest wait in these nine",       TEMPS,      2,       4),
+    ("the record high: never warmer -> 0",   TEMPS,      6,       0),
+    ("the last day, which can only be 0",    TEMPS,      8,       0),
+    ("equal is not warmer, so day 0 waits",  TIED,       0,       3),
+    ("...and the last equal day waits too",  TIED,       2,       1),
+    ("a single day -> 0, not an error",      SINGLE,     0,       0),
+    ("a cooling run: nothing resolves",      COOLING,    0,       0),
+    ("a warming run: resolved next day",     WARMING,    0,       1),
+    ("a flat run: strictness again -> 0",    FLAT,       0,       0),
+    ("one late record resolves everyone",    SPIKE,      0,       10),
+    ("20,000 days, day 0",                   BIG_TEMPS,  0,       2),
+    ("20,000 days, the longest wait",        BIG_TEMPS,  9065,    2195),
+    ("20,000 days, the last day",            BIG_TEMPS,  19999,   0),
+]
+
+
+def show_examples():
+    """Print the examples table and assert every row, two ways.
+
+    Each row is checked against the stack and against the forward scan, which is run on every
+    input here (and cached, since several rows share a series).  The two cost columns are the
+    point of the table: `fwd` is the forward scan's measured comparisons and `steps` is the
+    stack's pushes plus pops.  The stack LOSES on every short series in the table, because it
+    pays a push per day whether or not that day does any work, and the forward scan stops at
+    the first warmer day.  Its win is asymptotic, and the 20,000-day rows are where it shows.
+
+    On the small series each row additionally pins the bounded lookahead from BOTH sides: a
+    lookahead equal to the true wait gives the true answer, and one day shorter gives 0 --
+    the bounded view goes BACKWARDS, reporting "no warmer day ever" for a day whose warmer day
+    simply had not arrived yet.  That is the same price the bounded watermark pays, and the
+    unbounded stack never pays it: one late record high (the SPIKE row) resolves every waiting
+    day at once, exactly as a running maximum jumps and stays there.
+    """
+    cache = {}
+    print(f"{'what it exercises':37s} {'days':>6} {'day':>6} {'temp':>5} {'answer':>7} "
+          f"{'fwd':>8} {'steps':>8}  verdict")
+    for label, temps, day, want in EXAMPLES:
+        key = id(temps)
+        if key not in cache:
+            cache[key] = (naive(temps), next_warmer(temps))
+        (ref, ops), (got, pushes, pops, _, unresolved) = cache[key]
+        assert got[day] == want, (label, got[day], want)
+        assert ref[day] == want, (label, 'the forward scan disagrees', ref[day], want)
+        assert pushes == len(temps) and pops == len(temps) - len(unresolved), label
+        if len(temps) <= 50:
+            # both sides of the lookahead the sliding-window reflex would have to choose
+            if want:
+                assert next_warmer_within(temps, want)[day] == want, (label, 'bound too tight')
+                if want > 1:
+                    assert next_warmer_within(temps, want - 1)[day] == 0, (label, 'bound-1')
+            else:
+                assert next_warmer_within(temps, len(temps))[day] == 0, (label, 'spurious')
+        steps = pushes + pops
+        verdict = ("stack wins" if steps < ops else
+                   "stack LOSES" if steps > ops else "tie")
+        print(f"{label:37s} {len(temps):>6} {day:>6} {temps[day]:>5} {want:>7} "
+              f"{ops:>8,} {steps:>8,}  {verdict}")
+    print(f"all {len(EXAMPLES)} examples agree with the forward scan")
+    print()
 
 
 def naive(temps):
@@ -94,6 +183,7 @@ def next_warmer_within(temps, lookahead):
 
 
 def main():
+    show_examples()
     print("TEMPS =", "  ".join(f"{i}:{v}" for i, v in enumerate(TEMPS)))
     want, naive_ops = naive(TEMPS)
     got, pushes, pops, biggest, unresolved = next_warmer(TEMPS)

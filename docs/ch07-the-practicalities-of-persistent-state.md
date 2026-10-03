@@ -482,6 +482,13 @@ there a dropped accumulator UNDERSTATED a total, here a dropped visitor is recou
 OVERSTATES the distinct count.  The way out is to stop being exact: a sketch answers "how
 many distinct" in a fixed few kilobytes at any cardinality, with a small, measurable error.
 
+WORKED EXAMPLES: the EXAMPLES table below holds 13 input/output pairs -- the chapter's own
+nine views, both sides of the 295-hour silence the expiry turns on, a day-long allowance that
+saves nothing, an empty day, a single view, a thousand views from one visitor, both sides of
+the sketch's k-th slot, and two generated streams at 4,000 and 12,000 distinct visitors.
+Every row is ASSERTED against the exact set AND against the sketch, so the table cannot drift
+from the code: change an answer and this file stops running.
+
 Run it:  python3 programs/ch07_v2.py
 """
 import hashlib
@@ -498,6 +505,13 @@ TRUE_DISTINCT = 2
 DAY = 86_400           # the window the question names: distinct per DAY
 K = 256                # the sketch's size, in retained hash values
 INFINITY = float("inf")
+
+# Inputs for the examples table, not alternative versions of the problem: an empty day, one
+# view, and one visitor who will not stop clicking.  The generated streams the table also
+# needs are built just below `stream_of`, which is the function that makes them.
+EMPTY_DAY = []
+ONE_VIEW = [("a", 0)]
+ONE_VISITOR = [("solo", 0)] * 1_000
 
 
 def exact_distinct(views):
@@ -604,7 +618,86 @@ def stream_of(cardinality, repeats, seed=20260303):
     return views
 
 
+# More inputs for the examples table -- these need `stream_of`, so they are declared here
+# rather than with the constants above.  They are inputs, not alternative versions of the
+# problem: the two sides of the sketch's k-th slot, a mid-range day, and two generated days at
+# the scale that forces the question (the statement says tens of millions; 12,000 is as far as
+# a program meant to finish in seconds can honestly go, and the sketch's state is already flat
+# by then).
+UNDER_K = stream_of(K - 1, 3)        # 255 distinct: one short of the sketch's capacity
+AT_K = stream_of(K, 3)               # 256 distinct: exactly full
+MID_STREAM = stream_of(1_000, 2)
+BIG_STREAM = stream_of(4_000, 1)
+BIGGER_STREAM = stream_of(12_000, 1)
+
+# ------------------------------------------------------------------- WORKED EXAMPLES
+# (what it exercises, views, ttl, distinct, expiry's count, sketch estimate, visitors saved).
+# A ttl of None means no expiry is applied on that row -- `distinct_with_expiry` rescans the
+# live set on every view, which is quadratic, and running it on 12,000 visitors would cost
+# more than the whole program.  That cost is itself part of the objection to keeping the
+# visitors.  Every row is asserted by show_examples(), which is why the table is data and not
+# a comment: a comment can go stale silently, and this cannot.
+EXAMPLES = [
+    ("the chapter's 9 views, 2 visitors",    VIEWS,         None,     2,  None,     2, None),
+    ("ttl = 295, the longest silence",       VIEWS,          295,     2,     2,     2,    0),
+    ("ttl = 294, one hour tighter",          VIEWS,          294,     2,     3,     2,    0),
+    ("ttl = a whole day: saves nothing",     VIEWS,          DAY,     2,     2,     2,    0),
+    ("ttl = 0: saves 2, overstates to 9",    VIEWS,            0,     2,     9,     2,    2),
+    ("an empty day -> 0, not an error",      EMPTY_DAY,     None,     0,  None,     0, None),
+    ("a single view",                        ONE_VIEW,      None,     1,  None,     1, None),
+    ("1 visitor, 1,000 views",               ONE_VISITOR,   None,     1,  None,     1, None),
+    ("255 distinct: no estimate, the set",   UNDER_K,       None,   255,  None,   255, None),
+    ("256 distinct: estimator takes over",   AT_K,          None,   256,  None,   257, None),
+    ("1,000 distinct, mid-range",            MID_STREAM,    None, 1_000,  None,   983, None),
+    ("4,000 distinct (generated)",           BIG_STREAM,    None, 4_000,  None,  3_721, None),
+    ("12,000 distinct (generated)",          BIGGER_STREAM, None, 12_000, None, 11_544, None),
+]
+
+
+def show_examples():
+    """Print the examples table and assert every row, two ways.
+
+    Each row is checked against `exact_distinct` -- the brute-force set, which is the
+    reference answer and cannot be wrong -- and against the sketch, which must agree EXACTLY
+    below k and stay inside three of its own standard errors above it.  The two slot columns
+    are the costs, printed per row so the reader can see where the sketch wins: above k it
+    holds 256 slots against the exact set's thousands, and at or below k it holds the same
+    number the set does and buys nothing at all.  The `saved` column is the same story for the
+    expiry -- inside one day it saves zero visitors, every time.
+    """
+    se = K ** -0.5
+    print(f"{'what it exercises':36s} {'views':>7} {'ttl':>6} {'distinct':>9} {'estimate':>9} "
+          f"{'set slots':>10} {'sketch':>7} {'expiry':>7} {'saved':>6}")
+    for label, views, ttl, want, want_expiry, want_est, want_saved in EXAMPLES:
+        exact, exact_slots = exact_distinct(views)
+        est, sketch_slots = kmv_sketch(views)
+        assert exact == want, (label, exact, want)
+        assert est == want_est, (label, est, want_est)
+        if exact < K:
+            assert est == exact, (label, "below k the sketch IS the set", est, exact)
+            assert sketch_slots == exact_slots, (label, sketch_slots, exact_slots)
+        else:
+            assert sketch_slots == K, (label, sketch_slots)
+            assert abs(est - exact) / exact < 3 * se, (label, est, exact, se)
+        if ttl is None:
+            ttl_s, exp_s, sav_s = "-", "-", "-"
+        else:
+            got, _, _ = distinct_with_expiry(views, ttl)
+            end = max(t for _, t in views)
+            saved = max(held_at(views, INFINITY, t) - held_at(views, ttl, t)
+                        for t in range(end + 1))
+            assert got == want_expiry, (label, got, want_expiry)
+            assert saved == want_saved, (label, saved, want_saved)
+            assert got >= exact, (label, "the expiry can only overstate", got, exact)
+            ttl_s, exp_s, sav_s = str(ttl), str(got), str(saved)
+        print(f"{label:36s} {len(views):>7,} {ttl_s:>6} {exact:>9,} {est:>9,} "
+              f"{exact_slots:>10,} {sketch_slots:>7,} {exp_s:>7} {sav_s:>6}")
+    print(f"all {len(EXAMPLES)} examples agree with the exact set")
+    print()
+
+
 def main():
+    show_examples()
     print("VIEWS =", "  ".join(f"{v}@{t}" for v, t in VIEWS), f"   ({len(VIEWS)} views)")
     distinct, slots = exact_distinct(VIEWS)
     views_count = count_the_views(VIEWS)
@@ -755,6 +848,22 @@ if __name__ == "__main__":
 Running it prints:
 
 ```
+what it exercises                      views    ttl  distinct  estimate  set slots  sketch  expiry  saved
+the chapter's 9 views, 2 visitors          9      -         2         2          2       2       -      -
+ttl = 295, the longest silence             9    295         2         2          2       2       2      0
+ttl = 294, one hour tighter                9    294         2         2          2       2       3      0
+ttl = a whole day: saves nothing           9  86400         2         2          2       2       2      0
+ttl = 0: saves 2, overstates to 9          9      0         2         2          2       2       9      2
+an empty day -> 0, not an error            0      -         0         0          0       0       -      -
+a single view                              1      -         1         1          1       1       -      -
+1 visitor, 1,000 views                 1,000      -         1         1          1       1       -      -
+255 distinct: no estimate, the set       765      -       255       255        255     255       -      -
+256 distinct: estimator takes over       768      -       256       257        256     256       -      -
+1,000 distinct, mid-range              2,000      -     1,000       983      1,000     256       -      -
+4,000 distinct (generated)             4,000      -     4,000     3,721      4,000     256       -      -
+12,000 distinct (generated)           12,000      -    12,000    11,544     12,000     256       -      -
+all 13 examples agree with the exact set
+
 VIEWS = a@1  a@3  b@50  b@90  a@130  b@220  a@245  b@260  a@540    (9 views)
   distinct visitors      : 2   (2 slots held)
   +1 per event           : 9   (1 slot held -- and the wrong question)
@@ -847,6 +956,13 @@ back reads it in.  Then memory is bounded by ACTIVE shoppers and correctness is 
 nothing -- and the honest price, measured below, is that durable storage is now bounded by
 nothing either.  The fix does not shrink the data, it moves it to where growth is affordable.
 
+WORKED EXAMPLES: the EXAMPLES table below holds 13 input/output pairs -- the chapter's own
+nine additions, both sides of the 295-hour silence the sweep turns on, both sides of the hour
+at which a week-long allowance starts saving anything, an empty stream, a single addition, a
+cart erased with nothing to come back to, and two generated streams at 2,000 one-visit
+shoppers.  Every row is ASSERTED twice, against the true cart and against the store, so the
+table cannot drift from the code: change an answer and this file stops running.
+
 Run it:  python3 programs/ch07_v3.py
 """
 import random
@@ -865,6 +981,82 @@ INFINITY = float("inf")
 # many shoppers who visit once, plus one who never leaves.
 ONEOFF = 2_000
 BIG_TTL = 100
+
+# Inputs for the examples table, not alternative versions of the problem: an empty stream, one
+# addition, a pair of additions ten hours apart (so one allowance sits on each side of the
+# gap), and the asymptotic stream -- the same shape main() measures below, built here so the
+# table can reach it too.
+NO_ADDITIONS = []
+ONE_ADDITION = [("x", 5, 0)]
+TWO_ADDITIONS = [("x", 5, 0), ("x", 3, 10)]
+BIG_ADDITIONS = sorted([(f"once{i}", 1, i) for i in range(1, ONEOFF + 1)]
+                       + [("regular", 1, t) for t in range(5, ONEOFF, 10)],
+                       key=lambda e: e[2])
+
+# ------------------------------------------------------------------- WORKED EXAMPLES
+# (what it exercises, additions, ttl, hour observed, cart value kept by DELETING, carts saved
+# at that hour).  The hour is an input and not a detail: `carts_held_at` only reports what
+# memory holds at the moment you look, and the same allowance saves 0 carts at hour 413 and 2
+# at hour 429 -- so a table without the hour in it would be reporting an opinion.  Every row
+# is asserted by show_examples(), which is why the table is data and not a comment: a comment
+# can go stale silently, and this cannot.
+EXAMPLES = [
+    ("never expire: the whole cart",          ADDITIONS,     INFINITY, 540,  45, 0),
+    ("ttl = 295, the longest silence",        ADDITIONS,          295, 540,  45, 0),
+    ("ttl = 294, one hour tighter",           ADDITIONS,          294, 540,  29, 0),
+    ("ttl = a week, at the last addition",    ADDITIONS,          168, 540,   8, 1),
+    ("ttl = a week, at hour 413: saves 0",    ADDITIONS,          168, 413,   8, 0),
+    ("ttl = a week, at hour 429: saves 2",    ADDITIONS,          168, 429,   8, 2),
+    ("ttl = 0: one cart at a time",           ADDITIONS,            0, 540,   8, 1),
+    ("an empty stream -> no carts at all",    NO_ADDITIONS,  INFINITY,   0,   0, 0),
+    ("a single addition",                     ONE_ADDITION,  INFINITY,   0,   5, 0),
+    ("one gap of 10, ttl = 10: kept",         TWO_ADDITIONS,       10,  10,   8, 0),
+    ("one gap of 10, ttl = 9: restarted",     TWO_ADDITIONS,        9,  10,   3, 0),
+    ("2,000 one-visit shoppers, ttl = 100",   BIG_ADDITIONS,      100, 2000, 301, 1899),
+    ("2,000 one-visit shoppers, ttl = 0",     BIG_ADDITIONS,        0, 2000,   1, 2000),
+]
+
+
+def truth_of(additions):
+    """The true cart per shopper: every item, in arrival order.  The brute-force reference the
+    examples table checks the store against -- it is the requirement written out, so it cannot
+    be wrong, and anything that disagrees with it is the thing that is broken."""
+    out = {}
+    for s, price, _ in additions:
+        out.setdefault(s, []).append(price)
+    return out
+
+
+def show_examples():
+    """Print the examples table and assert every row, two ways.
+
+    Each row is checked against `truth_of` -- the brute-force cart, which cannot be wrong --
+    and against the store, which must reproduce it exactly on every row.  The two cost
+    columns are printed per row so the reader can see where the bound is worth anything: at
+    the chapter's scale the allowance saves 0 carts and loses up to 37 of the 45 units of cart
+    value, and the saving only turns positive at the asymptotic scale on the last two rows.
+    """
+    print(f"{'what it exercises':37s} {'events':>7} {'ttl':>6} {'hour':>6} {'true':>6} "
+          f"{'kept':>6} {'held':>6} {'+ttl':>6} {'saved':>6} {'reloads':>8}")
+    for label, additions, ttl, hour, want_kept, want_saved in EXAMPLES:
+        plain, peak, _ = final_carts(additions, ttl, use_store=False)
+        stored, peak_s, reloads = final_carts(additions, ttl, use_store=True)
+        truth = truth_of(additions)
+        kept = sum(sum(items) for items in plain.values())
+        true_value = sum(sum(items) for items in truth.values())
+        held = carts_held_at(additions, INFINITY, hour)
+        held_ttl = carts_held_at(additions, ttl, hour)
+        assert kept == want_kept, (label, kept, want_kept)
+        assert held - held_ttl == want_saved, (label, held - held_ttl, want_saved)
+        assert stored == truth, (label, "the store must reproduce the true cart")
+        for s, items in plain.items():
+            assert is_suffix(items, truth[s]), (label, s, items)   # only ever a suffix
+        assert kept <= true_value, (label, kept, true_value)
+        ttl_s = "never" if ttl == INFINITY else str(ttl)
+        print(f"{label:37s} {len(additions):>7,} {ttl_s:>6} {hour:>6,} {true_value:>6,} "
+              f"{kept:>6,} {held:>6,} {held_ttl:>6,} {held - held_ttl:>6,} {reloads:>8,}")
+    print(f"all {len(EXAMPLES)} examples agree with the true cart")
+    print()
 
 
 def longest_silence(additions, shopper):
@@ -972,6 +1164,7 @@ def is_suffix(part, whole):
 
 
 def main():
+    show_examples()
     silences = {s: longest_silence(ADDITIONS, s) for s in ("a", "b")}
     print("ADDITIONS =", "  ".join(f"{s}@{t}:{p}" for s, p, t in ADDITIONS))
     print(f"  true carts {TRUE_CARTS}, values {TRUE_VALUE}")
@@ -1161,6 +1354,22 @@ if __name__ == "__main__":
 Running it prints:
 
 ```
+what it exercises                      events    ttl   hour   true   kept   held   +ttl  saved  reloads
+never expire: the whole cart                9  never    540     45     45      2      2      0        0
+ttl = 295, the longest silence              9    295    540     45     45      2      2      0        0
+ttl = 294, one hour tighter                 9    294    540     45     29      2      2      0        1
+ttl = a week, at the last addition          9    168    540     45      8      2      1      1        1
+ttl = a week, at hour 413: saves 0          9    168    413     45      8      2      2      0        1
+ttl = a week, at hour 429: saves 2          9    168    429     45      8      2      0      2        1
+ttl = 0: one cart at a time                 9      0    540     45      8      2      1      1        7
+an empty stream -> no carts at all          0  never      0      0      0      0      0      0        0
+a single addition                           1  never      0      5      5      1      1      0        0
+one gap of 10, ttl = 10: kept               2     10     10      8      8      1      1      0        0
+one gap of 10, ttl = 9: restarted           2      9     10      8      3      1      1      0        1
+2,000 one-visit shoppers, ttl = 100     2,200    100  2,000  2,200    301  2,001    102  1,899        0
+2,000 one-visit shoppers, ttl = 0       2,200      0  2,000  2,200      1  2,001      1  2,000      199
+all 13 examples agree with the true cart
+
 ADDITIONS = a@1:5  a@3:3  b@50:4  b@90:7  a@130:2  b@220:9  a@245:6  b@260:1  a@540:8
   true carts {'a': [5, 3, 2, 6, 8], 'b': [4, 7, 9, 1]}, values {'a': 24, 'b': 21}
   longest silence per shopper {'a': 295, 'b': 130}, allowance 168 hours (a week)
@@ -1257,6 +1466,13 @@ front of it -- and that cache is bounded by exactly the rule the chapter used on
 with the opposite consequence, because a cache miss RE-READS and a state expiry RESTARTS.
 The same bound is safe in one place and a published laundering schedule in the other.
 
+WORKED EXAMPLES: the EXAMPLES table below holds 13 input/output pairs -- the chapter's own
+nine signals, both sides of the 295-day dormancy the expiry turns on, a laundering pair that
+is washed on one side of it and kept on the other, an empty stream, a single signal, a cache
+of 0 slots and a cache bigger than the data, and two generated streams at 2,000 accounts.
+Every row is ASSERTED three ways, against the true score, the store and the cache, so the
+table cannot drift from the code: change an answer and this file stops running.
+
 Run it:  python3 programs/ch07_v4.py
 """
 import random
@@ -1273,6 +1489,77 @@ INFINITY = float("inf")
 # The scale at which any of this matters: many accounts seen once, one that never stops.
 ONEOFF = 2_000
 BIG_TTL = 100
+
+# Inputs for the examples table, not alternative versions of the problem: an empty stream, one
+# signal, the laundering pair the dormancy allowance decides, and the asymptotic stream -- the
+# same shape main() measures below, built here so the table can reach it too.
+NO_SIGNALS = []
+ONE_SIGNAL = [("solo", 7, 0)]
+LAUNDERING = [("mule", 20, 0), ("mule", 4, DORMANCY)]
+BIG_SIGNALS = sorted([(f"once{i}", 1, i) for i in range(1, ONEOFF + 1)]
+                     + [("regular", 1, t) for t in range(5, ONEOFF, 10)],
+                     key=lambda e: e[2])
+
+# ------------------------------------------------------------------- WORKED EXAMPLES
+# (what it exercises, signals, ttl, cache capacity, points the EXPIRY still has, restarts).
+# The expiry's total is the expected value because it is the only one that moves: the store
+# and every cache capacity return the true score on every row, which is the point.  Every row
+# is asserted by show_examples(), which is why the table is data and not a comment: a comment
+# can go stale silently, and this cannot.
+EXAMPLES = [
+    ("never expire: the true score",         SIGNALS,     INFINITY,    1,  45,   0),
+    ("ttl = 295, the dormancy itself",       SIGNALS,     DORMANCY,    1,  45,   0),
+    ("ttl = 294, one day tighter",           SIGNALS,   DORMANCY - 1,  1,  29,   1),
+    ("ttl = 100: four restarts",             SIGNALS,          100,    2,   8,   4),
+    ("ttl = 0: the last event only",         SIGNALS,            0,    0,   8,   7),
+    ("an empty stream -> no score at all",   NO_SIGNALS,  INFINITY,    5,   0,   0),
+    ("a single signal",                      ONE_SIGNAL,  INFINITY,    0,   7,   0),
+    ("the mule at ttl = 294: washed",        LAUNDERING, DORMANCY - 1, 1,   4,   1),
+    ("the mule at ttl = 295: kept",          LAUNDERING,  DORMANCY,    1,  24,   0),
+    ("cache of 0 slots: write-through",      SIGNALS,     INFINITY,    0,  45,   0),
+    ("cache bigger than the data",           SIGNALS,     INFINITY,   10,  45,   0),
+    ("2,000 accounts, ttl 100, 64 slots",    BIG_SIGNALS,      100,   64, 301,   0),
+    ("2,000 accounts, ttl 0, no cache",      BIG_SIGNALS,        0,    0,   1, 199),
+]
+
+
+def show_examples():
+    """Print the examples table and assert every row, three ways.
+
+    `true_scores` is the requirement written out, so it is the reference that cannot be wrong;
+    every row is checked against it, against the store, and against the cache at that row's
+    capacity.  The cost columns are printed per row so the reader can see what each answer
+    buys: `saved` is the scores the expiry stops holding -- 0 at the chapter's scale, where
+    the expiry has already cost 16 of account 'a''s 24 points, and 1,899 only on the last two
+    rows -- against the `reads` and `writes` the cache pays to be right at every one of them.
+    """
+    print(f"{'what it exercises':36s} {'events':>7} {'ttl':>6} {'cap':>4} {'true':>6} "
+          f"{'expiry':>7} {'restarts':>9} {'held':>6} {'+ttl':>6} {'saved':>6} "
+          f"{'reads':>6} {'writes':>7}")
+    for label, signals, ttl, cap, want_expiry, want_restarts in EXAMPLES:
+        truth = true_scores(signals)
+        forever, _ = score_in_memory_forever(signals)
+        stored, held_between, _ = score_in_a_store(signals)
+        cached, reads, writes, _ = score_with_cache(signals, cap)
+        expired, _, restarts = score_with_expiry(signals, ttl)
+        day = max((t for *_, t in signals), default=0)
+        held = held_at(signals, INFINITY, day)
+        held_ttl = held_at(signals, ttl, day)
+        true_total = sum(truth.values())
+        assert sum(expired.values()) == want_expiry, (label, sum(expired.values()), want_expiry)
+        assert restarts == want_restarts, (label, restarts, want_restarts)
+        assert forever == truth, (label, "keeping everything must be exact")
+        assert stored == truth, (label, "the store must be exact")
+        assert cached == truth, (label, "and so must the cache, at every capacity")
+        assert held_between == 0, (label, "the streaming layer holds nothing between events")
+        for acct in truth:
+            assert expired.get(acct, 0) <= truth[acct], (label, acct)   # only ever too low
+        ttl_s = "never" if ttl == INFINITY else str(ttl)
+        print(f"{label:36s} {len(signals):>7,} {ttl_s:>6} {cap:>4} {true_total:>6,} "
+              f"{sum(expired.values()):>7,} {restarts:>9,} {held:>6,} {held_ttl:>6,} "
+              f"{held - held_ttl:>6,} {reads:>6,} {writes:>7,}")
+    print(f"all {len(EXAMPLES)} examples agree with the true lifetime score")
+    print()
 
 
 def true_scores(signals):
@@ -1382,6 +1669,7 @@ def held_at(signals, ttl, t):
 
 
 def main():
+    show_examples()
     truth = true_scores(SIGNALS)
     print("SIGNALS =", "  ".join(f"{a}@{t}:+{p}" for a, p, t in SIGNALS))
     print(f"  true lifetime scores {truth};  account 'a' is dormant for {DORMANCY} days\n")
@@ -1534,6 +1822,22 @@ if __name__ == "__main__":
 Running it prints:
 
 ```
+what it exercises                     events    ttl  cap   true  expiry  restarts   held   +ttl  saved  reads  writes
+never expire: the true score               9  never    1     45      45         0      2      2      0      7       7
+ttl = 295, the dormancy itself             9    295    1     45      45         0      2      2      0      7       7
+ttl = 294, one day tighter                 9    294    1     45      29         1      2      2      0      7       7
+ttl = 100: four restarts                   9    100    2     45       8         4      2      1      1      2       2
+ttl = 0: the last event only               9      0    0     45       8         7      2      1      1      9       9
+an empty stream -> no score at all         0  never    5      0       0         0      0      0      0      0       0
+a single signal                            1  never    0      7       7         0      1      1      0      1       1
+the mule at ttl = 294: washed              2    294    1     24       4         1      1      1      0      1       1
+the mule at ttl = 295: kept                2    295    1     24      24         0      1      1      0      1       1
+cache of 0 slots: write-through            9  never    0     45      45         0      2      2      0      9       9
+cache bigger than the data                 9  never   10     45      45         0      2      2      0      2       2
+2,000 accounts, ttl 100, 64 slots      2,200    100   64  2,200     301         0  2,001    102  1,899  2,001   2,001
+2,000 accounts, ttl 0, no cache        2,200      0    0  2,200       1       199  2,001      1  2,000  2,200   2,200
+all 13 examples agree with the true lifetime score
+
 SIGNALS = a@1:+5  a@3:+3  b@50:+4  b@90:+7  a@130:+2  b@220:+9  a@245:+6  b@260:+1  a@540:+8
   true lifetime scores {'a': 24, 'b': 21};  account 'a' is dormant for 295 days
 

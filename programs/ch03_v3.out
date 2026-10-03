@@ -1,3 +1,21 @@
+what it exercises                       days    day  temp  answer      fwd    steps  verdict
+day 0, the first day of all                9      0     5       2       14       16  stack LOSES
+an ordinary day, mid-series                9      4     6       2       14       16  stack LOSES
+the longest wait in these nine             9      2     7       4       14       16  stack LOSES
+the record high: never warmer -> 0         9      6     9       0       14       16  stack LOSES
+the last day, which can only be 0          9      8     8       0       14       16  stack LOSES
+equal is not warmer, so day 0 waits        4      0     5       3        6        7  stack LOSES
+...and the last equal day waits too        4      2     5       1        6        7  stack LOSES
+a single day -> 0, not an error            1      0     7       0        0        1  stack LOSES
+a cooling run: nothing resolves            5      0     9       0       10        5  stack wins
+a warming run: resolved next day           5      0     1       1        4        9  stack LOSES
+a flat run: strictness again -> 0          4      0     4       0        6        4  stack wins
+one late record resolves everyone         11      0    10      10       55       21  stack wins
+20,000 days, day 0                     20000      0   285       2  353,878   39,967  stack wins
+20,000 days, the longest wait          20000   9065   998    2195  353,878   39,967  stack wins
+20,000 days, the last day              20000  19999   611       0  353,878   39,967  stack wins
+all 15 examples agree with the forward scan
+
 TEMPS = 0:5  1:3  2:7  3:2  4:6  5:1  6:9  7:4  8:8
   naive  : [2, 1, 4, 1, 2, 1, 0, 1, 0]   (14 forward comparisons)
   stack  : [2, 1, 4, 1, 2, 1, 0, 1, 0]   (9 pushes + 7 pops = 16 steps -- the stack LOSES at this size)

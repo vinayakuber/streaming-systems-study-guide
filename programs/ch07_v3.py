@@ -13,6 +13,13 @@ back reads it in.  Then memory is bounded by ACTIVE shoppers and correctness is 
 nothing -- and the honest price, measured below, is that durable storage is now bounded by
 nothing either.  The fix does not shrink the data, it moves it to where growth is affordable.
 
+WORKED EXAMPLES: the EXAMPLES table below holds 13 input/output pairs -- the chapter's own
+nine additions, both sides of the 295-hour silence the sweep turns on, both sides of the hour
+at which a week-long allowance starts saving anything, an empty stream, a single addition, a
+cart erased with nothing to come back to, and two generated streams at 2,000 one-visit
+shoppers.  Every row is ASSERTED twice, against the true cart and against the store, so the
+table cannot drift from the code: change an answer and this file stops running.
+
 Run it:  python3 programs/ch07_v3.py
 """
 import random
@@ -31,6 +38,82 @@ INFINITY = float("inf")
 # many shoppers who visit once, plus one who never leaves.
 ONEOFF = 2_000
 BIG_TTL = 100
+
+# Inputs for the examples table, not alternative versions of the problem: an empty stream, one
+# addition, a pair of additions ten hours apart (so one allowance sits on each side of the
+# gap), and the asymptotic stream -- the same shape main() measures below, built here so the
+# table can reach it too.
+NO_ADDITIONS = []
+ONE_ADDITION = [("x", 5, 0)]
+TWO_ADDITIONS = [("x", 5, 0), ("x", 3, 10)]
+BIG_ADDITIONS = sorted([(f"once{i}", 1, i) for i in range(1, ONEOFF + 1)]
+                       + [("regular", 1, t) for t in range(5, ONEOFF, 10)],
+                       key=lambda e: e[2])
+
+# ------------------------------------------------------------------- WORKED EXAMPLES
+# (what it exercises, additions, ttl, hour observed, cart value kept by DELETING, carts saved
+# at that hour).  The hour is an input and not a detail: `carts_held_at` only reports what
+# memory holds at the moment you look, and the same allowance saves 0 carts at hour 413 and 2
+# at hour 429 -- so a table without the hour in it would be reporting an opinion.  Every row
+# is asserted by show_examples(), which is why the table is data and not a comment: a comment
+# can go stale silently, and this cannot.
+EXAMPLES = [
+    ("never expire: the whole cart",          ADDITIONS,     INFINITY, 540,  45, 0),
+    ("ttl = 295, the longest silence",        ADDITIONS,          295, 540,  45, 0),
+    ("ttl = 294, one hour tighter",           ADDITIONS,          294, 540,  29, 0),
+    ("ttl = a week, at the last addition",    ADDITIONS,          168, 540,   8, 1),
+    ("ttl = a week, at hour 413: saves 0",    ADDITIONS,          168, 413,   8, 0),
+    ("ttl = a week, at hour 429: saves 2",    ADDITIONS,          168, 429,   8, 2),
+    ("ttl = 0: one cart at a time",           ADDITIONS,            0, 540,   8, 1),
+    ("an empty stream -> no carts at all",    NO_ADDITIONS,  INFINITY,   0,   0, 0),
+    ("a single addition",                     ONE_ADDITION,  INFINITY,   0,   5, 0),
+    ("one gap of 10, ttl = 10: kept",         TWO_ADDITIONS,       10,  10,   8, 0),
+    ("one gap of 10, ttl = 9: restarted",     TWO_ADDITIONS,        9,  10,   3, 0),
+    ("2,000 one-visit shoppers, ttl = 100",   BIG_ADDITIONS,      100, 2000, 301, 1899),
+    ("2,000 one-visit shoppers, ttl = 0",     BIG_ADDITIONS,        0, 2000,   1, 2000),
+]
+
+
+def truth_of(additions):
+    """The true cart per shopper: every item, in arrival order.  The brute-force reference the
+    examples table checks the store against -- it is the requirement written out, so it cannot
+    be wrong, and anything that disagrees with it is the thing that is broken."""
+    out = {}
+    for s, price, _ in additions:
+        out.setdefault(s, []).append(price)
+    return out
+
+
+def show_examples():
+    """Print the examples table and assert every row, two ways.
+
+    Each row is checked against `truth_of` -- the brute-force cart, which cannot be wrong --
+    and against the store, which must reproduce it exactly on every row.  The two cost
+    columns are printed per row so the reader can see where the bound is worth anything: at
+    the chapter's scale the allowance saves 0 carts and loses up to 37 of the 45 units of cart
+    value, and the saving only turns positive at the asymptotic scale on the last two rows.
+    """
+    print(f"{'what it exercises':37s} {'events':>7} {'ttl':>6} {'hour':>6} {'true':>6} "
+          f"{'kept':>6} {'held':>6} {'+ttl':>6} {'saved':>6} {'reloads':>8}")
+    for label, additions, ttl, hour, want_kept, want_saved in EXAMPLES:
+        plain, peak, _ = final_carts(additions, ttl, use_store=False)
+        stored, peak_s, reloads = final_carts(additions, ttl, use_store=True)
+        truth = truth_of(additions)
+        kept = sum(sum(items) for items in plain.values())
+        true_value = sum(sum(items) for items in truth.values())
+        held = carts_held_at(additions, INFINITY, hour)
+        held_ttl = carts_held_at(additions, ttl, hour)
+        assert kept == want_kept, (label, kept, want_kept)
+        assert held - held_ttl == want_saved, (label, held - held_ttl, want_saved)
+        assert stored == truth, (label, "the store must reproduce the true cart")
+        for s, items in plain.items():
+            assert is_suffix(items, truth[s]), (label, s, items)   # only ever a suffix
+        assert kept <= true_value, (label, kept, true_value)
+        ttl_s = "never" if ttl == INFINITY else str(ttl)
+        print(f"{label:37s} {len(additions):>7,} {ttl_s:>6} {hour:>6,} {true_value:>6,} "
+              f"{kept:>6,} {held:>6,} {held_ttl:>6,} {held - held_ttl:>6,} {reloads:>8,}")
+    print(f"all {len(EXAMPLES)} examples agree with the true cart")
+    print()
 
 
 def longest_silence(additions, shopper):
@@ -138,6 +221,7 @@ def is_suffix(part, whole):
 
 
 def main():
+    show_examples()
     silences = {s: longest_silence(ADDITIONS, s) for s in ("a", "b")}
     print("ADDITIONS =", "  ".join(f"{s}@{t}:{p}" for s, p, t in ADDITIONS))
     print(f"  true carts {TRUE_CARTS}, values {TRUE_VALUE}")

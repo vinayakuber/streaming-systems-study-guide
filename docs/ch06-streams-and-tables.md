@@ -477,6 +477,13 @@ the fold reached is the thing that has to be carried across.  Subscribing from "
 instead of from the snapshot's version is the bug, and it is silent: the copy answers
 every read confidently with a value that stopped being true during start-up.
 
+WORKED EXAMPLES: the EXAMPLES table below holds 14 input/output pairs -- the correct
+handover, both sides of the version boundary (one entry of overlap, one entry of gap), a
+gap that a live entry silently repairs, a delete inside the gap, an empty log, a one-entry
+log, a log with no repeated keys where the warm start reads MORE than a cold one, and the
+20,000-change scale.  Every row is ASSERTED against a cold start, so the table cannot
+drift from the code: change the answer and this file stops running.
+
 Run it:  python3 programs/ch06_v2.py
 """
 import random
@@ -494,6 +501,44 @@ ABSENT = object()             # not a value: the key is not in the table at all
 # The snapshot was taken two changes before the end of the log.  A real snapshot is
 # always behind: it is written periodically, not at the instant of a crash.
 SNAPSHOT_VERSION = 7
+
+# An empty log, a one-entry log, a log whose keys never repeat (so compaction has nothing
+# to drop), the chapter's log with a delete appended, a different live entry, and the scale
+# at which a snapshot is worth writing.  These are inputs for the examples table, not
+# alternative versions of the problem.
+EMPTY_LOG = []
+ONE_ENTRY = [("a", 5)]
+DISTINCT_LOG = [("a", 1), ("b", 2), ("c", 3), ("d", 4), ("e", 5)]
+LOG_DEL = LOG + [("b", TOMBSTONE)]
+LIVE_B = [("b", 99)]
+BIG_KEY_COUNT, BIG_CHANGE_COUNT = 50, 20_000
+BIG_LOG = [(f"k{i % BIG_KEY_COUNT}", i) for i in range(BIG_CHANGE_COUNT)]
+
+# The tables those inputs fold to, written out so the EXAMPLES rows stay one line each.
+DISTINCT_TABLE = {"a": 1, "b": 2, "c": 3, "d": 4, "e": 5}
+BIG_TABLE = {f"k{i}": 19_950 + i for i in range(BIG_KEY_COUNT)}   # the last change per key
+BIG_STALE = {f"k{i}": 19_900 + i for i in range(BIG_KEY_COUNT)}   # one change per key behind
+
+# ------------------------------------------------------------------- WORKED EXAMPLES
+# (what it exercises, log, snapshot_version, subscribe_from, live, expected table).  Every
+# row is asserted by show_examples() against a cold start, which is why the table is data
+# and not a comment: a comment can go stale silently, and this cannot.
+EXAMPLES = [
+    ("empty log, nothing live",            EMPTY_LOG,    0,      0,      [],     {}),
+    ("one entry, no snapshot yet",         ONE_ENTRY,    0,      0,      [],     {"a": 5}),
+    ("one entry, snapshot at the tail",    ONE_ENTRY,    1,      1,      [],     {"a": 5}),
+    ("snapshot at v0 = a cold start",      LOG,          0,      0,      LIVE,   {"a": 30, "b": 21}),
+    ("the correct handover, v7 -> v7",     LOG,          7,      7,      LIVE,   {"a": 30, "b": 21}),
+    ("one entry of OVERLAP, v7 -> v6",     LOG,          7,      6,      LIVE,   {"a": 30, "b": 21}),
+    ("one entry of GAP, v7 -> v8",         LOG,          7,      8,      LIVE,   {"a": 30, "b": 17}),
+    ("subscribe from NOW, v7 -> v9",       LOG,          7,      9,      LIVE,   {"a": 30, "b": 17}),
+    ("a gap a live entry overwrites",      LOG,          7,      8,      LIVE_B, {"a": 24, "b": 99}),
+    ("a delete inside the gap",            LOG_DEL,      7,      10,     [],     {"a": 16, "b": 17}),
+    ("keys never repeat, max overlap",     DISTINCT_LOG, 5,      0,      [],     DISTINCT_TABLE),
+    ("keys never repeat, exact handover",  DISTINCT_LOG, 5,      5,      [],     DISTINCT_TABLE),
+    ("20,000 changes, snapshot at tail",   BIG_LOG,      20_000, 20_000, [],     BIG_TABLE),
+    ("20,000 changes, a 50-entry gap",     BIG_LOG,      19_950, 20_000, [],     BIG_STALE),
+]
 
 
 def fold(entries):
@@ -582,7 +627,44 @@ def gap_is_harmful(log, snapshot_version, subscribe_from, live):
     return False
 
 
+def _tbl(t):
+    """A table narrow enough for a column.  Fifty keys print as their count and first key."""
+    if not t:
+        return "{}"
+    if len(t) <= 3:
+        return " ".join(f"{k}={v}" for k, v in sorted(t.items()))
+    k, v = min(t.items())
+    return f"{len(t)} keys, {k}={v}"
+
+
+def show_examples():
+    """Print the examples table and assert every row.
+
+    Each row is checked TWO ways: the warm start must produce the expected table, and the
+    cold start -- the brute-force fold of every entry ever written -- must agree about
+    whether anything was lost.  The costs of both are printed, because the warm start is
+    not always the cheaper one: a log whose keys never repeat has nothing for compaction
+    to drop, so an overlapping handover reads the history twice.
+    """
+    print(f"{'what it exercises':34s} {'log':>6} {'snap':>6} {'sub':>6} {'slack':>6} "
+          f"{'the table':>18} {'warm':>6} {'cold':>6}  verdict")
+    for label, log, snap_v, sub_from, live, want in EXAMPLES:
+        table, warm_read, slack = warm_start(log, snap_v, sub_from, live)
+        truth, cold_read = cold_start(log, live)
+        assert table == want, (label, table, want)
+        assert (table != truth) == gap_is_harmful(log, snap_v, sub_from, live), (label, table, truth)
+        verdict = ("warm wins" if warm_read < cold_read else
+                   "warm LOSES" if warm_read > cold_read else "tie")
+        if table != truth:
+            verdict += ", STALE"
+        print(f"{label:34s} {len(log):>6} {snap_v:>6} {sub_from:>6} {slack:>6} "
+              f"{_tbl(table):>18} {warm_read:>6} {cold_read:>6}  {verdict}")
+    print(f"all {len(EXAMPLES)} examples match a cold start exactly where the gap predicate says they must")
+    print()
+
+
 def main():
+    show_examples()
     truth, cold_read = cold_start(LOG, LIVE)
     snap = compact(LOG[:SNAPSHOT_VERSION])
     print("LOG  =", "  ".join(f"{k}={v}" for k, v in LOG), f"   ({N} entries)")
@@ -700,6 +782,23 @@ if __name__ == "__main__":
 Running it prints:
 
 ```
+what it exercises                     log   snap    sub  slack          the table   warm   cold  verdict
+empty log, nothing live                 0      0      0      0                 {}      0      0  tie
+one entry, no snapshot yet              1      0      0      0                a=5      1      1  tie
+one entry, snapshot at the tail         1      1      1      0                a=5      1      1  tie
+snapshot at v0 = a cold start           9      0      0      0          a=30 b=21     10     10  tie
+the correct handover, v7 -> v7          9      7      7      0          a=30 b=21      5     10  warm wins
+one entry of OVERLAP, v7 -> v6          9      7      6      1          a=30 b=21      6     10  warm wins
+one entry of GAP, v7 -> v8              9      7      8     -1          a=30 b=17      4     10  warm wins, STALE
+subscribe from NOW, v7 -> v9            9      7      9     -2          a=30 b=17      3     10  warm wins, STALE
+a gap a live entry overwrites           9      7      8     -1          a=24 b=99      4     10  warm wins
+a delete inside the gap                10      7     10     -3          a=16 b=17      2     10  warm wins, STALE
+keys never repeat, max overlap          5      5      0      5        5 keys, a=1     10      5  warm LOSES
+keys never repeat, exact handover       5      5      5      0        5 keys, a=1      5      5  tie
+20,000 changes, snapshot at tail    20000  20000  20000      0  50 keys, k0=19950     50  20000  warm wins
+20,000 changes, a 50-entry gap      20000  19950  20000    -50  50 keys, k0=19900     50  20000  warm wins, STALE
+all 14 examples match a cold start exactly where the gap predicate says they must
+
 LOG  = a=5  a=8  b=7  a=10  a=16  b=8  b=17  b=21  a=24    (9 entries)
 LIVE = a=30    (arrives during start-up)
 snapshot at version 7 = [('a', 16), ('b', 17)]   (2 entries for 7 changes)
@@ -773,6 +872,13 @@ usually different storage.  There is no recovery scheme, so "these were never th
 is the answer -- and the second-best outcome is a system that KNOWS it cannot answer rather
 than one that answers from the present and sounds certain.
 
+WORKED EXAMPLES: the EXAMPLES table below holds 19 input/output pairs -- the audit log and
+the compacted one asked the same questions, both sides of every boundary (an effective date
+and the day before it, each record's surviving edge and the day before that), the day before
+a record existed and an unknown record, which have no answer at all, a one-entry log, an
+empty log, and the 5,000-change scale.  Every row is ASSERTED twice, so the table cannot
+drift from the code: change the answer and this file stops running.
+
 Run it:  python3 programs/ch06_v3.py
 """
 import random
@@ -790,6 +896,44 @@ ASKED_RECORD = "a"
 ASKED_DAY = 300               # "two years ago": between record a's 8 and its 10
 TODAY = 1000
 UNANSWERABLE = "UNANSWERABLE"  # not a value: the question cannot be answered
+
+# A one-entry log, an empty log, the log the retention job leaves behind (checked against
+# retained() in show_examples, so it cannot drift), and the scale at which the job gets
+# approved.  These are inputs for the examples table, not alternative versions of the
+# problem.
+ONE_ENTRY_LOG = [("a", 5, 40)]
+EMPTY_LOG = []
+STATE_LOG = [("a", 16, 500), ("b", 8, 560), ("b", 17, 700), ("b", 21, 760), ("a", 24, 900)]
+BIG_RECORD_COUNT, BIG_CHANGE_COUNT, BIG_DAY_COUNT = 50, 5_000, 3_650
+BIG_AUDIT = [(f"r{i % BIG_RECORD_COUNT}", i, (i * BIG_DAY_COUNT) // BIG_CHANGE_COUNT)
+             for i in range(BIG_CHANGE_COUNT)]
+
+# ------------------------------------------------------------------- WORKED EXAMPLES
+# (what it exercises, log, record, day, expected value).  Every row is asserted by
+# show_examples(), which is why the table is data and not a comment: a comment can go stale
+# silently, and this cannot.  U is UNANSWERABLE -- a refusal, not a value.
+U = UNANSWERABLE
+EXAMPLES = [
+    ("audit: the day before 'a' exists",   RECORD_LOG,    "a",  39,    U),
+    ("audit: a's first effective day",     RECORD_LOG,    "a",  40,    5),
+    ("audit: the day before a change",     RECORD_LOG,    "a",  189,   5),
+    ("audit: the effective day itself",    RECORD_LOG,    "a",  190,   8),
+    ("audit: the regulator's own day",     RECORD_LOG,    "a",  300,   8),
+    ("audit: today",                       RECORD_LOG,    "a",  1000,  24),
+    ("audit: an unknown record",           RECORD_LOG,    "zz", 1000,  U),
+    ("state: the regulator's own day",     STATE_LOG,     "a",  300,   U),
+    ("state: the day before a's edge",     STATE_LOG,     "a",  499,   U),
+    ("state: a's edge day",                STATE_LOG,     "a",  500,   16),
+    ("state: the day before b's edge",     STATE_LOG,     "b",  559,   U),
+    ("state: b's edge day",                STATE_LOG,     "b",  560,   8),
+    ("state: today, still answerable",     STATE_LOG,     "a",  1000,  24),
+    ("one entry: the day before it",       ONE_ENTRY_LOG, "a",  39,    U),
+    ("one entry: that very day",           ONE_ENTRY_LOG, "a",  40,    5),
+    ("an empty log answers nothing",       EMPTY_LOG,     "a",  1000,  U),
+    ("5,000 changes: day 0",               BIG_AUDIT,     "r1", 0,     1),
+    ("5,000 changes: mid-history",         BIG_AUDIT,     "r0", 1825,  2500),
+    ("5,000 changes: today",               BIG_AUDIT,     "r49", 3650, 4999),
+]
 
 
 def shown(day):
@@ -882,7 +1026,42 @@ def earliest_answerable(log, record):
     return min(days) if days else None
 
 
+def show_examples():
+    """Print the examples table and assert every row.
+
+    Each row is checked TWO ways, and usually three: the scan must return the expected
+    value, a max over the candidate entries must agree, and where it is affordable the
+    day-by-day replay must agree as well.  Both costs are printed -- the scan reads every
+    entry once, the replay reads every entry once PER day -- so a reader can see that on
+    the first day of a long log the two cost the same, and that the gap opens up only as
+    the question moves away from the beginning of the log.  The `present` column is the
+    answer the service could give for free out of its current table.
+    """
+    assert retained(RECORD_LOG, COMPACTED_ON) == STATE_LOG, "STATE_LOG must be what the job leaves"
+    print(f"{'what it exercises':34s} {'entries':>8} {'record':>7} {'date':>12} "
+          f"{'answer':>13} {'present':>13} {'scan':>6} {'replay':>9}  verdict")
+    for label, log, record, day, want in EXAMPLES:
+        got = value_as_of(log, record, day)
+        assert got == want, (label, got, want)
+        candidates = [(d, v) for r, v, d in log if r == record and d <= day]
+        by_max = max(candidates)[1] if candidates else UNANSWERABLE
+        assert by_max == want, (label, "the max over candidates disagrees", by_max, want)
+        scan, replay = len(log), (day + 1) * len(log)
+        if replay <= 100_000:          # materialising history is affordable only when tiny
+            tables = replay_tables(log, day)
+            assert tables[day].get(record, UNANSWERABLE) == want, (label, "the replay disagrees")
+        present = answer_from_current_state(log, record, day)
+        verdict = ("scan wins" if scan < replay else "tie") + \
+                  (", present agrees" if present == want else ", present WRONG")
+        print(f"{label:34s} {len(log):>8} {record:>7} {shown(day):>12} "
+              f"{str(got):>13} {str(present):>13} {scan:>6} {replay:>9}  {verdict}")
+    print(f"all {len(EXAMPLES)} examples agree with a max over the surviving entries, and with a "
+          f"day-by-day replay wherever one is affordable")
+    print()
+
+
 def main():
+    show_examples()
     records = sorted({r for r, _, _ in RECORD_LOG})
     audit_log = RECORD_LOG                             # never compacted
     state_log = retained(RECORD_LOG, COMPACTED_ON)     # compacted on COMPACTED_ON
@@ -1024,6 +1203,28 @@ if __name__ == "__main__":
 Running it prints:
 
 ```
+what it exercises                   entries  record         date        answer       present   scan    replay  verdict
+audit: the day before 'a' exists          9       a   2024-02-09  UNANSWERABLE            24      9       360  scan wins, present WRONG
+audit: a's first effective day            9       a   2024-02-10             5            24      9       369  scan wins, present WRONG
+audit: the day before a change            9       a   2024-07-08             5            24      9      1710  scan wins, present WRONG
+audit: the effective day itself           9       a   2024-07-09             8            24      9      1719  scan wins, present WRONG
+audit: the regulator's own day            9       a   2024-10-27             8            24      9      2709  scan wins, present WRONG
+audit: today                              9       a   2026-09-27            24            24      9      9009  scan wins, present agrees
+audit: an unknown record                  9      zz   2026-09-27  UNANSWERABLE  UNANSWERABLE      9      9009  scan wins, present agrees
+state: the regulator's own day            5       a   2024-10-27  UNANSWERABLE            24      5      1505  scan wins, present WRONG
+state: the day before a's edge            5       a   2025-05-14  UNANSWERABLE            24      5      2500  scan wins, present WRONG
+state: a's edge day                       5       a   2025-05-15            16            24      5      2505  scan wins, present WRONG
+state: the day before b's edge            5       b   2025-07-13  UNANSWERABLE            21      5      2800  scan wins, present WRONG
+state: b's edge day                       5       b   2025-07-14             8            21      5      2805  scan wins, present WRONG
+state: today, still answerable            5       a   2026-09-27            24            24      5      5005  scan wins, present agrees
+one entry: the day before it              1       a   2024-02-09  UNANSWERABLE             5      1        40  scan wins, present WRONG
+one entry: that very day                  1       a   2024-02-10             5             5      1        41  scan wins, present agrees
+an empty log answers nothing              0       a   2026-09-27  UNANSWERABLE  UNANSWERABLE      0         0  tie, present agrees
+5,000 changes: day 0                   5000      r1   2024-01-01             1          4951   5000      5000  tie, present WRONG
+5,000 changes: mid-history             5000      r0   2028-12-30          2500          4950   5000   9130000  scan wins, present WRONG
+5,000 changes: today                   5000     r49   2033-12-29          4999          4999   5000  18255000  scan wins, present agrees
+all 19 examples agree with a max over the surviving entries, and with a day-by-day replay wherever one is affordable
+
 RECORD_LOG:
   2024-02-10  record 'a' becomes  5  <- deleted by the retention job
   2024-07-09  record 'a' becomes  8  <- deleted by the retention job
@@ -1117,6 +1318,14 @@ the log's FORMAT was the first thing stated for a reason.  A log of states can b
 and replayed; a log of deltas can be neither, and both failures are the same fact: an
 assignment is idempotent and an addition is not.
 
+WORKED EXAMPLES: the EXAMPLES table below holds 12 input/output pairs -- an empty log and a
+single increment, one entry per counter (nothing to compact), the chapter's log and the same
+log reversed, both sides of the condition that decides whether keeping the last increment is
+harmless (increments that cancel before the last one, and increments that do not), a counter
+that cancels to zero, a delete, a log that is ONLY a delete, and two at the 20,000-increment
+scale -- one of which the wrong compaction gets exactly right.  Every row is ASSERTED three
+ways, so the table cannot drift from the code: change the answer and this file stops running.
+
 Run it:  python3 programs/ch06_v4.py
 """
 import random
@@ -1130,6 +1339,47 @@ DELTAS = [("errors", 5), ("errors", 3), ("hits", 7), ("errors", 2), ("errors", 6
 TRUE = {"errors": 24, "hits": 21}
 N = len(DELTAS)
 TOMBSTONE = None          # the entry that means "this counter is gone"
+
+# An empty log, a single increment, one entry per counter, a log whose earlier increments
+# cancel, increments that cancel to zero, a delete, a log that is only a delete, the
+# chapter's log reversed, and two at the scale that gets compaction scheduled.  These are
+# inputs for the examples table, not alternative versions of the problem.
+EMPTY_LOG = []
+ONE_DELTA = [("errors", 5)]
+ONE_PER_KEY = [("errors", 5), ("hits", 7)]
+NEGATIVE = [("errors", 5), ("errors", -2)]
+LUCKY = [("drops", 0), ("drops", 5)]       # earlier increments sum to 0: the naive one works
+CANCELLING = [("retries", 5), ("retries", -5), ("errors", 1)]
+WITH_DELETE = DELTAS + [("hits", TOMBSTONE)]
+ONLY_A_DELETE = [("hits", TOMBSTONE)]
+REVERSED = DELTAS[::-1]
+BIG_KEY_COUNT, BIG_ENTRY_COUNT = 50, 20_000
+BIG_DELTAS = [(f"m{i % BIG_KEY_COUNT}", 1 + (i % 3)) for i in range(BIG_ENTRY_COUNT)]
+# the same shape with increments that cycle -3..3, which per counter sum to zero over any
+# 7 entries -- so the LAST increment happens to equal the total and the wrong compaction
+# comes out exact.  An accidental cancellation is the one case where it looks right.
+BIG_CANCELS = [(f"m{i % BIG_KEY_COUNT}", (i % 7) - 3) for i in range(BIG_ENTRY_COUNT)]
+BIG_TRUE = {f"m{j}": 799 + (j % 3) for j in range(BIG_KEY_COUNT)}
+BIG_CANCELS_TRUE = {f"m{j}": (j % 7) - 3 for j in range(BIG_KEY_COUNT)}
+
+# ------------------------------------------------------------------- WORKED EXAMPLES
+# (what it exercises, delta log, expected totals, does compact_last agree?).  Every row is
+# asserted by show_examples(), which is why the table is data and not a comment: a comment
+# can go stale silently, and this cannot.
+EXAMPLES = [
+    ("an empty log: no counters at all", EMPTY_LOG,     {},                             True),
+    ("a single increment",               ONE_DELTA,     {"errors": 5},                  True),
+    ("one entry per counter",            ONE_PER_KEY,   {"errors": 5, "hits": 7},       True),
+    ("the chapter's log",                DELTAS,        {"errors": 24, "hits": 21},     False),
+    ("the chapter's log, reversed",      REVERSED,      {"errors": 24, "hits": 21},     False),
+    ("two increments, one negative",     NEGATIVE,      {"errors": 3},                  False),
+    ("earlier increments cancel: LUCKY", LUCKY,         {"drops": 5},                   True),
+    ("a counter that cancels to zero",   CANCELLING,    {"retries": 0, "errors": 1},    False),
+    ("a delete at the end of the log",   WITH_DELETE,   {"errors": 24},                 False),
+    ("a log that is only a delete",      ONLY_A_DELETE, {},                             True),
+    ("20,000 increments, 50 counters",   BIG_DELTAS,    BIG_TRUE,                       False),
+    ("20,000 that cancel: naive EXACT",  BIG_CANCELS,   BIG_CANCELS_TRUE,               True),
+]
 
 
 def fold_add(log):
@@ -1201,7 +1451,61 @@ def to_states(log):
     return emit(fold_add(log))
 
 
+def _tot(t):
+    """Totals narrow enough for a column.  Fifty counters print as a count and one value."""
+    if not t:
+        return "{}"
+    if len(t) <= 2:
+        return " ".join(f"{k}={v}" for k, v in sorted(t.items()))
+    k, v = min(t.items())
+    return f"{len(t)} counters, {k}={v}"
+
+
+def show_examples():
+    """Print the examples table and assert every row.
+
+    Each row is checked three ways: the fold with +, the fold of the summed compaction, and
+    an independent per-counter reference that slices the log instead of making one pass.
+    Both compactions' sizes are printed, because the size is NOT what separates them -- they
+    usually tie, and the last two rows show the same 20,000 entries reduced to the same 50
+    either way, right in one case and wrong in the other.  The last row is the uncomfortable
+    one: increments that cancel make the wrong compaction exactly right.
+    """
+    def reference(log):
+        """Per counter, the increments AFTER the last delete, summed.  A different mechanism
+        from fold_add -- it slices per key where fold_add makes a single pass."""
+        out = {}
+        for key in {k for k, _ in log}:
+            ds = [d for k, d in log if k == key]
+            after = ds[max((i for i, d in enumerate(ds) if d is TOMBSTONE), default=-1) + 1:]
+            if after:
+                out[key] = sum(after)
+        return out
+
+    print(f"{'what it exercises':34s} {'in':>7} {'sum':>5} {'last':>5} "
+          f"{'the totals':>22} {'off by':>7}  verdict")
+    for label, log, want, naive_ok in EXAMPLES:
+        totals = fold_add(log)
+        assert totals == want, (label, totals, want)
+        assert reference(log) == want, (label, "the reference disagrees", reference(log))
+        summed, naive = compact_sum(log), compact_last(log)
+        assert fold_add(summed) == want, (label, "summing the increments must preserve the fold")
+        assert fold_assign(to_states(log)) == want, (label, "converting to states must too")
+        from_naive = fold_add(naive)
+        assert (from_naive == want) == naive_ok, (label, from_naive, want)
+        off = max((abs(want[k] - from_naive.get(k, 0)) for k in want), default=0)
+        size = ("tie" if len(summed) == len(naive) else
+                "sum smaller" if len(summed) < len(naive) else "last smaller")
+        verdict = f"{size}, " + ("naive agrees" if naive_ok else f"naive WRONG by {off}")
+        print(f"{label:34s} {len(log):>7} {len(summed):>5} {len(naive):>5} "
+              f"{_tot(totals):>22} {off:>7}  {verdict}")
+    print(f"all {len(EXAMPLES)} examples agree with a per-counter reference sum and with both "
+          f"safe compactions")
+    print()
+
+
 def main():
+    show_examples()
     print("DELTAS =", "  ".join(f"{k}{d:+d}" for k, d in DELTAS), f"   ({N} entries)")
     totals = fold_add(DELTAS)
     naive = compact_last(DELTAS)
@@ -1350,6 +1654,21 @@ if __name__ == "__main__":
 Running it prints:
 
 ```
+what it exercises                       in   sum  last             the totals  off by  verdict
+an empty log: no counters at all         0     0     0                     {}       0  tie, naive agrees
+a single increment                       1     1     1               errors=5       0  tie, naive agrees
+one entry per counter                    2     2     2        errors=5 hits=7       0  tie, naive agrees
+the chapter's log                        9     2     2      errors=24 hits=21      17  tie, naive WRONG by 17
+the chapter's log, reversed              9     2     2      errors=24 hits=21      19  tie, naive WRONG by 19
+two increments, one negative             2     1     1               errors=3       5  tie, naive WRONG by 5
+earlier increments cancel: LUCKY         2     1     1                drops=5       0  tie, naive agrees
+a counter that cancels to zero           3     2     2     errors=1 retries=0       5  tie, naive WRONG by 5
+a delete at the end of the log          10     1     2              errors=24      16  sum smaller, naive WRONG by 16
+a log that is only a delete              1     0     1                     {}       0  sum smaller, naive agrees
+20,000 increments, 50 counters       20000    50    50    50 counters, m0=799     798  tie, naive WRONG by 798
+20,000 that cancel: naive EXACT      20000    50    50     50 counters, m0=-3       0  tie, naive agrees
+all 12 examples agree with a per-counter reference sum and with both safe compactions
+
 DELTAS = errors+5  errors+3  hits+7  errors+2  errors+6  hits+1  hits+9  hits+4  errors+8    (9 entries)
   fold with +            -> {'errors': 24, 'hits': 21}
   compact_last(deltas)   -> [('errors', 8), ('hits', 4)]  folds to {'errors': 8, 'hits': 4}   WRONG

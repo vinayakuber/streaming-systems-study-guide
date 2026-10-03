@@ -1,3 +1,27 @@
+what it exercises                          n   W  crash  policy  sk   ans      final  kept  safe  exact
+no crash at all (the reference)            9   3   None  window  +0     7          7     4     4   True
+crash at the very first input              9   3      1  window  +0     7          7     2     4   True
+crash just BEFORE the 1st answer           9   3      2  window  +0     7          7     3     4   True
+crash just AFTER the 1st answer            9   3      3  window  +0     7          7     4     4   True
+crash at the last input                    9   3      8  window  +0     7          7     4     4   True
+replay the source instead                  9   3      4  replay  +0     7          7     2     4   True
+total-only: high by its own 12/3           9   3      4   total  +0     7         11     2     4  False
+total-only, crash at input 1               9   3      1   total  +0     7    8.66667     2     4  False
+position AHEAD: one input LOST             9   3      4  window  +1     6          7     4     4  False
+position BEHIND: one input twice           9   3      4  window  -1     8          7     4     4  False
+W = 1, crash mid-stream                    9   1      4  window  +0     9          8     2     2   True
+W = N, the single answer survives          9   9      4  window  +0     1          5     5    10   True
+W = N, total-only right BY LUCK            9   9      4   total  +0     1          5     2    10   True
+W > N -> no answer, ever                   2   3   None  window  +0     0       None     3     4   True
+a single value, W = 1                      1   1   None  window  +0     1          7     2     2   True
+flat stream, total-only doubles it         6   3      3   total  +0     4          8     2     4  False
+mixture of magnitudes, rebuilt             9   3      4  window  +0     7          7     4     4  False
+uniform scaling, no drift at all           9   3      4  window  +0     7      7e+16     4     4   True
+4,000 values, W = 50, crash at 2000     4000  50   2000  window  +0  3951       1.52    51    51   True
+4,000 values, total-only: LOW by 1.5    4000  50   2000   total  +0  3951       0.02     2    51  False
+persisted total 0: right by luck        4000  50     21   total  +0  3951       1.52     2    51  False
+all 21 examples agree with the from-scratch reference
+
 VALUES = 0:5  1:3  2:7  3:2  4:6  5:1  6:9  7:4  8:8    W = 3
   no crash: [5.0, 4.0, 5.0, 3.0, 5.3333, 4.6667, 7.0]
 

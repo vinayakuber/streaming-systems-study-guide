@@ -1,3 +1,20 @@
+what it exercises                     log   snap    sub  slack          the table   warm   cold  verdict
+empty log, nothing live                 0      0      0      0                 {}      0      0  tie
+one entry, no snapshot yet              1      0      0      0                a=5      1      1  tie
+one entry, snapshot at the tail         1      1      1      0                a=5      1      1  tie
+snapshot at v0 = a cold start           9      0      0      0          a=30 b=21     10     10  tie
+the correct handover, v7 -> v7          9      7      7      0          a=30 b=21      5     10  warm wins
+one entry of OVERLAP, v7 -> v6          9      7      6      1          a=30 b=21      6     10  warm wins
+one entry of GAP, v7 -> v8              9      7      8     -1          a=30 b=17      4     10  warm wins, STALE
+subscribe from NOW, v7 -> v9            9      7      9     -2          a=30 b=17      3     10  warm wins, STALE
+a gap a live entry overwrites           9      7      8     -1          a=24 b=99      4     10  warm wins
+a delete inside the gap                10      7     10     -3          a=16 b=17      2     10  warm wins, STALE
+keys never repeat, max overlap          5      5      0      5        5 keys, a=1     10      5  warm LOSES
+keys never repeat, exact handover       5      5      5      0        5 keys, a=1      5      5  tie
+20,000 changes, snapshot at tail    20000  20000  20000      0  50 keys, k0=19950     50  20000  warm wins
+20,000 changes, a 50-entry gap      20000  19950  20000    -50  50 keys, k0=19900     50  20000  warm wins, STALE
+all 14 examples match a cold start exactly where the gap predicate says they must
+
 LOG  = a=5  a=8  b=7  a=10  a=16  b=8  b=17  b=21  a=24    (9 entries)
 LIVE = a=30    (arrives during start-up)
 snapshot at version 7 = [('a', 16), ('b', 17)]   (2 entries for 7 changes)

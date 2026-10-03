@@ -15,6 +15,16 @@ and falls.  The busiest moment is that count's maximum and an overlap exists whe
 exceeds one.  The span-pair framing was the obstacle, not the solution -- and the event sweep
 is strictly more general, because it also answers the chapter's two-list question.
 
+WORKED EXAMPLES: the EXAMPLES table below holds 12 booking lists and their answers -- an empty
+room, a single zero-length booking, a room with no clash at all, BOTH sides of the closed-span
+boundary (adjacent at 11 is free, touching at 10 is a clash), identical and nested bookings, the
+chapter's own data, the workshop that breaks the two-pointer rule, and two generated rooms of
+20,000 and 2,000 bookings.  Each row prints what the sweep costs in marks beside what the
+quadratic answer would cost in comparisons, and on the small rows the marks are the MORE
+expensive of the two.  Every row is ASSERTED -- against the answer below, against a direct
+per-instant count, and where it is affordable against every_pair() as well -- so the table
+cannot drift from the code.
+
 Run it:  python3 programs/ch09_v2.py
 """
 import random
@@ -33,6 +43,40 @@ RIGHT = [(50, 150), (220, 320)]
 # simultaneous booking exposes it.
 WITH_WORKSHOP = sorted(BOOKINGS + [(140, 230)])
 NONE = None                                  # these two bookings do not overlap at all
+
+# Rooms for the examples table, not alternative versions of the problem: the degenerate ones,
+# the two sides of the closed-span boundary, and two GENERATED rooms at scale -- a CHAIN in
+# which each booking overlaps only the next, and a STACK in which every booking covers one
+# instant, so the pair count is quadratic in the answer while the marks stay at 2 per booking.
+EMPTY_ROOM  = []                                  # nothing booked at all
+ONE_BOOKING = [(5, 5)]                            # one zero-length booking
+NO_CLASH    = [(0, 1), (5, 6), (10, 11)]          # a clean room: no pair to report
+ADJACENT    = [(0, 10), (11, 20)]                 # free side of the boundary
+TOUCHING    = [(0, 10), (10, 20)]                 # clash side: both occupy minute 10
+TWO_SAME    = [(0, 10), (0, 10)]                  # the same booking made twice
+FOUR_SAME   = [(0, 10)] * 4                       # one instant, 4 choose 2 = 6 pairs
+NESTED      = [(0, 100), (10, 20), (30, 40)]      # two bookings inside a third
+BIG_CHAIN   = [(i * 5, i * 5 + 7) for i in range(20_000)]
+BIG_STACK   = [(i, 50_000) for i in range(2_000)]
+
+# ------------------------------------------------------------------- WORKED EXAMPLES
+# (what it exercises, bookings, expected (max_live, busiest_moment, pair_count)).  Every row is
+# asserted by show_examples(), which is why the table is data and not a comment: a comment can
+# go stale silently, and this cannot.
+EXAMPLES = [
+    ("an empty room -> no busiest moment",   EMPTY_ROOM,     (0,    None, 0)),
+    ("one zero-length booking",              ONE_BOOKING,    (1,    5,    0)),
+    ("three bookings, no clash at all",      NO_CLASH,       (1,    0,    0)),
+    ("adjacent at 11: free (boundary)",      ADJACENT,       (1,    0,    0)),
+    ("touching at 10: a clash (boundary)",   TOUCHING,       (2,    10,   1)),
+    ("the same booking made twice",          TWO_SAME,       (2,    0,    1)),
+    ("four identical bookings",              FOUR_SAME,      (4,    0,    6)),
+    ("nesting, not merely overlap",          NESTED,         (2,    10,   2)),
+    ("the chapter's two lists, poured in",   BOOKINGS,       (2,    130,  2)),
+    ("...plus the workshop: three live",     WITH_WORKSHOP,  (3,    140,  5)),
+    ("20,000 bookings in a chain",           BIG_CHAIN,      (2,    5,    19_999)),
+    ("2,000 bookings over one instant",      BIG_STACK,      (2000, 1999, 1_999_000)),
+]
 
 
 def overlap_of(x, y):
@@ -164,7 +208,40 @@ def covering(bookings, t):
     return sum(1 for s, e in bookings if s <= t <= e)
 
 
+def show_examples():
+    """Print the examples table and assert every row.
+
+    Each row is checked at least twice: against the expected triple in the table, and against
+    covering(), a direct count of the bookings live at the instant the sweep calls busiest.  On
+    the rows small enough to afford it the quadratic every_pair() is run too, so the pair count
+    is confirmed by the reference implementation rather than by the sweep's own arithmetic.  The
+    two cost columns are printed side by side because the sweep does not win on every input: at
+    five bookings the marks and the comparisons are both 10, and below that the quadratic answer
+    is the cheaper one.
+    """
+    print(f"{'what it exercises':36s} {'bookings':>8} {'marks':>7} {'pair cmps':>12} "
+          f"{'busiest':>8} {'at':>6} {'pairs':>10}")
+    for label, bookings, want in EXAMPLES:
+        n = len(bookings)
+        got = event_sweep(bookings)
+        best, at, pairs = got
+        assert got == want, (label, got, want)
+        if at is None:
+            assert (best, pairs, n) == (0, 0, 0), (label, got)   # nothing booked, nothing to report
+        else:
+            assert covering(bookings, at) == best, (label, at, best)
+            assert any(s <= at <= e for s, e in bookings), (label, at)
+        if n <= 40:                       # the quadratic reference, where it is affordable
+            ref, cmps = every_pair(bookings)
+            assert len(ref) == pairs, (label, len(ref), pairs)
+            assert cmps == n * (n - 1) // 2, (label, cmps)
+        would = n * (n - 1) // 2          # what every_pair would cost on this room
+        print(f"{label:36s} {n:>8,} {2 * n:>7,} {would:>12,} {best:>8,} {str(at):>6} {pairs:>10,}")
+    print(f"all {len(EXAMPLES)} examples agree with a direct per-instant count")
+
+
 def main():
+    show_examples()
     print(f"BOOKINGS = {BOOKINGS}   ({len(BOOKINGS)} bookings, closed spans)")
     pairs, cmp = every_pair(BOOKINGS)
     best, at, count = event_sweep(BOOKINGS)

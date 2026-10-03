@@ -1,3 +1,22 @@
+what it exercises                  spans     window  free  free min  walk min  gaps
+no meetings: the whole window          0      0..10     1        11        11  [(0, 10)]
+busy throughout -> nothing free        1      0..10     0         0        11  []
+busy at the start                      1      0..10     1         5        11  [(6, 10)]
+busy at the end                        1      0..10     1         5        11  [(0, 4)]
+adjacent spans: no gap between         2      0..10     1         3        11  [(8, 10)]
+one minute between: a gap              2      0..10     2         4        11  [(4, 4), (8, 10)]
+a zero-length meeting splits it        1      0..10     2        10        11  [(0, 4), (6, 10)]
+a one-minute window, busy              1       5..5     0         0         1  []
+a one-minute window, free              1       5..5     1         1         1  [(5, 5)]
+a span covering it from outside        1      0..10     0         0        11  []
+a span entirely after the window       1      0..10     1        11        11  [(0, 10)]
+a meeting nested in a longer one       2     0..120     1        20       121  [(101, 120)]
+more meetings than minutes            12      0..10     5         5        11  [(1, 1), (3, 3), (5, 5...
+the chapter's own calendar             3     0..600     4       481       601  [(0, 0), (4, 129), (24...
+start after end: empty, no error       0      10..5     0         0         0  []
+a year, 2,000 meetings             2,000  0..525600 2,001   403,601   525,601  [(0, 9), (71, 259), (3...
+a year, booked back to back        2,000  0..525600     1   403,601   525,601  [(122000, 525600)]
+all 17 examples partition their window and agree with the per-minute walk
 BUSY   = [(1, 3), (130, 245), (540, 540)]
 window = 0..600
   one pass        : [(0, 0), (4, 129), (246, 539), (541, 600)]

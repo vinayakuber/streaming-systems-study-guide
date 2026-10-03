@@ -1,3 +1,18 @@
+what it exercises                       in   sum  last             the totals  off by  verdict
+an empty log: no counters at all         0     0     0                     {}       0  tie, naive agrees
+a single increment                       1     1     1               errors=5       0  tie, naive agrees
+one entry per counter                    2     2     2        errors=5 hits=7       0  tie, naive agrees
+the chapter's log                        9     2     2      errors=24 hits=21      17  tie, naive WRONG by 17
+the chapter's log, reversed              9     2     2      errors=24 hits=21      19  tie, naive WRONG by 19
+two increments, one negative             2     1     1               errors=3       5  tie, naive WRONG by 5
+earlier increments cancel: LUCKY         2     1     1                drops=5       0  tie, naive agrees
+a counter that cancels to zero           3     2     2     errors=1 retries=0       5  tie, naive WRONG by 5
+a delete at the end of the log          10     1     2              errors=24      16  sum smaller, naive WRONG by 16
+a log that is only a delete              1     0     1                     {}       0  sum smaller, naive agrees
+20,000 increments, 50 counters       20000    50    50    50 counters, m0=799     798  tie, naive WRONG by 798
+20,000 that cancel: naive EXACT      20000    50    50     50 counters, m0=-3       0  tie, naive agrees
+all 12 examples agree with a per-counter reference sum and with both safe compactions
+
 DELTAS = errors+5  errors+3  hits+7  errors+2  errors+6  hits+1  hits+9  hits+4  errors+8    (9 entries)
   fold with +            -> {'errors': 24, 'hits': 21}
   compact_last(deltas)   -> [('errors', 8), ('hits', 4)]  folds to {'errors': 8, 'hits': 4}   WRONG

@@ -64,6 +64,14 @@ makes the back useless: the later one is both smaller and closer, so it would al
 shorter run.  Same eviction argument as the sliding maximum, opposite ordering, different
 quantity.  "Both better AND newer" is the giveaway that it generalises.
 
+WORKED EXAMPLES: the EXAMPLES table below holds 18 input/output pairs -- the smallest K that
+is reachable at all and the largest, an ordinary mid-range K, both sides of the 21/22
+boundary where the answer has to grow, both sides of the single second that does or does not
+reach K, an empty stream, an all-idle stream at K = 0 and K = 1, idle seconds spliced into
+the middle, a signed stream where the two-pointer answers wrongly, a K no run can reach (and
+what is returned instead of a guess), and two rows at 20,000 seconds.  Every row is ASSERTED,
+so the table cannot drift from the code: change an answer and this file stops running.
+
 Run it:  python3 programs/ch03_v2.py
 """
 
@@ -84,6 +92,89 @@ IDLE = [5, 3, 7, 0, 0, 0, 2, 6, 1, 9, 4, 8]
 KS = (15, 21, 22, 999)
 
 N = len(COUNTS)
+
+# An empty load test, a single second, an all-idle stream, a four-second stream (the length
+# at which the two costs below come out exactly equal), a signed stream where the running
+# total is NOT non-decreasing, and the 20,000-second scale the program measures at the end.
+# These are inputs for the examples table, not alternative versions of the problem.
+EMPTY = []
+SINGLE = [7]
+ALL_IDLE = [0, 0, 0]
+FOUR = COUNTS[:4]                                  # [5, 3, 7, 2]
+SIGNED = [0, -2, 5]                                # net connections opened minus closed
+BIG_COUNTS = [(i * 7919) % 50 for i in range(20_000)]   # deterministic, no seed needed
+
+# ------------------------------------------------------------------- WORKED EXAMPLES
+# (what it exercises, counts, K, expected shortest length).  Every row is asserted by
+# show_examples() against the pair scan AND the two-pointer, which is why the table is data
+# and not a comment: a comment can go stale silently, and this cannot.
+EXAMPLES = [
+    ("smallest K that is reachable",        COUNTS,      0,          1),
+    ("ordinary K, mid-range",               COUNTS,      15,         3),
+    ("K = 21, three seconds reach it",      COUNTS,      21,         3),
+    ("K = 22, three no longer enough",      COUNTS,      22,         4),
+    ("K = the whole load test",             COUNTS,      45,         9),
+    ("one past the whole total -> none",    COUNTS,      46,         None),
+    ("far beyond reach -> none",            COUNTS,      999,        None),
+    ("idle seconds spliced in",             IDLE,        15,         3),
+    ("idle seconds, across the boundary",   IDLE,        22,         4),
+    ("empty stream -> none",                EMPTY,       1,          None),
+    ("one second, exactly K",               SINGLE,      7,          1),
+    ("one second, one short of K",          SINGLE,      8,          None),
+    ("all-idle stream, K = 0",              ALL_IDLE,    0,          1),
+    ("all-idle stream, K = 1 -> none",      ALL_IDLE,    1,          None),
+    ("four seconds: the two costs tie",     FOUR,        15,         3),
+    ("signed data: two-pointer is wrong",   SIGNED,      4,          1),
+    ("20,000 seconds, K = 2000",            BIG_COUNTS,  2000,       80),
+    ("20,000 seconds, K unreachable",       BIG_COUNTS,  10 ** 9,    None),
+]
+
+
+def show_examples():
+    """Print the examples table and assert every row, two ways.
+
+    Every row is checked against the increasing list (loose AND strict) and, where the stream
+    is small enough to afford it, against the quadratic pair scan as well.  The two cost
+    columns are the point of the table: `pairs` is what the pair scan examines -- exactly
+    n(n+1)/2, since it never breaks early -- and `list ops` is the ceiling on the increasing
+    list's work, n+1 pushes and at most n+1 pops.  On short streams the pair scan is the
+    cheaper program, and the table says so rather than implying otherwise.
+
+    The two-pointer is asserted only where it is entitled to be right: non-negative counts
+    AND K >= 1.  MEASURED, and not what was expected: it also disagrees at K = 0, where it
+    returns 0 because it allows the left edge to pass the right one and reports the EMPTY run.
+    So the three rows it gets wrong are the two K = 0 rows and the signed one, and that count
+    is asserted below -- the docstring's "correct only for non-negative counts" is true but
+    incomplete.
+    """
+    print(f"{'what it exercises':36s} {'secs':>6} {'K':>11} {'answer':>7} "
+          f"{'pairs':>12} {'list ops':>9}  verdict")
+    disagreements = 0
+    for label, counts, k, want in EXAMPLES:
+        n = len(counts)
+        got, widest = shortest_deque(counts, k)
+        strict, _ = shortest_deque(counts, k, strict=True)
+        assert got == want, (label, got, want)
+        assert strict == want, (label, 'the strict comparison disagrees', strict, want)
+        pairs = n * (n + 1) // 2
+        if n <= 200:                      # the pair scan is affordable here, so run it
+            nv, ops = shortest_naive(counts, k)
+            assert nv == want, (label, 'the pair scan disagrees', nv, want)
+            assert ops == pairs, (label, ops, pairs)
+        tp = shortest_two_pointer(counts, k)
+        if k > 0 and min(counts, default=0) >= 0:
+            assert tp == want, (label, 'the two-pointer disagrees', tp, want)
+        else:
+            disagreements += tp != want
+        list_ops = 2 * (n + 1)
+        verdict = ("list wins" if list_ops < pairs else
+                   "list LOSES" if list_ops > pairs else "tie")
+        shown = 'none' if got is None else str(got)
+        print(f"{label:36s} {n:>6} {k:>11} {shown:>7} {pairs:>12,} {list_ops:>9,}  {verdict}")
+    assert disagreements == 3, (
+        f"{disagreements} two-pointer disagreements, expected 3 (two K=0 rows and the signed one)")
+    print(f"all {len(EXAMPLES)} examples agree with the pair scan")
+    print()
 
 
 def prefix(counts):
@@ -162,6 +253,7 @@ def shortest_deque(counts, k, strict=False):
 
 
 def main():
+    show_examples()
     pre = prefix(COUNTS)
     print("COUNTS =", "  ".join(f"{i}:{v}" for i, v in enumerate(COUNTS)))
     print(f"prefix  = {pre}\n")
@@ -292,6 +384,27 @@ if __name__ == "__main__":
 Running it prints:
 
 ```
+what it exercises                      secs           K  answer        pairs  list ops  verdict
+smallest K that is reachable              9           0       1           45        20  list wins
+ordinary K, mid-range                     9          15       3           45        20  list wins
+K = 21, three seconds reach it            9          21       3           45        20  list wins
+K = 22, three no longer enough            9          22       4           45        20  list wins
+K = the whole load test                   9          45       9           45        20  list wins
+one past the whole total -> none          9          46    none           45        20  list wins
+far beyond reach -> none                  9         999    none           45        20  list wins
+idle seconds spliced in                  12          15       3           78        26  list wins
+idle seconds, across the boundary        12          22       4           78        26  list wins
+empty stream -> none                      0           1    none            0         2  list LOSES
+one second, exactly K                     1           7       1            1         4  list LOSES
+one second, one short of K                1           8    none            1         4  list LOSES
+all-idle stream, K = 0                    3           0       1            6         8  list LOSES
+all-idle stream, K = 1 -> none            3           1    none            6         8  list LOSES
+four seconds: the two costs tie           4          15       3           10        10  tie
+signed data: two-pointer is wrong         3           4       1            6         8  list LOSES
+20,000 seconds, K = 2000              20000        2000      80  200,010,000    40,002  list wins
+20,000 seconds, K unreachable         20000  1000000000    none  200,010,000    40,002  list wins
+all 18 examples agree with the pair scan
+
 COUNTS = 0:5  1:3  2:7  3:2  4:6  5:1  6:9  7:4  8:8
 prefix  = [0, 5, 8, 15, 17, 23, 24, 33, 37, 45]
 
@@ -366,6 +479,16 @@ question -- the shared idea is the eviction, not the window.
 The unresolved days are also the watermark's backlog in miniature: they are precisely the
 events the running maximum has not yet passed.
 
+WORKED EXAMPLES: the EXAMPLES table below holds 15 input/output pairs -- the first day of the
+series and the last, an ordinary middle day, both sides of the strict `<` comparison (equal
+days wait, strictly warmer days resolve), a day whose warmer day never comes and the 0 that
+is returned instead of a guess, a single day, an all-cooling run, an all-warming run, a flat
+run, one late record high that resolves ten waiting days at once, and three rows at 20,000
+days including the longest wait in the series.  Every row also pins down the lookahead
+boundary from both sides: a bounded lookahead equal to the true wait is right, and one day
+shorter reports 0.  Every row is ASSERTED, so the table cannot drift from the code: change an
+answer and this file stops running.
+
 Run it:  python3 programs/ch03_v3.py
 """
 
@@ -381,6 +504,85 @@ TEMPS = [5, 3, 7, 2, 6, 1, 9, 4, 8]
 TIED = [5, 5, 5, 6]
 
 N = len(TEMPS)
+
+# One day, a monotone cooling run, a monotone warming run, a flat run, a long slide ending in
+# a single record high, and the 20,000-day scale the program measures at the end (seeded, so
+# the answers below are reproducible).  These are inputs for the examples table, not
+# alternative versions of the problem.
+SINGLE = [7]
+COOLING = [9, 7, 5, 3, 1]
+WARMING = [1, 3, 5, 7, 9]
+FLAT = [4, 4, 4, 4]
+SPIKE = list(range(10, 0, -1)) + [99]              # ten cooling days, then one record high
+BIG_TEMPS = random.Random(20260304).choices(range(1000), k=20_000)
+
+# ------------------------------------------------------------------- WORKED EXAMPLES
+# (what it exercises, temps, day, expected days until the next warmer one).  Every row is
+# asserted by show_examples() against the forward scan AND against the bounded lookahead on
+# both sides of the true wait, which is why the table is data and not a comment: a comment
+# can go stale silently, and this cannot.
+EXAMPLES = [
+    ("day 0, the first day of all",          TEMPS,      0,       2),
+    ("an ordinary day, mid-series",          TEMPS,      4,       2),
+    ("the longest wait in these nine",       TEMPS,      2,       4),
+    ("the record high: never warmer -> 0",   TEMPS,      6,       0),
+    ("the last day, which can only be 0",    TEMPS,      8,       0),
+    ("equal is not warmer, so day 0 waits",  TIED,       0,       3),
+    ("...and the last equal day waits too",  TIED,       2,       1),
+    ("a single day -> 0, not an error",      SINGLE,     0,       0),
+    ("a cooling run: nothing resolves",      COOLING,    0,       0),
+    ("a warming run: resolved next day",     WARMING,    0,       1),
+    ("a flat run: strictness again -> 0",    FLAT,       0,       0),
+    ("one late record resolves everyone",    SPIKE,      0,       10),
+    ("20,000 days, day 0",                   BIG_TEMPS,  0,       2),
+    ("20,000 days, the longest wait",        BIG_TEMPS,  9065,    2195),
+    ("20,000 days, the last day",            BIG_TEMPS,  19999,   0),
+]
+
+
+def show_examples():
+    """Print the examples table and assert every row, two ways.
+
+    Each row is checked against the stack and against the forward scan, which is run on every
+    input here (and cached, since several rows share a series).  The two cost columns are the
+    point of the table: `fwd` is the forward scan's measured comparisons and `steps` is the
+    stack's pushes plus pops.  The stack LOSES on every short series in the table, because it
+    pays a push per day whether or not that day does any work, and the forward scan stops at
+    the first warmer day.  Its win is asymptotic, and the 20,000-day rows are where it shows.
+
+    On the small series each row additionally pins the bounded lookahead from BOTH sides: a
+    lookahead equal to the true wait gives the true answer, and one day shorter gives 0 --
+    the bounded view goes BACKWARDS, reporting "no warmer day ever" for a day whose warmer day
+    simply had not arrived yet.  That is the same price the bounded watermark pays, and the
+    unbounded stack never pays it: one late record high (the SPIKE row) resolves every waiting
+    day at once, exactly as a running maximum jumps and stays there.
+    """
+    cache = {}
+    print(f"{'what it exercises':37s} {'days':>6} {'day':>6} {'temp':>5} {'answer':>7} "
+          f"{'fwd':>8} {'steps':>8}  verdict")
+    for label, temps, day, want in EXAMPLES:
+        key = id(temps)
+        if key not in cache:
+            cache[key] = (naive(temps), next_warmer(temps))
+        (ref, ops), (got, pushes, pops, _, unresolved) = cache[key]
+        assert got[day] == want, (label, got[day], want)
+        assert ref[day] == want, (label, 'the forward scan disagrees', ref[day], want)
+        assert pushes == len(temps) and pops == len(temps) - len(unresolved), label
+        if len(temps) <= 50:
+            # both sides of the lookahead the sliding-window reflex would have to choose
+            if want:
+                assert next_warmer_within(temps, want)[day] == want, (label, 'bound too tight')
+                if want > 1:
+                    assert next_warmer_within(temps, want - 1)[day] == 0, (label, 'bound-1')
+            else:
+                assert next_warmer_within(temps, len(temps))[day] == 0, (label, 'spurious')
+        steps = pushes + pops
+        verdict = ("stack wins" if steps < ops else
+                   "stack LOSES" if steps > ops else "tie")
+        print(f"{label:37s} {len(temps):>6} {day:>6} {temps[day]:>5} {want:>7} "
+              f"{ops:>8,} {steps:>8,}  {verdict}")
+    print(f"all {len(EXAMPLES)} examples agree with the forward scan")
+    print()
 
 
 def naive(temps):
@@ -445,6 +647,7 @@ def next_warmer_within(temps, lookahead):
 
 
 def main():
+    show_examples()
     print("TEMPS =", "  ".join(f"{i}:{v}" for i, v in enumerate(TEMPS)))
     want, naive_ops = naive(TEMPS)
     got, pushes, pops, biggest, unresolved = next_warmer(TEMPS)
@@ -611,6 +814,24 @@ if __name__ == "__main__":
 Running it prints:
 
 ```
+what it exercises                       days    day  temp  answer      fwd    steps  verdict
+day 0, the first day of all                9      0     5       2       14       16  stack LOSES
+an ordinary day, mid-series                9      4     6       2       14       16  stack LOSES
+the longest wait in these nine             9      2     7       4       14       16  stack LOSES
+the record high: never warmer -> 0         9      6     9       0       14       16  stack LOSES
+the last day, which can only be 0          9      8     8       0       14       16  stack LOSES
+equal is not warmer, so day 0 waits        4      0     5       3        6        7  stack LOSES
+...and the last equal day waits too        4      2     5       1        6        7  stack LOSES
+a single day -> 0, not an error            1      0     7       0        0        1  stack LOSES
+a cooling run: nothing resolves            5      0     9       0       10        5  stack wins
+a warming run: resolved next day           5      0     1       1        4        9  stack LOSES
+a flat run: strictness again -> 0          4      0     4       0        6        4  stack wins
+one late record resolves everyone         11      0    10      10       55       21  stack wins
+20,000 days, day 0                     20000      0   285       2  353,878   39,967  stack wins
+20,000 days, the longest wait          20000   9065   998    2195  353,878   39,967  stack wins
+20,000 days, the last day              20000  19999   611       0  353,878   39,967  stack wins
+all 15 examples agree with the forward scan
+
 TEMPS = 0:5  1:3  2:7  3:2  4:6  5:1  6:9  7:4  8:8
   naive  : [2, 1, 4, 1, 2, 1, 0, 1, 0]   (14 forward comparisons)
   stack  : [2, 1, 4, 1, 2, 1, 0, 1, 0]   (9 pushes + 7 pops = 16 steps -- the stack LOSES at this size)
@@ -691,6 +912,15 @@ or neither.  Get that wrong and a front goes stale, the spread reads too small, 
 answer is a longer steady stretch than really occurred -- which on a factory floor is a
 quality claim nobody made.
 
+WORKED EXAMPLES: the EXAMPLES table below holds 15 input/output pairs -- the smallest
+tolerance and the largest, an ordinary middle one, both sides of the L = 6 boundary the
+chapter's nine readings sit on (L = 5 gives 5 seconds, L = 6 gives 6), both sides of the full
+spread (L = 7 still gives 6, L = 8 takes the whole series), the one extra tolerance that buys
+nothing, an empty log and the 0 it returns instead of a guess, a single reading, a two-second
+log either side of its own gap, a flat run where L = 0 is a real question, and two rows at
+20,000 seconds.  Every row is ASSERTED against the brute-force scan as well, so the table
+cannot drift from the code: change an answer and this file stops running.
+
 Run it:  python3 programs/ch03_v4.py
 """
 
@@ -706,6 +936,72 @@ READINGS = [5, 3, 7, 2, 6, 1, 9, 4, 8]
 L = 6
 
 N = len(READINGS)
+
+# An empty log, a single reading, a two-second log, a flat run, and the 20,000-second scale
+# (seeded, so the answers below are reproducible).  These are inputs for the examples table,
+# not alternative versions of the problem.
+EMPTY = []
+ONE = [4]
+PAIR = [5, 3]                                      # one gap of 2, and nothing else
+FLAT_RUN = [4, 4, 4, 4, 4]
+BIG_READINGS = random.Random(20260304).choices(range(100), k=20_000)
+
+# ------------------------------------------------------------------- WORKED EXAMPLES
+# (what it exercises, readings, L, expected length).  Every row is asserted by
+# show_examples() against the brute-force scan -- length AND starting second -- which is why
+# the table is data and not a comment: a comment can go stale silently, and this cannot.
+EXAMPLES = [
+    ("L = 0, distinct readings: every run is 1", READINGS,      0,   1),
+    ("L = 2, an ordinary tolerance",             READINGS,      2,   2),
+    ("L = 4, the middle of the range",           READINGS,      4,   3),
+    ("L = 5, one below the chapter's L",         READINGS,      5,   5),
+    ("L = 6, the stretch spans exactly L",       READINGS,      6,   6),
+    ("L = 7, one more buys nothing",             READINGS,      7,   6),
+    ("L = 8 = the full spread: everything",      READINGS,      8,   9),
+    ("L = 99, far above the full spread",        READINGS,      99,  9),
+    ("L = 0 on a flat run: a real question",     FLAT_RUN,      0,   5),
+    ("an empty log -> 0, not a guess",           EMPTY,         5,   0),
+    ("a single reading, no tolerance",           ONE,           0,   1),
+    ("two seconds, L below their gap",           PAIR,          1,   1),
+    ("two seconds, L exactly their gap",         PAIR,          2,   2),
+    ("20,000 seconds, L = 0 (constant runs)",    BIG_READINGS,  0,   3),
+    ("20,000 seconds, L = 20",                   BIG_READINGS,  20,  8),
+]
+
+
+def show_examples():
+    """Print the examples table and assert every row, two ways.
+
+    Every row is checked against the two deques and against the brute-force scan, and both
+    the LENGTH and the STARTING SECOND must match -- a right length at a wrong start would be
+    a different stretch, which is the error the stale-front bug produces.
+
+    The two cost columns are measured, not asserted into existence: `runs` is the number of
+    stretches the brute-force scan measured, and `dq ops` is everything the two deques did
+    (pushes, back-pops, front-pops and left-edge steps).  They are counts of DIFFERENT units
+    and the table says which is smaller, not which program is faster: a measured run costs
+    time proportional to its length, because the scan takes the max and the min of a slice,
+    while every deque op is constant work.  So the deques come out with MORE ops on short logs
+    -- they pay two pushes a second whether or not anything happens -- and even at 20,000
+    seconds with L = 20 their op count is the larger of the two, while the work behind each of
+    those ops is not.  Printing both is the only honest way to show that.
+    """
+    print(f"{'what it exercises':42s} {'secs':>6} {'L':>4} {'answer':>7} {'from':>7} "
+          f"{'runs':>9} {'dq ops':>9}  fewer steps")
+    for label, xs, limit, want in EXAMPLES:
+        got, start, pushes, back, front, steps = longest_steady(xs, limit)
+        ref, rstart, ops = longest_naive(xs, limit)
+        assert got == want, (label, got, want)
+        assert ref == want, (label, 'the brute-force scan disagrees', ref, want)
+        assert start == rstart, (label, 'different starting second', start, rstart)
+        if want:
+            assert spread(xs[start:start + want]) <= limit, (label, 'the run does not fit')
+        ops_dq = pushes + back + front + steps
+        fewer = ("deques" if ops_dq < ops else "naive" if ops_dq > ops else "tie")
+        print(f"{label:42s} {len(xs):>6} {limit:>4} {want:>7} {start:>7,} "
+              f"{ops:>9,} {ops_dq:>9,}  {fewer}")
+    print(f"all {len(EXAMPLES)} examples agree with the brute-force scan")
+    print()
 
 
 def spread(xs):
@@ -815,6 +1111,7 @@ def longest_fixed_offset(xs, limit):
 
 
 def main():
+    show_examples()
     print("READINGS =", "  ".join(f"{i}:{v}" for i, v in enumerate(READINGS)), f"   L = {L}")
     want, wstart, ops = longest_naive(READINGS, L)
     got, start, pushes, back, front, steps = longest_steady(READINGS, L)
@@ -919,6 +1216,24 @@ if __name__ == "__main__":
 Running it prints:
 
 ```
+what it exercises                            secs    L  answer    from      runs    dq ops  fewer steps
+L = 0, distinct readings: every run is 1        9    0       1       0        17        42  naive
+L = 2, an ordinary tolerance                    9    2       2       0        18        42  naive
+L = 4, the middle of the range                  9    4       3       0        21        40  naive
+L = 5, one below the chapter's L                9    5       5       0        30        38  naive
+L = 6, the stretch spans exactly L              9    6       6       0        33        38  naive
+L = 7, one more buys nothing                    9    7       6       0        33        38  naive
+L = 8 = the full spread: everything             9    8       9       0        45        31  deques
+L = 99, far above the full spread               9   99       9       0        45        31  deques
+L = 0 on a flat run: a real question            5    0       5       0        15        18  naive
+an empty log -> 0, not a guess                  0    5       0       0         0         0  tie
+a single reading, no tolerance                  1    0       1       0         1         2  naive
+two seconds, L below their gap                  2    1       1       0         3         7  naive
+two seconds, L exactly their gap                2    2       2       0         3         5  naive
+20,000 seconds, L = 0 (constant runs)       20000    0       3   5,971    40,217    99,997  naive
+20,000 seconds, L = 20                      20000   20       8  13,079    50,096    99,997  naive
+all 15 examples agree with the brute-force scan
+
 READINGS = 0:5  1:3  2:7  3:2  4:6  5:1  6:9  7:4  8:8    L = 6
   naive  : 6 seconds from second 0   (33 runs measured)
   deques : 6 seconds from second 0 -> [5, 3, 7, 2, 6, 1], spread 6 <= 6

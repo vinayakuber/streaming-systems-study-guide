@@ -15,6 +15,13 @@ front of it -- and that cache is bounded by exactly the rule the chapter used on
 with the opposite consequence, because a cache miss RE-READS and a state expiry RESTARTS.
 The same bound is safe in one place and a published laundering schedule in the other.
 
+WORKED EXAMPLES: the EXAMPLES table below holds 13 input/output pairs -- the chapter's own
+nine signals, both sides of the 295-day dormancy the expiry turns on, a laundering pair that
+is washed on one side of it and kept on the other, an empty stream, a single signal, a cache
+of 0 slots and a cache bigger than the data, and two generated streams at 2,000 accounts.
+Every row is ASSERTED three ways, against the true score, the store and the cache, so the
+table cannot drift from the code: change an answer and this file stops running.
+
 Run it:  python3 programs/ch07_v4.py
 """
 import random
@@ -31,6 +38,77 @@ INFINITY = float("inf")
 # The scale at which any of this matters: many accounts seen once, one that never stops.
 ONEOFF = 2_000
 BIG_TTL = 100
+
+# Inputs for the examples table, not alternative versions of the problem: an empty stream, one
+# signal, the laundering pair the dormancy allowance decides, and the asymptotic stream -- the
+# same shape main() measures below, built here so the table can reach it too.
+NO_SIGNALS = []
+ONE_SIGNAL = [("solo", 7, 0)]
+LAUNDERING = [("mule", 20, 0), ("mule", 4, DORMANCY)]
+BIG_SIGNALS = sorted([(f"once{i}", 1, i) for i in range(1, ONEOFF + 1)]
+                     + [("regular", 1, t) for t in range(5, ONEOFF, 10)],
+                     key=lambda e: e[2])
+
+# ------------------------------------------------------------------- WORKED EXAMPLES
+# (what it exercises, signals, ttl, cache capacity, points the EXPIRY still has, restarts).
+# The expiry's total is the expected value because it is the only one that moves: the store
+# and every cache capacity return the true score on every row, which is the point.  Every row
+# is asserted by show_examples(), which is why the table is data and not a comment: a comment
+# can go stale silently, and this cannot.
+EXAMPLES = [
+    ("never expire: the true score",         SIGNALS,     INFINITY,    1,  45,   0),
+    ("ttl = 295, the dormancy itself",       SIGNALS,     DORMANCY,    1,  45,   0),
+    ("ttl = 294, one day tighter",           SIGNALS,   DORMANCY - 1,  1,  29,   1),
+    ("ttl = 100: four restarts",             SIGNALS,          100,    2,   8,   4),
+    ("ttl = 0: the last event only",         SIGNALS,            0,    0,   8,   7),
+    ("an empty stream -> no score at all",   NO_SIGNALS,  INFINITY,    5,   0,   0),
+    ("a single signal",                      ONE_SIGNAL,  INFINITY,    0,   7,   0),
+    ("the mule at ttl = 294: washed",        LAUNDERING, DORMANCY - 1, 1,   4,   1),
+    ("the mule at ttl = 295: kept",          LAUNDERING,  DORMANCY,    1,  24,   0),
+    ("cache of 0 slots: write-through",      SIGNALS,     INFINITY,    0,  45,   0),
+    ("cache bigger than the data",           SIGNALS,     INFINITY,   10,  45,   0),
+    ("2,000 accounts, ttl 100, 64 slots",    BIG_SIGNALS,      100,   64, 301,   0),
+    ("2,000 accounts, ttl 0, no cache",      BIG_SIGNALS,        0,    0,   1, 199),
+]
+
+
+def show_examples():
+    """Print the examples table and assert every row, three ways.
+
+    `true_scores` is the requirement written out, so it is the reference that cannot be wrong;
+    every row is checked against it, against the store, and against the cache at that row's
+    capacity.  The cost columns are printed per row so the reader can see what each answer
+    buys: `saved` is the scores the expiry stops holding -- 0 at the chapter's scale, where
+    the expiry has already cost 16 of account 'a''s 24 points, and 1,899 only on the last two
+    rows -- against the `reads` and `writes` the cache pays to be right at every one of them.
+    """
+    print(f"{'what it exercises':36s} {'events':>7} {'ttl':>6} {'cap':>4} {'true':>6} "
+          f"{'expiry':>7} {'restarts':>9} {'held':>6} {'+ttl':>6} {'saved':>6} "
+          f"{'reads':>6} {'writes':>7}")
+    for label, signals, ttl, cap, want_expiry, want_restarts in EXAMPLES:
+        truth = true_scores(signals)
+        forever, _ = score_in_memory_forever(signals)
+        stored, held_between, _ = score_in_a_store(signals)
+        cached, reads, writes, _ = score_with_cache(signals, cap)
+        expired, _, restarts = score_with_expiry(signals, ttl)
+        day = max((t for *_, t in signals), default=0)
+        held = held_at(signals, INFINITY, day)
+        held_ttl = held_at(signals, ttl, day)
+        true_total = sum(truth.values())
+        assert sum(expired.values()) == want_expiry, (label, sum(expired.values()), want_expiry)
+        assert restarts == want_restarts, (label, restarts, want_restarts)
+        assert forever == truth, (label, "keeping everything must be exact")
+        assert stored == truth, (label, "the store must be exact")
+        assert cached == truth, (label, "and so must the cache, at every capacity")
+        assert held_between == 0, (label, "the streaming layer holds nothing between events")
+        for acct in truth:
+            assert expired.get(acct, 0) <= truth[acct], (label, acct)   # only ever too low
+        ttl_s = "never" if ttl == INFINITY else str(ttl)
+        print(f"{label:36s} {len(signals):>7,} {ttl_s:>6} {cap:>4} {true_total:>6,} "
+              f"{sum(expired.values()):>7,} {restarts:>9,} {held:>6,} {held_ttl:>6,} "
+              f"{held - held_ttl:>6,} {reads:>6,} {writes:>7,}")
+    print(f"all {len(EXAMPLES)} examples agree with the true lifetime score")
+    print()
 
 
 def true_scores(signals):
@@ -140,6 +218,7 @@ def held_at(signals, ttl, t):
 
 
 def main():
+    show_examples()
     truth = true_scores(SIGNALS)
     print("SIGNALS =", "  ".join(f"{a}@{t}:+{p}" for a, p, t in SIGNALS))
     print(f"  true lifetime scores {truth};  account 'a' is dormant for {DORMANCY} days\n")

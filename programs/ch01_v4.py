@@ -13,6 +13,18 @@ either way and the restart is silently wrong, in opposite directions depending o
 ahead.  Both failures below are produced by running the worker with a crash injected and
 restarting it from what it actually wrote.
 
+WORKED EXAMPLES: the EXAMPLES table below holds 21 input/output pairs -- no crash at all, a
+crash at the first input and at the last, both sides of the tick where the first answer has
+already been emitted, all three checkpoint policies, both skew directions (which change the
+NUMBER of answers, not their values), W = 1 and W = N, a stream shorter than its own window
+(no answer at all), a flat stream, the mixture-versus-uniform float pair, and a generated
+4,000-value stream including the crash point whose persisted total is exactly zero, where
+the broken checkpoint comes out right by luck.  Each row prints what that policy actually
+persisted beside what the safe one would have cost.  Every row is ASSERTED twice -- the
+answer count and final value, then the from-scratch reference (or, for the total-only
+policy, its exact error law) -- so the table cannot drift from the code: change an answer
+and this file stops running.
+
 Run it:  python3 programs/ch01_v4.py
 """
 
@@ -31,6 +43,49 @@ HUGE = 1e16
 
 N = len(VALUES)
 NWIN = N - W + 1
+
+# Inputs for the examples table, not alternative versions of the problem: a stream shorter
+# than its own window, a stream of one value, a flat stream, the two float cases the
+# chapter's finding is about, and one GENERATED stream long enough that a crash at value
+# 2,000 leaves thousands of answers to get wrong.
+TOO_SHORT = [5, 3]
+ONE_VALUE = [7]
+FLAT = [4] * 6
+MIXTURE = [HUGE] + VALUES[1:]              # ONE value replaced: magnitudes mixed
+UNIFORM = [v * HUGE for v in VALUES]       # every value scaled: magnitudes shared
+_BIG_RNG = random.Random(20260303)         # seeded, so the expected values below are fixed
+BIG_STREAM = [_BIG_RNG.randint(-40, 40) for _ in range(4000)]
+
+# ------------------------------------------------------------------- WORKED EXAMPLES
+# (what it exercises, stream, W, crash_at, policy, skew, expected (answers emitted, final
+# answer)).  The count is half the expected value on purpose: a skewed checkpoint reports
+# plausible NUMBERS and the wrong number OF them, so counting answers is the only cheap
+# alarm.  A stream shorter than its window emits nothing, and the expected final answer is
+# then None rather than a guess.  Every row is asserted by show_examples(), which is why
+# this table is data and not a comment: a comment can go stale silently, this cannot.
+EXAMPLES = [
+    ("no crash at all (the reference)",     VALUES,     3,  None, "window",  0, (7, 7.0)),
+    ("crash at the very first input",       VALUES,     3,  1,    "window",  0, (7, 7.0)),
+    ("crash just BEFORE the 1st answer",    VALUES,     3,  2,    "window",  0, (7, 7.0)),
+    ("crash just AFTER the 1st answer",     VALUES,     3,  3,    "window",  0, (7, 7.0)),
+    ("crash at the last input",             VALUES,     3,  8,    "window",  0, (7, 7.0)),
+    ("replay the source instead",           VALUES,     3,  4,    "replay",  0, (7, 7.0)),
+    ("total-only: high by its own 12/3",    VALUES,     3,  4,    "total",   0, (7, 11.0)),
+    ("total-only, crash at input 1",        VALUES,     3,  1,    "total",   0, (7, 8.666666666666666)),
+    ("position AHEAD: one input LOST",      VALUES,     3,  4,    "window", +1, (6, 7.0)),
+    ("position BEHIND: one input twice",    VALUES,     3,  4,    "window", -1, (8, 7.0)),
+    ("W = 1, crash mid-stream",             VALUES,     1,  4,    "window",  0, (9, 8.0)),
+    ("W = N, the single answer survives",   VALUES,     9,  4,    "window",  0, (1, 5.0)),
+    ("W = N, total-only right BY LUCK",     VALUES,     9,  4,    "total",   0, (1, 5.0)),
+    ("W > N -> no answer, ever",            TOO_SHORT,  3,  None, "window",  0, (0, None)),
+    ("a single value, W = 1",               ONE_VALUE,  1,  None, "window",  0, (1, 7.0)),
+    ("flat stream, total-only doubles it",  FLAT,       3,  3,    "total",   0, (4, 8.0)),
+    ("mixture of magnitudes, rebuilt",      MIXTURE,    3,  4,    "window",  0, (7, 7.0)),
+    ("uniform scaling, no drift at all",    UNIFORM,    3,  4,    "window",  0, (7, 7e16)),
+    ("4,000 values, W = 50, crash at 2000", BIG_STREAM, 50, 2000, "window",  0, (3951, 1.52)),
+    ("4,000 values, total-only: LOW by 1.5", BIG_STREAM, 50, 2000, "total",  0, (3951, 0.02)),
+    ("persisted total 0: right by luck",    BIG_STREAM, 50, 21,   "total",   0, (3951, 1.52)),
+]
 
 
 def exact_answers(xs, w=W):
@@ -104,7 +159,65 @@ def run(xs, w=W, crash_at=None, policy="window", skew=0):
     return answers, ck
 
 
+def show_examples():
+    """Print the examples table and assert every row.
+
+    Each row is checked TWO ways.  The first is the expected (count, final answer) written
+    in the table.  The second is the from-scratch reference: for a policy that is supposed
+    to be exact, EVERY answer must equal exact_answers(), not just the last one; for the
+    total-only policy, the final answer must be high by exactly the restored total over W,
+    which is the law the rest of this file measures.  Integer streams are compared exactly;
+    the two rows whose values exceed 2**53 cannot be, and are compared to a tolerance,
+    which is the float finding showing up in the test harness rather than in the program.
+
+    The two costs printed are what the row's policy actually persisted and what the safe
+    policy would have cost (W + 1).  At W = 1 they are the same number, so the cheap
+    checkpoint wins nothing there; at W = 50 it is 2 numbers against 51, and those 49
+    numbers are the entire price of being right.
+    """
+    print(f"{'what it exercises':38s} {'n':>5} {'W':>3} {'crash':>6} {'policy':>7} {'sk':>3} "
+          f"{'ans':>5} {'final':>10} {'kept':>5} {'safe':>5} {'exact':>6}")
+    for label, xs, w, crash, policy, skew, want in EXAMPLES:
+        want_n, want_final = want
+        got, ck = run(xs, w, crash_at=crash, policy=policy, skew=skew)
+        truth = exact_answers(xs, w)
+        final = got[-1] if got else None
+        exact = got == truth
+        # ints below 2**53 are exact in float64; these two rows are the ones that are not
+        ints = all(float(v).is_integer() and abs(v) < 2.0**53 for v in xs)
+
+        assert len(got) == want_n, (label, len(got), want_n)
+        assert (final is None) == (want_final is None), (label, final, want_final)
+        assert final is None or abs(final - want_final) <= 1e-9 * max(1.0, abs(want_final)), (
+            label, final, want_final)
+        # ---- the second check: the from-scratch reference, or the total-only error law
+        if skew != 0:
+            assert len(got) != len(truth), (label, 'a skew must change the answer COUNT')
+        elif policy in ("window", "replay"):
+            if ints:
+                assert got == truth, (label, 'an exact policy drifted', got, truth)
+            else:
+                assert abs(final - truth[-1]) <= 1e-9 * abs(truth[-1]), (label, final)
+        elif len(xs) - (crash or 0) >= w:          # the window refilled after the restart
+            assert abs((final - truth[-1]) - ck["total"] / w) <= 1e-9 * max(1.0, abs(final)), (
+                label, final, truth[-1], ck)
+        else:
+            # fewer than W arrivals after the restart, so the window never overflows and
+            # nothing is ever subtracted: the restored total either passes through harmless
+            # (the W = N row, exact despite a persisted 17) or lands whole in the answer.
+            err = 0.0 if final is None else final - truth[-1]
+            assert abs(err) <= 1e-9 or abs(err - ck["total"] / w) <= 1e-9 * max(1.0, abs(final)), (
+                label, err, ck)
+
+        shown = 'None' if final is None else f"{final:g}"
+        print(f"{label:38s} {len(xs):>5} {w:>3} {str(crash):>6} {policy:>7} {skew:>+3} "
+              f"{len(got):>5} {shown:>10} {ck['size']:>5} {w + 1:>5} {str(exact):>6}")
+    print(f"all {len(EXAMPLES)} examples agree with the from-scratch reference")
+    print()
+
+
 def main():
+    show_examples()
     print("VALUES =", "  ".join(f"{i}:{v}" for i, v in enumerate(VALUES)), f"   W = {W}")
     truth, clean_ck = run(VALUES)
     assert truth == exact_answers(VALUES), (truth, exact_answers(VALUES))

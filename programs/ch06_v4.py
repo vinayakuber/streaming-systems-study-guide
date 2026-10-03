@@ -13,6 +13,14 @@ the log's FORMAT was the first thing stated for a reason.  A log of states can b
 and replayed; a log of deltas can be neither, and both failures are the same fact: an
 assignment is idempotent and an addition is not.
 
+WORKED EXAMPLES: the EXAMPLES table below holds 12 input/output pairs -- an empty log and a
+single increment, one entry per counter (nothing to compact), the chapter's log and the same
+log reversed, both sides of the condition that decides whether keeping the last increment is
+harmless (increments that cancel before the last one, and increments that do not), a counter
+that cancels to zero, a delete, a log that is ONLY a delete, and two at the 20,000-increment
+scale -- one of which the wrong compaction gets exactly right.  Every row is ASSERTED three
+ways, so the table cannot drift from the code: change the answer and this file stops running.
+
 Run it:  python3 programs/ch06_v4.py
 """
 import random
@@ -26,6 +34,47 @@ DELTAS = [("errors", 5), ("errors", 3), ("hits", 7), ("errors", 2), ("errors", 6
 TRUE = {"errors": 24, "hits": 21}
 N = len(DELTAS)
 TOMBSTONE = None          # the entry that means "this counter is gone"
+
+# An empty log, a single increment, one entry per counter, a log whose earlier increments
+# cancel, increments that cancel to zero, a delete, a log that is only a delete, the
+# chapter's log reversed, and two at the scale that gets compaction scheduled.  These are
+# inputs for the examples table, not alternative versions of the problem.
+EMPTY_LOG = []
+ONE_DELTA = [("errors", 5)]
+ONE_PER_KEY = [("errors", 5), ("hits", 7)]
+NEGATIVE = [("errors", 5), ("errors", -2)]
+LUCKY = [("drops", 0), ("drops", 5)]       # earlier increments sum to 0: the naive one works
+CANCELLING = [("retries", 5), ("retries", -5), ("errors", 1)]
+WITH_DELETE = DELTAS + [("hits", TOMBSTONE)]
+ONLY_A_DELETE = [("hits", TOMBSTONE)]
+REVERSED = DELTAS[::-1]
+BIG_KEY_COUNT, BIG_ENTRY_COUNT = 50, 20_000
+BIG_DELTAS = [(f"m{i % BIG_KEY_COUNT}", 1 + (i % 3)) for i in range(BIG_ENTRY_COUNT)]
+# the same shape with increments that cycle -3..3, which per counter sum to zero over any
+# 7 entries -- so the LAST increment happens to equal the total and the wrong compaction
+# comes out exact.  An accidental cancellation is the one case where it looks right.
+BIG_CANCELS = [(f"m{i % BIG_KEY_COUNT}", (i % 7) - 3) for i in range(BIG_ENTRY_COUNT)]
+BIG_TRUE = {f"m{j}": 799 + (j % 3) for j in range(BIG_KEY_COUNT)}
+BIG_CANCELS_TRUE = {f"m{j}": (j % 7) - 3 for j in range(BIG_KEY_COUNT)}
+
+# ------------------------------------------------------------------- WORKED EXAMPLES
+# (what it exercises, delta log, expected totals, does compact_last agree?).  Every row is
+# asserted by show_examples(), which is why the table is data and not a comment: a comment
+# can go stale silently, and this cannot.
+EXAMPLES = [
+    ("an empty log: no counters at all", EMPTY_LOG,     {},                             True),
+    ("a single increment",               ONE_DELTA,     {"errors": 5},                  True),
+    ("one entry per counter",            ONE_PER_KEY,   {"errors": 5, "hits": 7},       True),
+    ("the chapter's log",                DELTAS,        {"errors": 24, "hits": 21},     False),
+    ("the chapter's log, reversed",      REVERSED,      {"errors": 24, "hits": 21},     False),
+    ("two increments, one negative",     NEGATIVE,      {"errors": 3},                  False),
+    ("earlier increments cancel: LUCKY", LUCKY,         {"drops": 5},                   True),
+    ("a counter that cancels to zero",   CANCELLING,    {"retries": 0, "errors": 1},    False),
+    ("a delete at the end of the log",   WITH_DELETE,   {"errors": 24},                 False),
+    ("a log that is only a delete",      ONLY_A_DELETE, {},                             True),
+    ("20,000 increments, 50 counters",   BIG_DELTAS,    BIG_TRUE,                       False),
+    ("20,000 that cancel: naive EXACT",  BIG_CANCELS,   BIG_CANCELS_TRUE,               True),
+]
 
 
 def fold_add(log):
@@ -97,7 +146,61 @@ def to_states(log):
     return emit(fold_add(log))
 
 
+def _tot(t):
+    """Totals narrow enough for a column.  Fifty counters print as a count and one value."""
+    if not t:
+        return "{}"
+    if len(t) <= 2:
+        return " ".join(f"{k}={v}" for k, v in sorted(t.items()))
+    k, v = min(t.items())
+    return f"{len(t)} counters, {k}={v}"
+
+
+def show_examples():
+    """Print the examples table and assert every row.
+
+    Each row is checked three ways: the fold with +, the fold of the summed compaction, and
+    an independent per-counter reference that slices the log instead of making one pass.
+    Both compactions' sizes are printed, because the size is NOT what separates them -- they
+    usually tie, and the last two rows show the same 20,000 entries reduced to the same 50
+    either way, right in one case and wrong in the other.  The last row is the uncomfortable
+    one: increments that cancel make the wrong compaction exactly right.
+    """
+    def reference(log):
+        """Per counter, the increments AFTER the last delete, summed.  A different mechanism
+        from fold_add -- it slices per key where fold_add makes a single pass."""
+        out = {}
+        for key in {k for k, _ in log}:
+            ds = [d for k, d in log if k == key]
+            after = ds[max((i for i, d in enumerate(ds) if d is TOMBSTONE), default=-1) + 1:]
+            if after:
+                out[key] = sum(after)
+        return out
+
+    print(f"{'what it exercises':34s} {'in':>7} {'sum':>5} {'last':>5} "
+          f"{'the totals':>22} {'off by':>7}  verdict")
+    for label, log, want, naive_ok in EXAMPLES:
+        totals = fold_add(log)
+        assert totals == want, (label, totals, want)
+        assert reference(log) == want, (label, "the reference disagrees", reference(log))
+        summed, naive = compact_sum(log), compact_last(log)
+        assert fold_add(summed) == want, (label, "summing the increments must preserve the fold")
+        assert fold_assign(to_states(log)) == want, (label, "converting to states must too")
+        from_naive = fold_add(naive)
+        assert (from_naive == want) == naive_ok, (label, from_naive, want)
+        off = max((abs(want[k] - from_naive.get(k, 0)) for k in want), default=0)
+        size = ("tie" if len(summed) == len(naive) else
+                "sum smaller" if len(summed) < len(naive) else "last smaller")
+        verdict = f"{size}, " + ("naive agrees" if naive_ok else f"naive WRONG by {off}")
+        print(f"{label:34s} {len(log):>7} {len(summed):>5} {len(naive):>5} "
+              f"{_tot(totals):>22} {off:>7}  {verdict}")
+    print(f"all {len(EXAMPLES)} examples agree with a per-counter reference sum and with both "
+          f"safe compactions")
+    print()
+
+
 def main():
+    show_examples()
     print("DELTAS =", "  ".join(f"{k}{d:+d}" for k, d in DELTAS), f"   ({N} entries)")
     totals = fold_add(DELTAS)
     naive = compact_last(DELTAS)

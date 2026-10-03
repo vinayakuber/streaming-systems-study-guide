@@ -14,6 +14,15 @@ pair can land in a state that corresponds to no moment in the event stream at al
 derived pair always corresponds to some earlier moment.  The skill is noticing that "both must
 agree" is a request to have two sources of truth, and declining it.
 
+WORKED EXAMPLES: the EXAMPLES table below holds 19 input/output pairs -- the first and last
+event of the stream as crash points, an ordinary middle one, both sides of the crash boundary
+(the last event versus no crash at all) in both write orders, a crash point past the end that
+never fires, the rebuild interval on both sides of the staleness bound (every event, every 3,
+and an interval longer than the whole stream), the zero-valued event that makes the two stores
+AGREE while still being split, a one-event stream, an empty stream that has nothing to split,
+and a 3,000-event stream at scale; each row prints what both designs cost for that same input.
+Every row is ASSERTED, so the table cannot drift from the code.
+
 Run it:  python3 programs/ch05_v3.py
 """
 
@@ -30,6 +39,42 @@ N = len(ITEMS)
 # How many events between cache rebuilds, for the derived design.  3 is small enough to trace
 # and large enough that the cache is visibly behind.
 REBUILD_EVERY = 3
+
+# A stream with a zero-valued event, a one-event stream, an empty stream, and a 3,000-event
+# stream at scale.  These are inputs for the examples table, not alternative versions of the
+# problem.  The big stream's values are all equal, which is fine because those rows test SCALE
+# and not whether a wrong total identifies which event was lost.
+WITH_ZERO = ITEMS[:4] + [(99, 0)] + ITEMS[4:]
+ONE_EVENT = [(0, 5)]
+EMPTY_STREAM = []
+BIG_ITEMS = [(i, 7) for i in range(3_000)]
+
+# ------------------------------------------------------------------- WORKED EXAMPLES
+# (what it exercises, items, design, crash_at, (counter, warehouse total)).  "derived@k"
+# rebuilds the cache every k events.  Every row is asserted by show_examples() against the
+# program AND against an independent formula for the same pair, which is why the table is data
+# and not a comment: a comment can go stale silently, and this cannot.
+EXAMPLES = [
+    ("counter-first, crash on the FIRST event",  ITEMS,        "counter_first",   0,     (5, 0)),
+    ("counter-first, ordinary middle event",     ITEMS,        "counter_first",   4,     (23, 17)),
+    ("counter-first, crash on the LAST event",   ITEMS,        "counter_first",   8,     (45, 37)),
+    ("counter-first, no crash at all",           ITEMS,        "counter_first",   None,  (45, 45)),
+    ("crash point past the end never fires",     ITEMS,        "counter_first",   99,    (45, 45)),
+    ("warehouse-first, FIRST event (sign flip)", ITEMS,        "warehouse_first", 0,     (0, 5)),
+    ("warehouse-first, crash on the LAST event", ITEMS,        "warehouse_first", 8,     (37, 45)),
+    ("derived@3, crash before anything ran",     ITEMS,        "derived@3",       0,     (0, 0)),
+    ("derived@3, middle event, lag 1",           ITEMS,        "derived@3",       4,     (15, 17)),
+    ("derived@3, LAST event, lag 2 (the bound)", ITEMS,        "derived@3",       8,     (24, 37)),
+    ("derived@3, no crash -> caught up",         ITEMS,        "derived@3",       None,  (45, 45)),
+    ("derived@1, rebuild every event, lag 0",    ITEMS,        "derived@1",       8,     (37, 37)),
+    ("derived@20, interval > whole stream",      ITEMS,        "derived@20",      None,  (0, 45)),
+    ("a ZERO-valued event: the pair AGREES",     WITH_ZERO,    "counter_first",   4,     (17, 17)),
+    ("one-event stream, crash on it",            ONE_EVENT,    "counter_first",   0,     (5, 0)),
+    ("empty stream: nothing to split",           EMPTY_STREAM, "counter_first",   0,     (0, 0)),
+    ("3,000 events, counter-first, midway",      BIG_ITEMS,    "counter_first",   1500,  (10507, 10500)),
+    ("3,000 events, derived@500, lag 200",       BIG_ITEMS,    "derived@500",     1700,  (10500, 11900)),
+    ("3,000 events, derived@500, no crash",      BIG_ITEMS,    "derived@500",     None,  (21000, 21000)),
+]
 
 
 def prefixes(items):
@@ -120,7 +165,61 @@ def reconcile(counter, rows, direction):
     return counter, counter, rows
 
 
+def show_examples():
+    """Print the examples table and assert every row, twice over.
+
+    The second check is an independent formula for the pair -- prefix sums of the values,
+    with no reference to dual_write or derived -- so a row has to agree with the program and
+    with the rule the program claims to implement.
+
+    The two cost columns are for the SAME input on BOTH designs, so each row shows which one
+    is cheaper for it.  `dual` counts durable writes (two per event, one for the event the
+    crash straddles).  `derv` counts the one write per event PLUS the rows each rebuild has to
+    re-read, because rebuild() sums the whole warehouse every time.  That is why the derived
+    design LOSES on most of these rows: its correctness is free and its freshness is not, and
+    a short rebuild interval on a long stream is the expensive corner.
+    """
+    print(f"{'what it exercises':40s} {'events':>6} {'design':>15} {'crash':>5} "
+          f"{'counter':>8} {'wh':>8} {'lag':>4} {'dual':>6} {'derv':>7} {'cheaper':>8}")
+    for label, items, design, crash_at, want in EXAMPLES:
+        vals = [v for _, v in items]
+        n = len(items)
+        m = n if crash_at is None else min(crash_at, n)      # events that completed a row
+        every = int(design.split("@")[1]) if "@" in design else REBUILD_EVERY
+
+        if design.startswith("derived"):
+            counter, rows, lag = derived(items, crash_at, every)
+            wh = rebuild(rows)
+            caught = (m // every) * every
+            ref = (sum(vals[:caught]), sum(vals[:m]))
+            assert lag == m - caught, (label, lag, m - caught)
+        else:
+            first = design == "counter_first"
+            counter, wh, rows = dual_write(items, crash_at, counter_first=first)
+            lag = 0
+            if m < n:                                        # the crash really landed
+                ahead, behind = sum(vals[:m + 1]), sum(vals[:m])
+                ref = (ahead, behind) if first else (behind, ahead)
+            else:
+                ref = (sum(vals), sum(vals))
+
+        assert (counter, wh) == want, (label, (counter, wh), want)
+        assert ref == want, (label, 'the rule disagrees', ref, want)
+        assert wh == sum(v for _, v in rows), (label, wh, rows)
+
+        dual = 2 * m + (1 if m < n else 0)
+        r = m // every
+        derv = m + every * r * (r + 1) // 2
+        cheaper = 'derived' if derv < dual else 'dual' if dual < derv else 'tie'
+        crash = 'none' if crash_at is None else str(crash_at)
+        print(f"{label:40s} {n:>6} {design:>15} {crash:>5} "
+              f"{counter:>8} {wh:>8} {lag:>4} {dual:>6} {derv:>7} {cheaper:>8}")
+    print(f"all {len(EXAMPLES)} examples agree with the prefix sums of their own stream")
+    print()
+
+
 def main():
+    show_examples()
     legal = prefixes(ITEMS)
     print("ITEMS =", "  ".join(f"{e}:{v}" for e, v in ITEMS), f"  total {CORRECT}")
     print(f"the {len(legal)} totals the stream legitimately passes through: {legal}\n")

@@ -15,6 +15,16 @@ charged" the reverse, so at-most-once with the record written BEFORE sending.  A
 opposite of what the first reading of the question invites.  The local dedupe set that looks
 like a third option is measured below and shown to be the same two orderings renamed.
 
+WORKED EXAMPLES: the EXAMPLES table below holds 21 input/output pairs -- the first and last
+item of the queue as crash points, the middle one the trace follows, both sides of the crash
+boundary (a crash versus no crash) in both orderings, a crash point past the end that never
+fires, both sides of the dedupe boundary (remember-then-send against send-then-remember), both
+sides of the far-end idempotency key including the case where the key does NOT rescue the
+design, an empty queue and a one-item queue, a run crashed at every item at once, and a
+20,000-item queue at scale; each row prices its own outcome for both messages, so the row
+shows which message it is acceptable for.  Every row is ASSERTED, so the table cannot drift
+from the code.
+
 Run it:  python3 programs/ch05_v4.py
 """
 
@@ -35,6 +45,44 @@ PROFILES = {
     "your parcel has arrived": {"duplicate": 1, "loss": 20},
     "you have been charged":   {"duplicate": 50, "loss": 2},
 }
+
+# A one-item queue, an empty queue, and a 20,000-item queue at the scale a real notification
+# backlog reaches.  ALL means "crashed at every item in one run".  These are inputs for the
+# examples table, not alternative versions of the problem.
+ONE_ITEM = [(0, 5)]
+EMPTY_QUEUE = []
+BIG_QUEUE = [(i, 1 + i % 7) for i in range(20_000)]
+BIG_MID = len(BIG_QUEUE) // 2
+ALL = "all"
+
+# ------------------------------------------------------------------- WORKED EXAMPLES
+# (what it exercises, items, ordering, crash point, far-end key, (duplicated ids, lost ids)).
+# Every row is asserted by show_examples() against the program AND against a closed form for
+# the send sequence the ordering forces, which is why the table is data and not a comment: a
+# comment can go stale silently, and this cannot.
+EXAMPLES = [
+    ("effect-first, crash on the FIRST item",   ITEMS,       "effect_then_position", 0,       False, ([0], [])),
+    ("effect-first, the traced middle item",    ITEMS,       "effect_then_position", C,       False, ([3], [])),
+    ("effect-first, crash on the LAST item",    ITEMS,       "effect_then_position", N - 1,   False, ([8], [])),
+    ("effect-first, no crash at all",           ITEMS,       "effect_then_position", None,    False, ([], [])),
+    ("crash point past the end never fires",    ITEMS,       "effect_then_position", 99,      False, ([], [])),
+    ("position-first, FIRST item (mirrored)",   ITEMS,       "position_then_effect", 0,       False, ([], [0])),
+    ("position-first, crash on the LAST item",  ITEMS,       "position_then_effect", N - 1,   False, ([], [8])),
+    ("position-first, no crash at all",         ITEMS,       "position_then_effect", None,    False, ([], [])),
+    ("send-then-remember == effect-first",      ITEMS,       "send_then_dedupe",     C,       False, ([3], [])),
+    ("remember-then-send == position-first",    ITEMS,       "dedupe_then_send",     C,       False, ([], [3])),
+    ("effect-first, crashed at EVERY item",     ITEMS,       "effect_then_position", ALL,     False, ([0, 1, 2, 3, 4, 5, 6, 7, 8], [])),
+    ("position-first, crashed at EVERY item",   ITEMS,       "position_then_effect", ALL,     False, ([], [0, 1, 2, 3, 4, 5, 6, 7, 8])),
+    ("far-end key rescues effect-first",        ITEMS,       "effect_then_position", C,       True,  ([], [])),
+    ("far-end key does NOT rescue position",    ITEMS,       "position_then_effect", C,       True,  ([], [3])),
+    ("far-end key, crashed at EVERY item",      ITEMS,       "effect_then_position", ALL,     True,  ([], [])),
+    ("empty queue: nothing to send",            EMPTY_QUEUE, "effect_then_position", 0,       False, ([], [])),
+    ("one item, effect-first, crash on it",     ONE_ITEM,    "effect_then_position", 0,       False, ([0], [])),
+    ("one item, position-first, crash on it",   ONE_ITEM,    "position_then_effect", 0,       False, ([], [0])),
+    ("20,000 items, effect-first, midway",      BIG_QUEUE,   "effect_then_position", BIG_MID, False, ([10000], [])),
+    ("20,000 items, position-first, midway",    BIG_QUEUE,   "position_then_effect", BIG_MID, False, ([], [10000])),
+    ("20,000 items, far-end key, midway",       BIG_QUEUE,   "effect_then_position", BIG_MID, True,  ([], [])),
+]
 
 
 def run(items, order, crash_at, far_end_key=False):
@@ -130,7 +178,65 @@ def expected_cost(items, order, profile):
     return total / len(items)
 
 
+def show_examples():
+    """Print the examples table and assert every row, twice over.
+
+    The second check is a closed form for the send sequence: effect-first repeats the
+    straddling item, so the phone sees ids[:c+1] + ids[c:], and position-first skips it, so it
+    sees ids[:c] + ids[c+1:].  It is written out here with no reference to `run`, so a row has
+    to agree with the program and with the rule the program claims to implement.  A run
+    crashed at EVERY item has no closed form -- the send order after repeated restarts is an
+    implementation detail -- so those rows are checked on the tally alone.
+
+    The two cost columns price the SAME outcome for BOTH messages, which is the whole point of
+    the variation: a duplicate is cheap for a parcel notice and expensive for a charge notice,
+    so the identical row is acceptable under one message and not the other.  Rows that cost
+    nothing either way -- a clean run, or a crash under a far-end key -- are the ties, and
+    they are the only rows where the choice does not have to be made.
+    """
+    parcel, charged = PROFILES["your parcel has arrived"], PROFILES["you have been charged"]
+
+    def price(dups, lost, profile):
+        return len(dups) * profile["duplicate"] + len(lost) * profile["loss"]
+
+    def closed_form(ids, order, crash_at, key):
+        """What the phone must see, derived from the ordering rather than from `run`."""
+        if crash_at is None or crash_at >= len(ids):
+            return list(ids)
+        if key and order in ("effect_then_position", "send_then_dedupe"):
+            return list(ids)                      # the far end swallows the repeat
+        if order in ("effect_then_position", "send_then_dedupe"):
+            return ids[:crash_at + 1] + ids[crash_at:]
+        return ids[:crash_at] + ids[crash_at + 1:]
+
+    def short(ids):
+        return str(ids) if len(ids) <= 3 else f"{len(ids)} items"
+
+    print(f"{'what it exercises':42s} {'items':>6} {'ordering':>20} {'crash':>5} {'key':>5} "
+          f"{'duplicated':>11} {'lost':>11} {'parcel':>7} {'charge':>7} {'better for':>10}")
+    for label, items, order, crash_at, key, want in EXAMPLES:
+        ids = [eid for eid, _ in items]
+        crashes = (set(range(len(items))) if crash_at == ALL
+                   else set() if crash_at is None else {crash_at})
+        sent = run(items, order, crashes, far_end_key=key)
+        dups, lost = tally(items, sent)
+        assert (dups, lost) == want, (label, (dups, lost), want)
+
+        if crash_at != ALL:
+            ref = closed_form(ids, order, crash_at, key)
+            assert sent == ref, (label, 'the rule disagrees', sent[:12], ref[:12])
+
+        p, ch = price(dups, lost, parcel), price(dups, lost, charged)
+        better = 'parcel' if p < ch else 'charge' if ch < p else 'either'
+        shown = 'all' if crash_at == ALL else 'none' if crash_at is None else str(crash_at)
+        print(f"{label:42s} {len(items):>6} {order:>20} {shown:>5} {str(key):>5} "
+              f"{short(dups):>11} {short(lost):>11} {p:>7} {ch:>7} {better:>10}")
+    print(f"all {len(EXAMPLES)} examples agree with the send sequence their ordering forces")
+    print()
+
+
 def main():
+    show_examples()
     clean = {o: run(ITEMS, o, set()) for o in
              ("effect_then_position", "position_then_effect", "dedupe_then_send", "send_then_dedupe")}
     want = [eid for eid, _ in ITEMS]

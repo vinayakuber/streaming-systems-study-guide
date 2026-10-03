@@ -14,6 +14,14 @@ stored state cannot be the merged runs at all -- it has to be the individual boo
 the merge computed on read.  Recognising that the chapter's state shape is only valid for an
 append-only stream is the whole answer.
 
+WORKED EXAMPLES: the EXAMPLES table below holds 21 input/output pairs -- an empty calendar,
+the day's first and last minute, both sides of the overlap test (abutting versus one minute
+of overlap), a zero-length hold that occupies no minute and still blocks a booking, a cancel
+that splits a merged block, a cancel of a start
+nobody booked, a fully booked day with NO free gap to report, a four-minute day, and 400
+generated bookings.  Every row is ASSERTED twice -- against its expected answer and against
+the per-minute grid -- so the table cannot drift from the code.
+
 Run it:  python3 programs/ch04_v2.py
 """
 
@@ -34,6 +42,56 @@ DAY = (0, 600)
 
 # The cancellation the whole file turns on: the 90-minute-mark meeting, named by its start.
 CANCEL_START = 90
+
+# The chapter's nine requests as an operation stream, and the same stream with the cancel.
+# Below them: a single booking, the abutting pair and the one-minute-overlap pair, a tiny day,
+# a long day, and a generated stream of 600 bookings.  These are inputs for the examples
+# table, not alternative versions of the problem.
+REQUEST_OPS = [("book", r) for r in REQUESTS]
+REQUEST_OPS_CANCEL = REQUEST_OPS + [("cancel", CANCEL_START)]
+ONE_BOOKING = [("book", (10, 20))]
+DISJOINT = [("book", (10, 20)), ("book", (100, 130))]
+ABUTTING = [("book", (90, 130)), ("book", (130, 160))]       # 130 == 130: must NOT clash
+OVERLAPPING = [("book", (90, 130)), ("book", (129, 160))]     # one minute: must clash
+TINY_DAY = (0, 4)
+TINY_FULL = [("book", (t, t + 1)) for t in range(4)]          # four meetings fill a 4-minute day
+SHORT_DAY = (0, 2)
+SHORT_OPS = TINY_FULL[:2] + [("book", (2, 2))]                # three holds in a 2-minute day
+LONG_DAY = (0, 100_000)
+LONG_OPS = [("book", (0, 1)), ("book", (99_999, 100_000))]    # the first and last minute of it
+BIG_DAY = (0, 800)
+BIG_BOOKINGS = [("book", (2 * i, 2 * i + 2)) for i in range(400)]   # 400 abutting meetings
+BIG_SHUFFLED = BIG_BOOKINGS[:]
+random.Random(20260303).shuffle(BIG_SHUFFLED)                 # the same 400, in request order
+BIG_TWICE = BIG_BOOKINGS + BIG_SHUFFLED                       # every one requested a second time
+
+# ------------------------------------------------------------------- WORKED EXAMPLES
+# (what it exercises, ops, day, (bookings accepted, busy view)).  Every row is asserted by
+# show_examples(), which is why the table is data and not a comment: a comment can go stale
+# silently, and this cannot.
+EXAMPLES = [
+    ("empty stream -> nothing held, whole day free", [],              DAY,       (0, ())),
+    ("a single booking",                             ONE_BOOKING,     DAY,       (1, ((10, 20),))),
+    ("the day's FIRST minute",                       [("book", (0, 1))],     DAY, (1, ((0, 1),))),
+    ("the day's LAST minute",                        [("book", (599, 600))], DAY, (1, ((599, 600),))),
+    ("two disjoint bookings, both held",             DISJOINT,        DAY,       (2, ((10, 20), (100, 130)))),
+    ("back-to-back at 130: no clash, one block",     ABUTTING,        DAY,       (2, ((90, 160),))),
+    ("one minute of overlap at 129: REJECTED",       OVERLAPPING,     DAY,       (1, ((90, 130),))),
+    ("a zero-length hold occupies no minute",        [("book", (50, 50))], DAY,  (1, ((50, 50),))),
+    ("a zero-length hold still blocks 40..60",       [("book", (50, 50)), ("book", (40, 60))], DAY, (1, ((50, 50),))),
+    ("cancel splits the block the merge made",       ABUTTING + [("cancel", 90)], DAY, (3, ((130, 160),))),
+    ("cancel a start nobody booked -> no answer",    [("book", (90, 130)), ("cancel", 91)], DAY, (1, ((90, 130),))),
+    ("a booking running past the day's end",         [("book", (590, 700))], DAY, (1, ((590, 700),))),
+    ("the whole day in one booking -> NO free gap",  [("book", (0, 600))],   DAY, (1, ((0, 600),))),
+    ("the chapter's nine requests",                  REQUEST_OPS,     DAY,       (6, ((1, 31), (50, 80), (90, 160), (245, 275), (540, 570)))),
+    ("the nine, then the cancel at 90",              REQUEST_OPS_CANCEL, DAY,    (7, ((1, 31), (50, 80), (130, 160), (245, 275), (540, 570)))),
+    ("a 4-minute day, filled minute by minute",      TINY_FULL,       TINY_DAY,  (4, ((0, 4),))),
+    ("three holds in a 2-minute day (grid wins)",    SHORT_OPS,       SHORT_DAY, (3, ((0, 2),))),
+    ("first and last minute of a 100,000 day",       LONG_OPS,        LONG_DAY,  (2, ((0, 1), (99_999, 100_000)))),
+    ("400 abutting bookings -> one block",           BIG_BOOKINGS,    BIG_DAY,   (400, ((0, 800),))),
+    ("the same 400 in random request order",         BIG_SHUFFLED,    BIG_DAY,   (400, ((0, 800),))),
+    ("all 400 requested twice -> half rejected",     BIG_TWICE,       BIG_DAY,   (400, ((0, 800),))),
+]
 
 
 def clashes(members, span):
@@ -140,7 +198,44 @@ def occupied_minutes(members, day=DAY):
     return grid
 
 
+def show_examples():
+    """Print the examples table and assert every row, two independent ways.
+
+    Each row is checked against its expected (accepted count, busy view) AND against
+    `occupied_minutes` -- one boolean per minute of the day, which knows nothing about
+    interval merging -- so every block and every gap is confirmed minute by minute.
+
+    The last two columns are the two ways of answering the same question, and the cheaper one
+    is not always the merge: `sweep` is a pass over the held bookings, `grid` is one boolean
+    per minute of the day.  On a 100,000-minute day with two meetings the merge wins by five
+    orders of magnitude; on a 4-minute day with four meetings they tie; on a 2-minute day with
+    three holds the grid wins outright.
+    """
+    print(f"{'what it exercises':46s} {'ops':>5} {'acc':>4} {'busy view':>26} "
+          f"{'busy':>6} {'free':>7} {'sweep':>6} {'grid':>8}")
+    for label, ops, day, want in EXAMPLES:
+        acc, mem = run_member_calendar(ops)
+        busy, gaps = merged_view(mem), free_gaps(mem, day)
+        assert (sum(acc), tuple(busy)) == want, (label, sum(acc), tuple(busy), want)
+        grid = occupied_minutes(mem, day)
+        for s, e in busy:
+            assert all(grid[t - day[0]] for t in range(max(s, day[0]), min(e, day[1]))), (label, s, e)
+        for s, e in gaps:
+            assert not any(grid[t - day[0]] for t in range(s, e)), (label, s, e)
+        busy_min = sum(min(e, day[1]) - max(s, day[0]) for s, e in busy
+                       if min(e, day[1]) > max(s, day[0]))
+        free_min = sum(e - s for s, e in gaps)
+        assert busy_min == sum(grid), (label, busy_min, sum(grid))
+        assert busy_min + free_min == day[1] - day[0], (label, busy_min, free_min)
+        shown = str(list(busy)) if len(busy) <= 2 else f"{len(busy)} blocks"
+        print(f"{label:46s} {len(ops):>5} {sum(acc):>4} {shown:>26} "
+              f"{busy_min:>6} {free_min:>7} {len(mem):>6} {day[1] - day[0]:>8}")
+    print(f"all {len(EXAMPLES)} examples agree with the per-minute grid")
+    print()
+
+
 def main():
+    show_examples()
     ops = [("book", r) for r in REQUESTS]
     accepted, members = run_member_calendar(ops)
     print("REQUESTS (minutes from 09:00, half-open):")

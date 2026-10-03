@@ -14,6 +14,15 @@ the maximum) rather than an accumulator.  The impossibility is proved below by r
 it, not argued: two windows agree on (kept maximum, departing value, arriving value) and
 disagree on the answer, so no update function of those three arguments can exist.
 
+WORKED EXAMPLES: the EXAMPLES table below holds 18 input/output pairs -- the first and the
+last window of the chapter's stream, both sides of the tick where the stale maximum stops
+being right, W = 1 and W = N, a flat stream (the `<=` eviction), a single event, a stream
+shorter than its own window (no answer at all), a falling stream, the mixture-versus-uniform
+float pair, and a generated 5,000-event stream.  Each row prints the deque's steps beside
+the brute force's reads, so the rows where the deque LOSES are visible rather than claimed.
+Every row is ASSERTED three ways -- deque, brute force, rescan -- so the table cannot drift
+from the code: change an answer and this file stops running.
+
 Run it:  python3 programs/ch01_v2.py
 """
 
@@ -35,6 +44,46 @@ HUGE = 1e16
 
 N = len(VALUES)
 NWIN = N - W + 1
+
+# Inputs for the examples table, not alternative versions of the problem: a flat stream, a
+# single event, a stream shorter than its own window, a strictly falling stream (where the
+# maximum departs on every tick), the two float cases the chapter's finding is about, and
+# one GENERATED stream at the scale a real risk screen runs at.
+FLAT = [4] * 6
+ONE_EVENT = [42]
+TOO_SHORT = [5, 3]
+FALLING = list(range(20, 0, -1))
+MIXTURE = [HUGE] + VALUES[1:]              # ONE value replaced: magnitudes mixed
+UNIFORM = [v * HUGE for v in VALUES]       # every value scaled: magnitudes shared
+_BIG_RNG = random.Random(20260303)         # seeded, so the expected values below are fixed
+BIG_STREAM = [_BIG_RNG.randint(-10**6, 10**6) for _ in range(5000)]
+
+# ------------------------------------------------------------------- WORKED EXAMPLES
+# (what it exercises, stream, W, window index, expected maximum).  The window index is the
+# window's position, so window i covers xs[i:i+W]; a window that does not exist has no
+# maximum and the expected value is None rather than a guessed number.  Every row is
+# asserted by show_examples() against the deque, the brute force and the rescan, which is
+# why this table is data and not a comment: a comment can go stale silently, this cannot.
+EXAMPLES = [
+    ("first window of all",                  VALUES,     3,   0,    7),
+    ("ordinary window, maximum inside",      VALUES,     3,   1,    7),
+    ("stale maximum STILL right (7 in it)",  VALUES,     3,   2,    7),
+    ("stale maximum now WRONG (7 left)",     VALUES,     3,   3,    6),
+    ("a bigger arrival heals the staleness", VALUES,     3,   4,    9),
+    ("last window of all",                   VALUES,     3,   6,    9),
+    ("W = 1 -> the stream itself, first",    VALUES,     1,   0,    5),
+    ("W = 1 -> the stream itself, last",     VALUES,     1,   8,    8),
+    ("W = N -> one window, one answer",      VALUES,     9,   0,    9),
+    ("flat stream, `<=` keeps one entry",    FLAT,       3,   0,    4),
+    ("a single event, W = 1",                ONE_EVENT,  1,   0,    42),
+    ("W > N -> no window, so no answer",     TOO_SHORT,  3,   0,    None),
+    ("falling stream, last window",          FALLING,    3,   17,   3),
+    ("mixture of magnitudes, still exact",   MIXTURE,    3,   0,    1e16),
+    ("uniform scaling, still exact",         UNIFORM,    3,   3,    6e16),
+    ("5,000 events, W = 500, first",         BIG_STREAM, 500, 0,    997916),
+    ("5,000 events, W = 500, last",          BIG_STREAM, 500, 4500, 998567),
+    ("5,000 events, W = 1, deque LOSES",     BIG_STREAM, 1,   2500, -48956),
+]
 
 
 def brute_max(xs, i, w=W):
@@ -165,7 +214,38 @@ def find_sum_collision(rng, w=W, tries=20000):
     return None
 
 
+def show_examples():
+    """Print the examples table and assert every row.
+
+    Each row is checked THREE ways -- the deque, the brute force read of that one window,
+    and the rescan-on-departure -- so an expected value has to be wrong in three places at
+    once to slip through.  The deque's total steps are printed beside the brute force's
+    total reads, which is the honest cost comparison: at W = 1 and at W = N the deque does
+    MORE work than re-reading, because every tick pushes, pops and expires to answer a
+    window that was never worth a structure.
+    """
+    print(f"{'what it exercises':37s} {'n':>5} {'W':>4} {'win':>5} {'max':>9} "
+          f"{'steps':>7} {'reads':>9}")
+    for label, xs, w, idx, want in EXAMPLES:
+        answers, pushes, pops, expiries = slide_max(xs, w)
+        nwin = len(xs) - w + 1
+        got = answers[idx] if 0 <= idx < len(answers) else None
+        ref = brute_max(xs, idx, w) if 0 <= idx < nwin else None
+        rescan = running_max_rescan(xs, w)[0]
+        reg = rescan[idx] if 0 <= idx < len(rescan) else None
+        assert got == want, (label, got, want)
+        assert ref == want, (label, 'the brute force disagrees', ref, want)
+        assert reg == want, (label, 'the rescan disagrees', reg, want)
+        steps = pushes + pops + expiries
+        reads = max(0, nwin) * w
+        shown = 'None' if got is None else f"{got:g}"
+        print(f"{label:37s} {len(xs):>5} {w:>4} {idx:>5} {shown:>9} {steps:>7} {reads:>9}")
+    print(f"all {len(EXAMPLES)} examples agree with the brute force and the rescan")
+    print()
+
+
 def main():
+    show_examples()
     print("VALUES =", "  ".join(f"{i}:{v}" for i, v in enumerate(VALUES)), f"   W = {W}")
     truth = all_maxima(VALUES)
     single = running_max_single(VALUES)

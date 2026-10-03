@@ -64,6 +64,15 @@ the maximum) rather than an accumulator.  The impossibility is proved below by r
 it, not argued: two windows agree on (kept maximum, departing value, arriving value) and
 disagree on the answer, so no update function of those three arguments can exist.
 
+WORKED EXAMPLES: the EXAMPLES table below holds 18 input/output pairs -- the first and the
+last window of the chapter's stream, both sides of the tick where the stale maximum stops
+being right, W = 1 and W = N, a flat stream (the `<=` eviction), a single event, a stream
+shorter than its own window (no answer at all), a falling stream, the mixture-versus-uniform
+float pair, and a generated 5,000-event stream.  Each row prints the deque's steps beside
+the brute force's reads, so the rows where the deque LOSES are visible rather than claimed.
+Every row is ASSERTED three ways -- deque, brute force, rescan -- so the table cannot drift
+from the code: change an answer and this file stops running.
+
 Run it:  python3 programs/ch01_v2.py
 """
 
@@ -85,6 +94,46 @@ HUGE = 1e16
 
 N = len(VALUES)
 NWIN = N - W + 1
+
+# Inputs for the examples table, not alternative versions of the problem: a flat stream, a
+# single event, a stream shorter than its own window, a strictly falling stream (where the
+# maximum departs on every tick), the two float cases the chapter's finding is about, and
+# one GENERATED stream at the scale a real risk screen runs at.
+FLAT = [4] * 6
+ONE_EVENT = [42]
+TOO_SHORT = [5, 3]
+FALLING = list(range(20, 0, -1))
+MIXTURE = [HUGE] + VALUES[1:]              # ONE value replaced: magnitudes mixed
+UNIFORM = [v * HUGE for v in VALUES]       # every value scaled: magnitudes shared
+_BIG_RNG = random.Random(20260303)         # seeded, so the expected values below are fixed
+BIG_STREAM = [_BIG_RNG.randint(-10**6, 10**6) for _ in range(5000)]
+
+# ------------------------------------------------------------------- WORKED EXAMPLES
+# (what it exercises, stream, W, window index, expected maximum).  The window index is the
+# window's position, so window i covers xs[i:i+W]; a window that does not exist has no
+# maximum and the expected value is None rather than a guessed number.  Every row is
+# asserted by show_examples() against the deque, the brute force and the rescan, which is
+# why this table is data and not a comment: a comment can go stale silently, this cannot.
+EXAMPLES = [
+    ("first window of all",                  VALUES,     3,   0,    7),
+    ("ordinary window, maximum inside",      VALUES,     3,   1,    7),
+    ("stale maximum STILL right (7 in it)",  VALUES,     3,   2,    7),
+    ("stale maximum now WRONG (7 left)",     VALUES,     3,   3,    6),
+    ("a bigger arrival heals the staleness", VALUES,     3,   4,    9),
+    ("last window of all",                   VALUES,     3,   6,    9),
+    ("W = 1 -> the stream itself, first",    VALUES,     1,   0,    5),
+    ("W = 1 -> the stream itself, last",     VALUES,     1,   8,    8),
+    ("W = N -> one window, one answer",      VALUES,     9,   0,    9),
+    ("flat stream, `<=` keeps one entry",    FLAT,       3,   0,    4),
+    ("a single event, W = 1",                ONE_EVENT,  1,   0,    42),
+    ("W > N -> no window, so no answer",     TOO_SHORT,  3,   0,    None),
+    ("falling stream, last window",          FALLING,    3,   17,   3),
+    ("mixture of magnitudes, still exact",   MIXTURE,    3,   0,    1e16),
+    ("uniform scaling, still exact",         UNIFORM,    3,   3,    6e16),
+    ("5,000 events, W = 500, first",         BIG_STREAM, 500, 0,    997916),
+    ("5,000 events, W = 500, last",          BIG_STREAM, 500, 4500, 998567),
+    ("5,000 events, W = 1, deque LOSES",     BIG_STREAM, 1,   2500, -48956),
+]
 
 
 def brute_max(xs, i, w=W):
@@ -215,7 +264,38 @@ def find_sum_collision(rng, w=W, tries=20000):
     return None
 
 
+def show_examples():
+    """Print the examples table and assert every row.
+
+    Each row is checked THREE ways -- the deque, the brute force read of that one window,
+    and the rescan-on-departure -- so an expected value has to be wrong in three places at
+    once to slip through.  The deque's total steps are printed beside the brute force's
+    total reads, which is the honest cost comparison: at W = 1 and at W = N the deque does
+    MORE work than re-reading, because every tick pushes, pops and expires to answer a
+    window that was never worth a structure.
+    """
+    print(f"{'what it exercises':37s} {'n':>5} {'W':>4} {'win':>5} {'max':>9} "
+          f"{'steps':>7} {'reads':>9}")
+    for label, xs, w, idx, want in EXAMPLES:
+        answers, pushes, pops, expiries = slide_max(xs, w)
+        nwin = len(xs) - w + 1
+        got = answers[idx] if 0 <= idx < len(answers) else None
+        ref = brute_max(xs, idx, w) if 0 <= idx < nwin else None
+        rescan = running_max_rescan(xs, w)[0]
+        reg = rescan[idx] if 0 <= idx < len(rescan) else None
+        assert got == want, (label, got, want)
+        assert ref == want, (label, 'the brute force disagrees', ref, want)
+        assert reg == want, (label, 'the rescan disagrees', reg, want)
+        steps = pushes + pops + expiries
+        reads = max(0, nwin) * w
+        shown = 'None' if got is None else f"{got:g}"
+        print(f"{label:37s} {len(xs):>5} {w:>4} {idx:>5} {shown:>9} {steps:>7} {reads:>9}")
+    print(f"all {len(EXAMPLES)} examples agree with the brute force and the rescan")
+    print()
+
+
 def main():
+    show_examples()
     print("VALUES =", "  ".join(f"{i}:{v}" for i, v in enumerate(VALUES)), f"   W = {W}")
     truth = all_maxima(VALUES)
     single = running_max_single(VALUES)
@@ -352,6 +432,27 @@ if __name__ == "__main__":
 Running it prints:
 
 ```
+what it exercises                         n    W   win       max   steps     reads
+first window of all                       9    3     0         7      16        21
+ordinary window, maximum inside           9    3     1         7      16        21
+stale maximum STILL right (7 in it)       9    3     2         7      16        21
+stale maximum now WRONG (7 left)          9    3     3         6      16        21
+a bigger arrival heals the staleness      9    3     4         9      16        21
+last window of all                        9    3     6         9      16        21
+W = 1 -> the stream itself, first         9    1     0         5      17         9
+W = 1 -> the stream itself, last          9    1     8         8      17         9
+W = N -> one window, one answer           9    9     0         9      16         9
+flat stream, `<=` keeps one entry         6    3     0         4      11        12
+a single event, W = 1                     1    1     0        42       1         1
+W > N -> no window, so no answer          2    3     0      None       2         0
+falling stream, last window              20    3    17         3      37        54
+mixture of magnitudes, still exact        9    3     0     1e+16      16        21
+uniform scaling, still exact              9    3     3     6e+16      16        21
+5,000 events, W = 500, first           5000  500     0    997916    9995   2250500
+5,000 events, W = 500, last            5000  500  4500    998567    9995   2250500
+5,000 events, W = 1, deque LOSES       5000    1  2500    -48956    9999      5000
+all 18 examples agree with the brute force and the rescan
+
 VALUES = 0:5  1:3  2:7  3:2  4:6  5:1  6:9  7:4  8:8    W = 3
 
   brute force  : [7, 7, 7, 6, 9, 9, 9]   (7 windows x 3 = 21 reads)
@@ -421,6 +522,16 @@ so a correct implementation must be able to recompute on a timer and not only on
 That is the same clock-versus-arrival split the batching problem turns on, and a dashboard
 driven only by arrivals shows a number that was true minutes ago.
 
+WORKED EXAMPLES: the EXAMPLES table below holds 19 input/output pairs -- the instant before
+the first sample and the instant of the last, an ordinary arrival, both sides of the
+(now - span, now] edge on two samples exactly span apart, the arrival that retires two at
+once, a quiet instant where the window is EMPTY (so the answer is None rather than 0.0), a
+span of one second, a span longer than the whole stream, two probes inside the same second,
+a single sample, a flat stream, and a generated 20,000-sample stream.  Each row prints the
+rescan's reads beside the timer's ticks, so the rows where the timer costs more are visible.
+Every row is ASSERTED twice -- the rescan and the timer-driven scan -- so the table cannot
+drift from the code: change an answer and this file stops running.
+
 Run it:  python3 programs/ch01_v3.py
 """
 
@@ -445,6 +556,49 @@ W = 3
 # exactly SPAN: these two are 60 apart to the second, which is the only place the
 # inclusive-or-exclusive choice is visible at all.
 EDGE = [(0, 10), (60, 20)]
+
+# Inputs for the examples table, not alternative versions of the problem: two probes that
+# answer in the same second, a stream with exactly one sample, a perfectly regular flat
+# stream (same value, same gap), and one GENERATED stream at the 20,000-sample scale a real
+# dashboard sees, with gaps of 0, 1 or 2 seconds so that same-second ties occur throughout.
+TIE_SAMPLES = [(10, 4), (10, 8), (80, 2)]
+ONE_SAMPLE = [(7, 12)]
+FLAT_SAMPLES = [(i * 10, 4) for i in range(7)]
+_BIG_RNG = random.Random(20260303)         # seeded, so the expected values below are fixed
+BIG_SAMPLES = []
+_t = 0
+for _ in range(20_000):
+    _t += _BIG_RNG.choice([0, 1, 1, 2])
+    BIG_SAMPLES.append((_t, _BIG_RNG.randint(1, 40)))
+
+# ------------------------------------------------------------------- WORKED EXAMPLES
+# (what it exercises, samples, now, span, expected (average, count)).  `now` is a CLOCK
+# instant and need not be an arrival: that is the whole point of a time window, and the
+# rows at 180s and 191s are instants at which nothing arrives and the answer moves anyway.
+# An empty window has no average, so the expected value is None and not 0.0.  Every row is
+# asserted by show_examples() against both the rescan and the timer-driven scan, which is
+# why this table is data and not a comment: a comment can go stale silently, this cannot.
+EXAMPLES = [
+    ("before anything arrives -> None",      SAMPLES,      0,      60,     (None, 0)),
+    ("the first sample's own instant",       SAMPLES,      1,      60,     (5.0, 1)),
+    ("ordinary arrival, two in window",      SAMPLES,      3,      60,     (4.0, 2)),
+    ("three samples in the window",          SAMPLES,      50,     60,     (5.0, 3)),
+    ("the arrival that retires TWO",         SAMPLES,      90,     60,     (4.5, 2)),
+    ("quiet stream, one survivor",           SAMPLES,      180,    60,     (6.0, 1)),
+    ("quiet stream, window EMPTY -> None",   SAMPLES,      191,    60,     (None, 0)),
+    ("the last arrival of all",              SAMPLES,      540,    60,     (8.0, 1)),
+    ("far future -> None, not the last v",   SAMPLES,      10_000, 60,     (None, 0)),
+    ("edge: 1s inside, t=0 still counts",    EDGE,         59,     60,     (10.0, 1)),
+    ("edge: exactly span old, t=0 gone",     EDGE,         60,     60,     (20.0, 1)),
+    ("span = 1s, the sample's own second",   SAMPLES,      3,      1,      (3.0, 1)),
+    ("span = 1s, one second later",          SAMPLES,      4,      1,      (None, 0)),
+    ("span longer than the whole stream",    SAMPLES,      540,    10_000, (5.0, 9)),
+    ("two probes in the SAME second",        TIE_SAMPLES,  10,     60,     (6.0, 2)),
+    ("one sample, ever",                     ONE_SAMPLE,   7,      60,     (12.0, 1)),
+    ("flat stream, six identical samples",   FLAT_SAMPLES, 60,     60,     (4.0, 6)),
+    ("20,000 samples, mid-stream",           BIG_SAMPLES,  10_000, 60,     (21.523076923076925, 65)),
+    ("20,000 samples, past the end",         BIG_SAMPLES,  20_100, 60,     (None, 0)),
+]
 
 
 def window_at(samples, now, span=SPAN):
@@ -574,7 +728,42 @@ def timer_driven_scan(samples, until, span=SPAN, tick=1):
     return out
 
 
+def show_examples():
+    """Print the examples table and assert every row.
+
+    Each row is checked TWO ways: the rescan (average_at, which re-reads every sample) and
+    the timer-driven scan (one incremental window advanced by the clock), which is written
+    without reference to the rescan, so agreement is a check and not a tautology.  The two
+    costs are printed side by side -- the rescan's reads against the timer's ticks.  The
+    tick column counts ticks at THIS row's tick size (1s up to 1000s, 100s beyond, which is
+    exact at `now` because every tick admits all due arrivals and expires everything old
+    enough), and the quiet rows are where the timer loses: 101 ticks at a 100s tick, or
+    10,001 at a 1s one, to hold an answer a 9-sample rescan reproduces in 9 reads.
+    """
+    print(f"{'what it exercises':37s} {'now':>7} {'span':>7} {'n':>6} {'average':>10} "
+          f"{'count':>6} {'reads':>7} {'ticks':>7}")
+    for label, samples, now, span, want in EXAMPLES:
+        avg, count = average_at(samples, now, span)
+        tick = 1 if now <= 1000 else 100          # coarser ticks past a quiet stretch
+        assert now % tick == 0, (label, now, tick)
+        scan_avg, scan_count = timer_driven_scan(samples, now, span, tick)[now]
+        want_avg, want_count = want
+        assert count == want_count, (label, count, want_count)
+        assert (avg is None) == (want_avg is None), (label, avg, want_avg)
+        assert avg is None or abs(avg - want_avg) <= 1e-9 * max(1.0, abs(want_avg)), (
+            label, avg, want_avg)
+        assert scan_count == want_count, (label, 'the timer scan disagrees', scan_count)
+        assert (scan_avg is None and avg is None) or abs(scan_avg - avg) < 1e-9, (
+            label, 'the timer scan disagrees', scan_avg, avg)
+        shown = 'None' if avg is None else f"{avg:.3f}"
+        print(f"{label:37s} {now:>7} {span:>7} {len(samples):>6} {shown:>10} "
+              f"{count:>6} {len(samples):>7} {now // tick + 1:>7}")
+    print(f"all {len(EXAMPLES)} examples agree with the rescan and the timer-driven scan")
+    print()
+
+
 def main():
+    show_examples()
     print(f"SAMPLES (t seconds, v ms) = {SAMPLES}")
     print(f"SPAN = {SPAN}s   window = (now - {SPAN}, now]\n")
 
@@ -724,6 +913,28 @@ if __name__ == "__main__":
 Running it prints:
 
 ```
+what it exercises                         now    span      n    average  count   reads   ticks
+before anything arrives -> None             0      60      9       None      0       9       1
+the first sample's own instant              1      60      9      5.000      1       9       2
+ordinary arrival, two in window             3      60      9      4.000      2       9       4
+three samples in the window                50      60      9      5.000      3       9      51
+the arrival that retires TWO               90      60      9      4.500      2       9      91
+quiet stream, one survivor                180      60      9      6.000      1       9     181
+quiet stream, window EMPTY -> None        191      60      9       None      0       9     192
+the last arrival of all                   540      60      9      8.000      1       9     541
+far future -> None, not the last v      10000      60      9       None      0       9     101
+edge: 1s inside, t=0 still counts          59      60      2     10.000      1       2      60
+edge: exactly span old, t=0 gone           60      60      2     20.000      1       2      61
+span = 1s, the sample's own second          3       1      9      3.000      1       9       4
+span = 1s, one second later                 4       1      9       None      0       9       5
+span longer than the whole stream         540   10000      9      5.000      9       9     541
+two probes in the SAME second              10      60      3      6.000      2       3      11
+one sample, ever                            7      60      1     12.000      1       1       8
+flat stream, six identical samples         60      60      7      4.000      6       7      61
+20,000 samples, mid-stream              10000      60  20000     21.523     65   20000     101
+20,000 samples, past the end            20100      60  20000       None      0   20000     202
+all 19 examples agree with the rescan and the timer-driven scan
+
 SAMPLES (t seconds, v ms) = [(1, 5), (3, 3), (50, 7), (90, 2), (130, 6), (220, 1), (245, 9), (260, 4), (540, 8)]
 SPAN = 60s   window = (now - 60, now]
 
@@ -812,6 +1023,18 @@ either way and the restart is silently wrong, in opposite directions depending o
 ahead.  Both failures below are produced by running the worker with a crash injected and
 restarting it from what it actually wrote.
 
+WORKED EXAMPLES: the EXAMPLES table below holds 21 input/output pairs -- no crash at all, a
+crash at the first input and at the last, both sides of the tick where the first answer has
+already been emitted, all three checkpoint policies, both skew directions (which change the
+NUMBER of answers, not their values), W = 1 and W = N, a stream shorter than its own window
+(no answer at all), a flat stream, the mixture-versus-uniform float pair, and a generated
+4,000-value stream including the crash point whose persisted total is exactly zero, where
+the broken checkpoint comes out right by luck.  Each row prints what that policy actually
+persisted beside what the safe one would have cost.  Every row is ASSERTED twice -- the
+answer count and final value, then the from-scratch reference (or, for the total-only
+policy, its exact error law) -- so the table cannot drift from the code: change an answer
+and this file stops running.
+
 Run it:  python3 programs/ch01_v4.py
 """
 
@@ -830,6 +1053,49 @@ HUGE = 1e16
 
 N = len(VALUES)
 NWIN = N - W + 1
+
+# Inputs for the examples table, not alternative versions of the problem: a stream shorter
+# than its own window, a stream of one value, a flat stream, the two float cases the
+# chapter's finding is about, and one GENERATED stream long enough that a crash at value
+# 2,000 leaves thousands of answers to get wrong.
+TOO_SHORT = [5, 3]
+ONE_VALUE = [7]
+FLAT = [4] * 6
+MIXTURE = [HUGE] + VALUES[1:]              # ONE value replaced: magnitudes mixed
+UNIFORM = [v * HUGE for v in VALUES]       # every value scaled: magnitudes shared
+_BIG_RNG = random.Random(20260303)         # seeded, so the expected values below are fixed
+BIG_STREAM = [_BIG_RNG.randint(-40, 40) for _ in range(4000)]
+
+# ------------------------------------------------------------------- WORKED EXAMPLES
+# (what it exercises, stream, W, crash_at, policy, skew, expected (answers emitted, final
+# answer)).  The count is half the expected value on purpose: a skewed checkpoint reports
+# plausible NUMBERS and the wrong number OF them, so counting answers is the only cheap
+# alarm.  A stream shorter than its window emits nothing, and the expected final answer is
+# then None rather than a guess.  Every row is asserted by show_examples(), which is why
+# this table is data and not a comment: a comment can go stale silently, this cannot.
+EXAMPLES = [
+    ("no crash at all (the reference)",     VALUES,     3,  None, "window",  0, (7, 7.0)),
+    ("crash at the very first input",       VALUES,     3,  1,    "window",  0, (7, 7.0)),
+    ("crash just BEFORE the 1st answer",    VALUES,     3,  2,    "window",  0, (7, 7.0)),
+    ("crash just AFTER the 1st answer",     VALUES,     3,  3,    "window",  0, (7, 7.0)),
+    ("crash at the last input",             VALUES,     3,  8,    "window",  0, (7, 7.0)),
+    ("replay the source instead",           VALUES,     3,  4,    "replay",  0, (7, 7.0)),
+    ("total-only: high by its own 12/3",    VALUES,     3,  4,    "total",   0, (7, 11.0)),
+    ("total-only, crash at input 1",        VALUES,     3,  1,    "total",   0, (7, 8.666666666666666)),
+    ("position AHEAD: one input LOST",      VALUES,     3,  4,    "window", +1, (6, 7.0)),
+    ("position BEHIND: one input twice",    VALUES,     3,  4,    "window", -1, (8, 7.0)),
+    ("W = 1, crash mid-stream",             VALUES,     1,  4,    "window",  0, (9, 8.0)),
+    ("W = N, the single answer survives",   VALUES,     9,  4,    "window",  0, (1, 5.0)),
+    ("W = N, total-only right BY LUCK",     VALUES,     9,  4,    "total",   0, (1, 5.0)),
+    ("W > N -> no answer, ever",            TOO_SHORT,  3,  None, "window",  0, (0, None)),
+    ("a single value, W = 1",               ONE_VALUE,  1,  None, "window",  0, (1, 7.0)),
+    ("flat stream, total-only doubles it",  FLAT,       3,  3,    "total",   0, (4, 8.0)),
+    ("mixture of magnitudes, rebuilt",      MIXTURE,    3,  4,    "window",  0, (7, 7.0)),
+    ("uniform scaling, no drift at all",    UNIFORM,    3,  4,    "window",  0, (7, 7e16)),
+    ("4,000 values, W = 50, crash at 2000", BIG_STREAM, 50, 2000, "window",  0, (3951, 1.52)),
+    ("4,000 values, total-only: LOW by 1.5", BIG_STREAM, 50, 2000, "total",  0, (3951, 0.02)),
+    ("persisted total 0: right by luck",    BIG_STREAM, 50, 21,   "total",   0, (3951, 1.52)),
+]
 
 
 def exact_answers(xs, w=W):
@@ -903,7 +1169,65 @@ def run(xs, w=W, crash_at=None, policy="window", skew=0):
     return answers, ck
 
 
+def show_examples():
+    """Print the examples table and assert every row.
+
+    Each row is checked TWO ways.  The first is the expected (count, final answer) written
+    in the table.  The second is the from-scratch reference: for a policy that is supposed
+    to be exact, EVERY answer must equal exact_answers(), not just the last one; for the
+    total-only policy, the final answer must be high by exactly the restored total over W,
+    which is the law the rest of this file measures.  Integer streams are compared exactly;
+    the two rows whose values exceed 2**53 cannot be, and are compared to a tolerance,
+    which is the float finding showing up in the test harness rather than in the program.
+
+    The two costs printed are what the row's policy actually persisted and what the safe
+    policy would have cost (W + 1).  At W = 1 they are the same number, so the cheap
+    checkpoint wins nothing there; at W = 50 it is 2 numbers against 51, and those 49
+    numbers are the entire price of being right.
+    """
+    print(f"{'what it exercises':38s} {'n':>5} {'W':>3} {'crash':>6} {'policy':>7} {'sk':>3} "
+          f"{'ans':>5} {'final':>10} {'kept':>5} {'safe':>5} {'exact':>6}")
+    for label, xs, w, crash, policy, skew, want in EXAMPLES:
+        want_n, want_final = want
+        got, ck = run(xs, w, crash_at=crash, policy=policy, skew=skew)
+        truth = exact_answers(xs, w)
+        final = got[-1] if got else None
+        exact = got == truth
+        # ints below 2**53 are exact in float64; these two rows are the ones that are not
+        ints = all(float(v).is_integer() and abs(v) < 2.0**53 for v in xs)
+
+        assert len(got) == want_n, (label, len(got), want_n)
+        assert (final is None) == (want_final is None), (label, final, want_final)
+        assert final is None or abs(final - want_final) <= 1e-9 * max(1.0, abs(want_final)), (
+            label, final, want_final)
+        # ---- the second check: the from-scratch reference, or the total-only error law
+        if skew != 0:
+            assert len(got) != len(truth), (label, 'a skew must change the answer COUNT')
+        elif policy in ("window", "replay"):
+            if ints:
+                assert got == truth, (label, 'an exact policy drifted', got, truth)
+            else:
+                assert abs(final - truth[-1]) <= 1e-9 * abs(truth[-1]), (label, final)
+        elif len(xs) - (crash or 0) >= w:          # the window refilled after the restart
+            assert abs((final - truth[-1]) - ck["total"] / w) <= 1e-9 * max(1.0, abs(final)), (
+                label, final, truth[-1], ck)
+        else:
+            # fewer than W arrivals after the restart, so the window never overflows and
+            # nothing is ever subtracted: the restored total either passes through harmless
+            # (the W = N row, exact despite a persisted 17) or lands whole in the answer.
+            err = 0.0 if final is None else final - truth[-1]
+            assert abs(err) <= 1e-9 or abs(err - ck["total"] / w) <= 1e-9 * max(1.0, abs(final)), (
+                label, err, ck)
+
+        shown = 'None' if final is None else f"{final:g}"
+        print(f"{label:38s} {len(xs):>5} {w:>3} {str(crash):>6} {policy:>7} {skew:>+3} "
+              f"{len(got):>5} {shown:>10} {ck['size']:>5} {w + 1:>5} {str(exact):>6}")
+    print(f"all {len(EXAMPLES)} examples agree with the from-scratch reference")
+    print()
+
+
 def main():
+    show_examples()
     print("VALUES =", "  ".join(f"{i}:{v}" for i, v in enumerate(VALUES)), f"   W = {W}")
     truth, clean_ck = run(VALUES)
     assert truth == exact_answers(VALUES), (truth, exact_answers(VALUES))
@@ -1050,6 +1374,30 @@ if __name__ == "__main__":
 Running it prints:
 
 ```
+what it exercises                          n   W  crash  policy  sk   ans      final  kept  safe  exact
+no crash at all (the reference)            9   3   None  window  +0     7          7     4     4   True
+crash at the very first input              9   3      1  window  +0     7          7     2     4   True
+crash just BEFORE the 1st answer           9   3      2  window  +0     7          7     3     4   True
+crash just AFTER the 1st answer            9   3      3  window  +0     7          7     4     4   True
+crash at the last input                    9   3      8  window  +0     7          7     4     4   True
+replay the source instead                  9   3      4  replay  +0     7          7     2     4   True
+total-only: high by its own 12/3           9   3      4   total  +0     7         11     2     4  False
+total-only, crash at input 1               9   3      1   total  +0     7    8.66667     2     4  False
+position AHEAD: one input LOST             9   3      4  window  +1     6          7     4     4  False
+position BEHIND: one input twice           9   3      4  window  -1     8          7     4     4  False
+W = 1, crash mid-stream                    9   1      4  window  +0     9          8     2     2   True
+W = N, the single answer survives          9   9      4  window  +0     1          5     5    10   True
+W = N, total-only right BY LUCK            9   9      4   total  +0     1          5     2    10   True
+W > N -> no answer, ever                   2   3   None  window  +0     0       None     3     4   True
+a single value, W = 1                      1   1   None  window  +0     1          7     2     2   True
+flat stream, total-only doubles it         6   3      3   total  +0     4          8     2     4  False
+mixture of magnitudes, rebuilt             9   3      4  window  +0     7          7     4     4  False
+uniform scaling, no drift at all           9   3      4  window  +0     7      7e+16     4     4   True
+4,000 values, W = 50, crash at 2000     4000  50   2000  window  +0  3951       1.52    51    51   True
+4,000 values, total-only: LOW by 1.5    4000  50   2000   total  +0  3951       0.02     2    51  False
+persisted total 0: right by luck        4000  50     21   total  +0  3951       1.52     2    51  False
+all 21 examples agree with the from-scratch reference
+
 VALUES = 0:5  1:3  2:7  3:2  4:6  5:1  6:9  7:4  8:8    W = 3
   no crash: [5.0, 4.0, 5.0, 3.0, 5.3333, 4.6667, 7.0]
 

@@ -64,6 +64,13 @@ name, and there is no position to keep at all, because the file's existence IS t
 You can often manufacture an atomic step instead of needing a transaction.  What it costs, and
 where it stops working, are both measured below.
 
+WORKED EXAMPLES: the EXAMPLES table below holds 19 input/output pairs -- both sides of the
+commit boundary for all three orderings (killed before the last chunk, killed with every byte
+uploaded but the rename not yet run, and not killed at all), a crash point past the end of the
+stream that never fires, a zero-chunk backup, a one-chunk backup, and a 5,000-chunk file at
+scale; each row prints what a restart costs with and without resuming the staging file.  Every
+row is ASSERTED, so the table cannot drift from the code.
+
 Run it:  python3 programs/ch05_v2.py
 """
 
@@ -86,6 +93,43 @@ FINAL, TEMP = "backup", "backup.tmp"
 STALE_TEMP = "XXXXXXXXXXXXXXX"
 
 N = len(CHUNKS)
+
+# A one-chunk upload, a zero-chunk upload, and a large generated file at the scale the
+# statement's "large file" implies.  These are inputs for the examples table, not alternative
+# versions of the problem.  The big file's chunks repeat letters rather than being distinct,
+# which is fine here because those rows test SCALE and not attribution.
+ONE_CHUNK = ["z"]
+EMPTY_FILE = []
+BIG_CHUNKS = [chr(97 + i % 26) * (1 + i % 7) for i in range(5_000)]
+BIG_FILE = "".join(BIG_CHUNKS)
+MID = len(BIG_CHUNKS) // 2
+
+# ------------------------------------------------------------------- WORKED EXAMPLES
+# (what it exercises, chunks, policy, crash_at, what a restore would read).  Every row is
+# asserted by show_examples() against the program AND against an independent formula for the
+# same answer, which is why the table is data and not a comment: a comment can go stale
+# silently, and this cannot.
+EXAMPLES = [
+    ("rename, no crash -> committed",          CHUNKS,     "rename",       None,   COMPLETE),
+    ("rename, killed before chunk 0",          CHUNKS,     "rename",       0,      None),
+    ("rename, killed before chunk 1",          CHUNKS,     "rename",       1,      None),
+    ("rename, killed before the LAST chunk",   CHUNKS,     "rename",       N - 1,  None),
+    ("rename, bytes all up, commit not run",   CHUNKS,     "rename",       N,      None),
+    ("crash point past the end never fires",   CHUNKS,     "rename",       N + 7,  COMPLETE),
+    ("direct, killed before chunk 0",          CHUNKS,     "direct",       0,      None),
+    ("direct, killed before chunk 1",          CHUNKS,     "direct",       1,      "aaaaa"),
+    ("direct, killed before the LAST chunk",   CHUNKS,     "direct",       N - 1,  "".join(CHUNKS[:N - 1])),
+    ("direct, bytes all up, record not set",   CHUNKS,     "direct",       N,      COMPLETE),
+    ("record_first, killed before chunk 0",    CHUNKS,     "record_first", 0,      None),
+    ("record_first, killed before chunk 1",    CHUNKS,     "record_first", 1,      "aaaaa"),
+    ("record_first, bytes all up",             CHUNKS,     "record_first", N,      COMPLETE),
+    ("zero-chunk backup, rename -> empty",     EMPTY_FILE, "rename",       None,   ""),
+    ("zero-chunk backup, direct -> no file",   EMPTY_FILE, "direct",       None,   None),
+    ("one chunk, killed before its only one",  ONE_CHUNK,  "rename",       0,      None),
+    ("one chunk, no crash",                    ONE_CHUNK,  "rename",       None,   "z"),
+    ("5,000 chunks, rename, no crash",         BIG_CHUNKS, "rename",       None,   BIG_FILE),
+    ("5,000 chunks, rename, killed midway",    BIG_CHUNKS, "rename",       MID,    None),
+]
 
 
 def attempt(chunks, policy, crash_at, store, record, resume=False):
@@ -183,7 +227,66 @@ def cross_store(chunks, crash_at):
     return archive.get(FINAL)
 
 
+def show_examples():
+    """Print the examples table and assert every row, twice over.
+
+    `one_night` and `until_done` are hard-wired to the chapter's CHUNKS, so the two helpers
+    below run the SAME `attempt` against an arbitrary chunk list -- that is the only reason
+    they exist.  The second check on each row is an independent formula for what a restore
+    should read, so a row has to agree with the program and with the rule the program claims
+    to implement.  The two byte columns are the price of a restart: `scratch` re-sends
+    everything, `resume` continues from the staging file, and they TIE whenever the crash left
+    nothing staged to resume from.
+    """
+    def one(chunks, policy, crash_at):
+        store, record = {}, {"ok": False}
+        moved = attempt(chunks, policy, crash_at, store, record)
+        return visible(store), record["ok"], moved
+
+    def until(chunks, policy, crash_points, resume):
+        store, record = {}, {"ok": False}
+        total = 0
+        for c in list(crash_points) + [None]:
+            total += attempt(chunks, policy, c, store, record, resume=resume)
+            if visible(store) is not None and (policy == "rename" or record["ok"]):
+                break
+        return visible(store), total
+
+    print(f"{'what it exercises':38s} {'chunks':>7} {'policy':>13} {'crash':>6} "
+          f"{'visible':>11} {'rec':>4} {'scratch':>8} {'resume':>7}")
+    for label, chunks, policy, crash_at, want in EXAMPLES:
+        whole = "".join(chunks)
+        got, rec, moved = one(chunks, policy, crash_at)
+        assert got == want, (label, got, want)
+
+        # the independent reference: the rule each policy claims to follow, written out
+        if crash_at is None or crash_at > len(chunks):
+            ref = whole if (policy == "rename" or chunks) else None
+        elif policy == "rename" or crash_at == 0:
+            ref = None
+        else:
+            ref = "".join(chunks[:crash_at])
+        assert ref == want, (label, 'the rule disagrees', ref, want)
+        if policy == "rename":
+            assert got in (None, whole), (label, 'a partial file became visible', len(got or ''))
+
+        pts = [] if crash_at is None else [crash_at]
+        done_s, bytes_s = until(chunks, policy, pts, resume=False)
+        done_r, bytes_r = until(chunks, policy, pts, resume=True)
+        assert done_s == done_r, (label, done_s, done_r)
+        assert bytes_r <= bytes_s, (label, bytes_r, bytes_s)
+
+        shown = ('absent' if got is None else 'empty' if got == '' else
+                 'COMPLETE' if got == whole else f'{len(got)}B part')
+        crash = 'none' if crash_at is None else str(crash_at)
+        print(f"{label:38s} {len(chunks):>7} {policy:>13} {crash:>6} "
+              f"{shown:>11} {str(rec):>4} {bytes_s:>8} {bytes_r:>7}")
+    print(f"all {len(EXAMPLES)} examples agree with the rule they claim to implement")
+    print()
+
+
 def main():
+    show_examples()
     print(f"CHUNKS = {CHUNKS}")
     print(f"the finished file is {SIZE} bytes: {COMPLETE!r}\n")
 
@@ -327,6 +430,28 @@ if __name__ == "__main__":
 Running it prints:
 
 ```
+what it exercises                       chunks        policy  crash     visible  rec  scratch  resume
+rename, no crash -> committed                9        rename   none    COMPLETE False       45      45
+rename, killed before chunk 0                9        rename      0      absent False       45      45
+rename, killed before chunk 1                9        rename      1      absent False       50      45
+rename, killed before the LAST chunk         9        rename      8      absent False       82      45
+rename, bytes all up, commit not run         9        rename      9      absent False       90      45
+crash point past the end never fires         9        rename     16    COMPLETE False       45      45
+direct, killed before chunk 0                9        direct      0      absent False       45      45
+direct, killed before chunk 1                9        direct      1     5B part False       50      45
+direct, killed before the LAST chunk         9        direct      8    37B part False       82      45
+direct, bytes all up, record not set         9        direct      9    COMPLETE False       90      45
+record_first, killed before chunk 0          9  record_first      0      absent True       45      45
+record_first, killed before chunk 1          9  record_first      1     5B part True        5       5
+record_first, bytes all up                   9  record_first      9    COMPLETE True       45      45
+zero-chunk backup, rename -> empty           0        rename   none       empty False        0       0
+zero-chunk backup, direct -> no file         0        direct   none      absent True        0       0
+one chunk, killed before its only one        1        rename      0      absent False        1       1
+one chunk, no crash                          1        rename   none    COMPLETE False        1       1
+5,000 chunks, rename, no crash            5000        rename   none    COMPLETE False    19995   19995
+5,000 chunks, rename, killed midway       5000        rename   2500      absent False    29992   19995
+all 19 examples agree with the rule they claim to implement
+
 CHUNKS = ['aaaaa', 'bbb', 'ccccccc', 'dd', 'eeeeee', 'f', 'ggggggggg', 'hhhh', 'iiiiiiii']
 the finished file is 45 bytes: 'aaaaabbbcccccccddeeeeeefggggggggghhhhiiiiiiii'
 
@@ -420,6 +545,15 @@ pair can land in a state that corresponds to no moment in the event stream at al
 derived pair always corresponds to some earlier moment.  The skill is noticing that "both must
 agree" is a request to have two sources of truth, and declining it.
 
+WORKED EXAMPLES: the EXAMPLES table below holds 19 input/output pairs -- the first and last
+event of the stream as crash points, an ordinary middle one, both sides of the crash boundary
+(the last event versus no crash at all) in both write orders, a crash point past the end that
+never fires, the rebuild interval on both sides of the staleness bound (every event, every 3,
+and an interval longer than the whole stream), the zero-valued event that makes the two stores
+AGREE while still being split, a one-event stream, an empty stream that has nothing to split,
+and a 3,000-event stream at scale; each row prints what both designs cost for that same input.
+Every row is ASSERTED, so the table cannot drift from the code.
+
 Run it:  python3 programs/ch05_v3.py
 """
 
@@ -436,6 +570,42 @@ N = len(ITEMS)
 # How many events between cache rebuilds, for the derived design.  3 is small enough to trace
 # and large enough that the cache is visibly behind.
 REBUILD_EVERY = 3
+
+# A stream with a zero-valued event, a one-event stream, an empty stream, and a 3,000-event
+# stream at scale.  These are inputs for the examples table, not alternative versions of the
+# problem.  The big stream's values are all equal, which is fine because those rows test SCALE
+# and not whether a wrong total identifies which event was lost.
+WITH_ZERO = ITEMS[:4] + [(99, 0)] + ITEMS[4:]
+ONE_EVENT = [(0, 5)]
+EMPTY_STREAM = []
+BIG_ITEMS = [(i, 7) for i in range(3_000)]
+
+# ------------------------------------------------------------------- WORKED EXAMPLES
+# (what it exercises, items, design, crash_at, (counter, warehouse total)).  "derived@k"
+# rebuilds the cache every k events.  Every row is asserted by show_examples() against the
+# program AND against an independent formula for the same pair, which is why the table is data
+# and not a comment: a comment can go stale silently, and this cannot.
+EXAMPLES = [
+    ("counter-first, crash on the FIRST event",  ITEMS,        "counter_first",   0,     (5, 0)),
+    ("counter-first, ordinary middle event",     ITEMS,        "counter_first",   4,     (23, 17)),
+    ("counter-first, crash on the LAST event",   ITEMS,        "counter_first",   8,     (45, 37)),
+    ("counter-first, no crash at all",           ITEMS,        "counter_first",   None,  (45, 45)),
+    ("crash point past the end never fires",     ITEMS,        "counter_first",   99,    (45, 45)),
+    ("warehouse-first, FIRST event (sign flip)", ITEMS,        "warehouse_first", 0,     (0, 5)),
+    ("warehouse-first, crash on the LAST event", ITEMS,        "warehouse_first", 8,     (37, 45)),
+    ("derived@3, crash before anything ran",     ITEMS,        "derived@3",       0,     (0, 0)),
+    ("derived@3, middle event, lag 1",           ITEMS,        "derived@3",       4,     (15, 17)),
+    ("derived@3, LAST event, lag 2 (the bound)", ITEMS,        "derived@3",       8,     (24, 37)),
+    ("derived@3, no crash -> caught up",         ITEMS,        "derived@3",       None,  (45, 45)),
+    ("derived@1, rebuild every event, lag 0",    ITEMS,        "derived@1",       8,     (37, 37)),
+    ("derived@20, interval > whole stream",      ITEMS,        "derived@20",      None,  (0, 45)),
+    ("a ZERO-valued event: the pair AGREES",     WITH_ZERO,    "counter_first",   4,     (17, 17)),
+    ("one-event stream, crash on it",            ONE_EVENT,    "counter_first",   0,     (5, 0)),
+    ("empty stream: nothing to split",           EMPTY_STREAM, "counter_first",   0,     (0, 0)),
+    ("3,000 events, counter-first, midway",      BIG_ITEMS,    "counter_first",   1500,  (10507, 10500)),
+    ("3,000 events, derived@500, lag 200",       BIG_ITEMS,    "derived@500",     1700,  (10500, 11900)),
+    ("3,000 events, derived@500, no crash",      BIG_ITEMS,    "derived@500",     None,  (21000, 21000)),
+]
 
 
 def prefixes(items):
@@ -526,7 +696,61 @@ def reconcile(counter, rows, direction):
     return counter, counter, rows
 
 
+def show_examples():
+    """Print the examples table and assert every row, twice over.
+
+    The second check is an independent formula for the pair -- prefix sums of the values,
+    with no reference to dual_write or derived -- so a row has to agree with the program and
+    with the rule the program claims to implement.
+
+    The two cost columns are for the SAME input on BOTH designs, so each row shows which one
+    is cheaper for it.  `dual` counts durable writes (two per event, one for the event the
+    crash straddles).  `derv` counts the one write per event PLUS the rows each rebuild has to
+    re-read, because rebuild() sums the whole warehouse every time.  That is why the derived
+    design LOSES on most of these rows: its correctness is free and its freshness is not, and
+    a short rebuild interval on a long stream is the expensive corner.
+    """
+    print(f"{'what it exercises':40s} {'events':>6} {'design':>15} {'crash':>5} "
+          f"{'counter':>8} {'wh':>8} {'lag':>4} {'dual':>6} {'derv':>7} {'cheaper':>8}")
+    for label, items, design, crash_at, want in EXAMPLES:
+        vals = [v for _, v in items]
+        n = len(items)
+        m = n if crash_at is None else min(crash_at, n)      # events that completed a row
+        every = int(design.split("@")[1]) if "@" in design else REBUILD_EVERY
+
+        if design.startswith("derived"):
+            counter, rows, lag = derived(items, crash_at, every)
+            wh = rebuild(rows)
+            caught = (m // every) * every
+            ref = (sum(vals[:caught]), sum(vals[:m]))
+            assert lag == m - caught, (label, lag, m - caught)
+        else:
+            first = design == "counter_first"
+            counter, wh, rows = dual_write(items, crash_at, counter_first=first)
+            lag = 0
+            if m < n:                                        # the crash really landed
+                ahead, behind = sum(vals[:m + 1]), sum(vals[:m])
+                ref = (ahead, behind) if first else (behind, ahead)
+            else:
+                ref = (sum(vals), sum(vals))
+
+        assert (counter, wh) == want, (label, (counter, wh), want)
+        assert ref == want, (label, 'the rule disagrees', ref, want)
+        assert wh == sum(v for _, v in rows), (label, wh, rows)
+
+        dual = 2 * m + (1 if m < n else 0)
+        r = m // every
+        derv = m + every * r * (r + 1) // 2
+        cheaper = 'derived' if derv < dual else 'dual' if dual < derv else 'tie'
+        crash = 'none' if crash_at is None else str(crash_at)
+        print(f"{label:40s} {n:>6} {design:>15} {crash:>5} "
+              f"{counter:>8} {wh:>8} {lag:>4} {dual:>6} {derv:>7} {cheaper:>8}")
+    print(f"all {len(EXAMPLES)} examples agree with the prefix sums of their own stream")
+    print()
+
+
 def main():
+    show_examples()
     legal = prefixes(ITEMS)
     print("ITEMS =", "  ".join(f"{e}:{v}" for e, v in ITEMS), f"  total {CORRECT}")
     print(f"the {len(legal)} totals the stream legitimately passes through: {legal}\n")
@@ -663,6 +887,28 @@ if __name__ == "__main__":
 Running it prints:
 
 ```
+what it exercises                        events          design crash  counter       wh  lag   dual    derv  cheaper
+counter-first, crash on the FIRST event       9   counter_first     0        5        0    0      1       0  derived
+counter-first, ordinary middle event          9   counter_first     4       23       17    0      9       7  derived
+counter-first, crash on the LAST event        9   counter_first     8       45       37    0     17      17      tie
+counter-first, no crash at all                9   counter_first  none       45       45    0     18      27     dual
+crash point past the end never fires          9   counter_first    99       45       45    0     18      27     dual
+warehouse-first, FIRST event (sign flip)      9 warehouse_first     0        0        5    0      1       0  derived
+warehouse-first, crash on the LAST event      9 warehouse_first     8       37       45    0     17      17      tie
+derived@3, crash before anything ran          9       derived@3     0        0        0    0      1       0  derived
+derived@3, middle event, lag 1                9       derived@3     4       15       17    1      9       7  derived
+derived@3, LAST event, lag 2 (the bound)      9       derived@3     8       24       37    2     17      17      tie
+derived@3, no crash -> caught up              9       derived@3  none       45       45    0     18      27     dual
+derived@1, rebuild every event, lag 0         9       derived@1     8       37       37    0     17      44     dual
+derived@20, interval > whole stream           9      derived@20  none        0       45    9     18       9  derived
+a ZERO-valued event: the pair AGREES         10   counter_first     4       17       17    0      9       7  derived
+one-event stream, crash on it                 1   counter_first     0        5        0    0      1       0  derived
+empty stream: nothing to split                0   counter_first     0        0        0    0      0       0      tie
+3,000 events, counter-first, midway        3000   counter_first  1500    10507    10500    0   3001  377250     dual
+3,000 events, derived@500, lag 200         3000     derived@500  1700    10500    11900  200   3401    4700     dual
+3,000 events, derived@500, no crash        3000     derived@500  none    21000    21000    0   6000   13500     dual
+all 19 examples agree with the prefix sums of their own stream
+
 ITEMS = 0:5  1:3  2:7  3:2  4:6  5:1  6:9  7:4  8:8   total 45
 the 10 totals the stream legitimately passes through: [0, 5, 8, 15, 17, 23, 24, 33, 37, 45]
 
@@ -754,6 +1000,16 @@ charged" the reverse, so at-most-once with the record written BEFORE sending.  A
 opposite of what the first reading of the question invites.  The local dedupe set that looks
 like a third option is measured below and shown to be the same two orderings renamed.
 
+WORKED EXAMPLES: the EXAMPLES table below holds 21 input/output pairs -- the first and last
+item of the queue as crash points, the middle one the trace follows, both sides of the crash
+boundary (a crash versus no crash) in both orderings, a crash point past the end that never
+fires, both sides of the dedupe boundary (remember-then-send against send-then-remember), both
+sides of the far-end idempotency key including the case where the key does NOT rescue the
+design, an empty queue and a one-item queue, a run crashed at every item at once, and a
+20,000-item queue at scale; each row prices its own outcome for both messages, so the row
+shows which message it is acceptable for.  Every row is ASSERTED, so the table cannot drift
+from the code.
+
 Run it:  python3 programs/ch05_v4.py
 """
 
@@ -774,6 +1030,44 @@ PROFILES = {
     "your parcel has arrived": {"duplicate": 1, "loss": 20},
     "you have been charged":   {"duplicate": 50, "loss": 2},
 }
+
+# A one-item queue, an empty queue, and a 20,000-item queue at the scale a real notification
+# backlog reaches.  ALL means "crashed at every item in one run".  These are inputs for the
+# examples table, not alternative versions of the problem.
+ONE_ITEM = [(0, 5)]
+EMPTY_QUEUE = []
+BIG_QUEUE = [(i, 1 + i % 7) for i in range(20_000)]
+BIG_MID = len(BIG_QUEUE) // 2
+ALL = "all"
+
+# ------------------------------------------------------------------- WORKED EXAMPLES
+# (what it exercises, items, ordering, crash point, far-end key, (duplicated ids, lost ids)).
+# Every row is asserted by show_examples() against the program AND against a closed form for
+# the send sequence the ordering forces, which is why the table is data and not a comment: a
+# comment can go stale silently, and this cannot.
+EXAMPLES = [
+    ("effect-first, crash on the FIRST item",   ITEMS,       "effect_then_position", 0,       False, ([0], [])),
+    ("effect-first, the traced middle item",    ITEMS,       "effect_then_position", C,       False, ([3], [])),
+    ("effect-first, crash on the LAST item",    ITEMS,       "effect_then_position", N - 1,   False, ([8], [])),
+    ("effect-first, no crash at all",           ITEMS,       "effect_then_position", None,    False, ([], [])),
+    ("crash point past the end never fires",    ITEMS,       "effect_then_position", 99,      False, ([], [])),
+    ("position-first, FIRST item (mirrored)",   ITEMS,       "position_then_effect", 0,       False, ([], [0])),
+    ("position-first, crash on the LAST item",  ITEMS,       "position_then_effect", N - 1,   False, ([], [8])),
+    ("position-first, no crash at all",         ITEMS,       "position_then_effect", None,    False, ([], [])),
+    ("send-then-remember == effect-first",      ITEMS,       "send_then_dedupe",     C,       False, ([3], [])),
+    ("remember-then-send == position-first",    ITEMS,       "dedupe_then_send",     C,       False, ([], [3])),
+    ("effect-first, crashed at EVERY item",     ITEMS,       "effect_then_position", ALL,     False, ([0, 1, 2, 3, 4, 5, 6, 7, 8], [])),
+    ("position-first, crashed at EVERY item",   ITEMS,       "position_then_effect", ALL,     False, ([], [0, 1, 2, 3, 4, 5, 6, 7, 8])),
+    ("far-end key rescues effect-first",        ITEMS,       "effect_then_position", C,       True,  ([], [])),
+    ("far-end key does NOT rescue position",    ITEMS,       "position_then_effect", C,       True,  ([], [3])),
+    ("far-end key, crashed at EVERY item",      ITEMS,       "effect_then_position", ALL,     True,  ([], [])),
+    ("empty queue: nothing to send",            EMPTY_QUEUE, "effect_then_position", 0,       False, ([], [])),
+    ("one item, effect-first, crash on it",     ONE_ITEM,    "effect_then_position", 0,       False, ([0], [])),
+    ("one item, position-first, crash on it",   ONE_ITEM,    "position_then_effect", 0,       False, ([], [0])),
+    ("20,000 items, effect-first, midway",      BIG_QUEUE,   "effect_then_position", BIG_MID, False, ([10000], [])),
+    ("20,000 items, position-first, midway",    BIG_QUEUE,   "position_then_effect", BIG_MID, False, ([], [10000])),
+    ("20,000 items, far-end key, midway",       BIG_QUEUE,   "effect_then_position", BIG_MID, True,  ([], [])),
+]
 
 
 def run(items, order, crash_at, far_end_key=False):
@@ -869,7 +1163,65 @@ def expected_cost(items, order, profile):
     return total / len(items)
 
 
+def show_examples():
+    """Print the examples table and assert every row, twice over.
+
+    The second check is a closed form for the send sequence: effect-first repeats the
+    straddling item, so the phone sees ids[:c+1] + ids[c:], and position-first skips it, so it
+    sees ids[:c] + ids[c+1:].  It is written out here with no reference to `run`, so a row has
+    to agree with the program and with the rule the program claims to implement.  A run
+    crashed at EVERY item has no closed form -- the send order after repeated restarts is an
+    implementation detail -- so those rows are checked on the tally alone.
+
+    The two cost columns price the SAME outcome for BOTH messages, which is the whole point of
+    the variation: a duplicate is cheap for a parcel notice and expensive for a charge notice,
+    so the identical row is acceptable under one message and not the other.  Rows that cost
+    nothing either way -- a clean run, or a crash under a far-end key -- are the ties, and
+    they are the only rows where the choice does not have to be made.
+    """
+    parcel, charged = PROFILES["your parcel has arrived"], PROFILES["you have been charged"]
+
+    def price(dups, lost, profile):
+        return len(dups) * profile["duplicate"] + len(lost) * profile["loss"]
+
+    def closed_form(ids, order, crash_at, key):
+        """What the phone must see, derived from the ordering rather than from `run`."""
+        if crash_at is None or crash_at >= len(ids):
+            return list(ids)
+        if key and order in ("effect_then_position", "send_then_dedupe"):
+            return list(ids)                      # the far end swallows the repeat
+        if order in ("effect_then_position", "send_then_dedupe"):
+            return ids[:crash_at + 1] + ids[crash_at:]
+        return ids[:crash_at] + ids[crash_at + 1:]
+
+    def short(ids):
+        return str(ids) if len(ids) <= 3 else f"{len(ids)} items"
+
+    print(f"{'what it exercises':42s} {'items':>6} {'ordering':>20} {'crash':>5} {'key':>5} "
+          f"{'duplicated':>11} {'lost':>11} {'parcel':>7} {'charge':>7} {'better for':>10}")
+    for label, items, order, crash_at, key, want in EXAMPLES:
+        ids = [eid for eid, _ in items]
+        crashes = (set(range(len(items))) if crash_at == ALL
+                   else set() if crash_at is None else {crash_at})
+        sent = run(items, order, crashes, far_end_key=key)
+        dups, lost = tally(items, sent)
+        assert (dups, lost) == want, (label, (dups, lost), want)
+
+        if crash_at != ALL:
+            ref = closed_form(ids, order, crash_at, key)
+            assert sent == ref, (label, 'the rule disagrees', sent[:12], ref[:12])
+
+        p, ch = price(dups, lost, parcel), price(dups, lost, charged)
+        better = 'parcel' if p < ch else 'charge' if ch < p else 'either'
+        shown = 'all' if crash_at == ALL else 'none' if crash_at is None else str(crash_at)
+        print(f"{label:42s} {len(items):>6} {order:>20} {shown:>5} {str(key):>5} "
+              f"{short(dups):>11} {short(lost):>11} {p:>7} {ch:>7} {better:>10}")
+    print(f"all {len(EXAMPLES)} examples agree with the send sequence their ordering forces")
+    print()
+
+
 def main():
+    show_examples()
     clean = {o: run(ITEMS, o, set()) for o in
              ("effect_then_position", "position_then_effect", "dedupe_then_send", "send_then_dedupe")}
     want = [eid for eid, _ in ITEMS]
@@ -1011,6 +1363,30 @@ if __name__ == "__main__":
 Running it prints:
 
 ```
+what it exercises                           items             ordering crash   key  duplicated        lost  parcel  charge better for
+effect-first, crash on the FIRST item           9 effect_then_position     0 False         [0]          []       1      50     parcel
+effect-first, the traced middle item            9 effect_then_position     3 False         [3]          []       1      50     parcel
+effect-first, crash on the LAST item            9 effect_then_position     8 False         [8]          []       1      50     parcel
+effect-first, no crash at all                   9 effect_then_position  none False          []          []       0       0     either
+crash point past the end never fires            9 effect_then_position    99 False          []          []       0       0     either
+position-first, FIRST item (mirrored)           9 position_then_effect     0 False          []         [0]      20       2     charge
+position-first, crash on the LAST item          9 position_then_effect     8 False          []         [8]      20       2     charge
+position-first, no crash at all                 9 position_then_effect  none False          []          []       0       0     either
+send-then-remember == effect-first              9     send_then_dedupe     3 False         [3]          []       1      50     parcel
+remember-then-send == position-first            9     dedupe_then_send     3 False          []         [3]      20       2     charge
+effect-first, crashed at EVERY item             9 effect_then_position   all False     9 items          []       9     450     parcel
+position-first, crashed at EVERY item           9 position_then_effect   all False          []     9 items     180      18     charge
+far-end key rescues effect-first                9 effect_then_position     3  True          []          []       0       0     either
+far-end key does NOT rescue position            9 position_then_effect     3  True          []         [3]      20       2     charge
+far-end key, crashed at EVERY item              9 effect_then_position   all  True          []          []       0       0     either
+empty queue: nothing to send                    0 effect_then_position     0 False          []          []       0       0     either
+one item, effect-first, crash on it             1 effect_then_position     0 False         [0]          []       1      50     parcel
+one item, position-first, crash on it           1 position_then_effect     0 False          []         [0]      20       2     charge
+20,000 items, effect-first, midway          20000 effect_then_position 10000 False     [10000]          []       1      50     parcel
+20,000 items, position-first, midway        20000 position_then_effect 10000 False          []     [10000]      20       2     charge
+20,000 items, far-end key, midway           20000 effect_then_position 10000  True          []          []       0       0     either
+all 21 examples agree with the send sequence their ordering forces
+
 ITEMS = [0, 1, 2, 3, 4, 5, 6, 7, 8], values [5, 3, 7, 2, 6, 1, 9, 4, 8]
   with no crash, all four orderings send exactly [0, 1, 2, 3, 4, 5, 6, 7, 8]
 

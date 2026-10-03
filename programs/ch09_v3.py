@@ -17,6 +17,18 @@ early is wrong in BOTH directions -- measured below, it sometimes reports more a
 than the correct answer, so no count can audit it.  And "nearest" and "as many matches as
 possible" are different objectives; the spec asks for the first one.
 
+WORKED EXAMPLES: the EXAMPLES table below holds 17 input/output pairs -- no impressions and no
+clicks at all, BOTH sides of the attribution window (shown exactly W before is inside, W + 1 is
+outside), an impression shown after its click, two clicks competing for one impression, the
+chapter's own streams answered at four different waits (0, W, the measured lateness, and
+offline), the case where nearest-first loses a match, the case where answering early reports
+MORE attributions than the correct answer, and three generated pairs of 300 streams each.  Every
+row prints what nearest-first attributed beside the most any rule could have, so the rows where
+the cheap answer merely ties and the row where it loses are both visible.  Every row is
+ASSERTED -- against the count below, against the offline matcher wherever the wait is long
+enough to equal it, and against the window and one-to-one rules on every credited impression --
+so the table cannot drift from the code.
+
 Run it:  python3 programs/ch09_v3.py
 """
 import random
@@ -33,6 +45,50 @@ CLICKS = [50, 90, 220, 260, 265]
 W = 60                    # the attribution window: the chapter's widening constant J
 TRUE_LATENESS = 85        # measured below, not assumed: max(arrived_at - shown_at)
 UNATTRIBUTED = None       # not an impression: this click is credited to nobody
+
+# Streams for the examples table, not alternative versions of the problem: the degenerate ones,
+# a single impression to push a click against each edge of the window, the two pathological
+# pairs the prose below discusses, and three GENERATED pairs at scale -- 300 impressions and 300
+# clicks, punctual in one and 120 seconds late in the other, so the wait can be seen deciding
+# every attribution at once rather than one of them.
+NO_IMPS       = []                                  # nothing to attribute to
+NO_CLICKS     = []                                  # nothing to attribute
+ONE_IMP       = [(100, 100)]                        # one punctual impression, shown at 100
+GREEDY_IMPS   = [(100, 100), (150, 150)]            # nearest-first strands the second click
+GREEDY_CLICKS = [160, 199]
+RUSHED_IMPS   = [(31, 31), (109, 109), (115, 155), (132, 172), (199, 199)]
+RUSHED_CLICKS = [30, 51, 89, 154, 181]              # answering at once over-reports on these
+BIG_N         = 300
+BIG_PUNCTUAL  = [(i * 10, i * 10) for i in range(BIG_N)]
+BIG_LATE      = [(i * 10, i * 10 + 120) for i in range(BIG_N)]
+BIG_CLICKS    = [i * 10 + 5 for i in range(BIG_N)]
+FOREVER       = float("inf")                        # the offline wait: every impression in hand
+
+# ------------------------------------------------------------------- WORKED EXAMPLES
+# (what it exercises, impressions, clicks, W, wait, attributed, the most any rule could get).
+# The last column is None where max_matching() is too expensive to run -- it is O(clicks x
+# impressions) with backtracking and takes half a minute at 300 streams, which is itself a fact
+# about the yardstick.  Every row is asserted by show_examples(), which is why the table is data
+# and not a comment: a comment can go stale silently, and this cannot.
+EXAMPLES = [
+    ("no impressions -> credited to nobody", NO_IMPS,      [100],         W, 0,             0,   0),
+    ("no clicks -> an empty answer",         ONE_IMP,      NO_CLICKS,     W, 0,             0,   0),
+    ("shown at the click's own second",      ONE_IMP,      [100],         W, 0,             1,   1),
+    ("shown exactly W before: inside",       ONE_IMP,      [160],         W, 0,             1,   1),
+    ("shown W + 1 before: outside",          ONE_IMP,      [161],         W, 0,             0,   0),
+    ("shown AFTER the click: never",         ONE_IMP,      [99],          W, 0,             0,   0),
+    ("two clicks, one impression",           ONE_IMP,      [120, 120],    W, 0,             1,   1),
+    ("chapter streams, answered at once",    IMPRESSIONS,  CLICKS,        W, 0,             1,   2),
+    ("chapter streams, waiting W",           IMPRESSIONS,  CLICKS,        W, W,             1,   2),
+    ("chapter streams, waiting lateness",    IMPRESSIONS,  CLICKS,        W, TRUE_LATENESS, 2,   2),
+    ("chapter streams, offline",             IMPRESSIONS,  CLICKS,        W, FOREVER,       2,   2),
+    ("nearest-first LOSES a match",          GREEDY_IMPS,  GREEDY_CLICKS, W, 0,             1,   2),
+    ("answering early reports MORE",         RUSHED_IMPS,  RUSHED_CLICKS, W, 0,             3,   3),
+    ("...and the right answer is fewer",     RUSHED_IMPS,  RUSHED_CLICKS, W, FOREVER,       2,   3),
+    ("300 punctual streams, no wait",        BIG_PUNCTUAL, BIG_CLICKS,    W, 0,             300, None),
+    ("300 late by 120, no wait",             BIG_LATE,     BIG_CLICKS,    W, 0,             0,   None),
+    ("300 late by 120, waiting 120",         BIG_LATE,     BIG_CLICKS,    W, 120,          300, None),
+]
 
 
 def measured_lateness(impressions):
@@ -134,7 +190,50 @@ def droppable(impressions, bound):
     return [(s, a) for s, a in impressions if s < bound]
 
 
+def show_examples():
+    """Print the examples table and assert every row.
+
+    Each row is checked two ways.  The count is compared with the table, and the attributions
+    themselves are compared with attribute_offline() -- the batch reference -- on every row
+    whose wait is at least the lateness measured on its own impressions, which is the only
+    circumstance under which the stream is entitled to equal the batch.  Independently of both,
+    every credited impression is re-tested against in_window() and checked to be credited once,
+    so a row cannot pass by returning a legal-looking count built from illegal matches.  The
+    `best` column is max_matching(), the most any rule could attribute: where it exceeds
+    `got`, nearest-first is losing money by specification rather than by bug.
+    """
+    print(f"{'what it exercises':37s} {'imps':>5} {'clicks':>7} {'wait':>6} {'got':>5} "
+          f"{'best':>5}  attributions")
+    for label, imps, clicks, w, wait, want, want_best in EXAMPLES:
+        res = attribute(imps, clicks, w, wait)
+        got = matched_count(res)
+        assert got == want, (label, got, want)
+        late = measured_lateness(imps) if imps else 0
+        if wait >= late:                  # only then may the stream claim the batch answer
+            assert res == attribute_offline(imps, clicks, w), (label, res)
+        credited = [i for _, i in res if i is not UNATTRIBUTED]
+        assert len(credited) == len(set(credited)), (label, credited)
+        for click_t, i in res:
+            if i is not UNATTRIBUTED:
+                assert in_window(i, click_t, w), (label, click_t, i)
+        if want_best is None:
+            best_shown = "-"              # the yardstick does not scale; see the table's comment
+        else:
+            best = max_matching(imps, clicks, w)
+            assert best == want_best, (label, best, want_best)
+            assert got <= best, (label, got, best)
+            best_shown = str(best)
+        shown = "  ".join(f"{c}->{'-' if i is UNATTRIBUTED else i}" for c, i in res) or "(none)"
+        if len(shown) > 29:
+            shown = shown[:26] + "..."
+        wait_shown = "inf" if wait == FOREVER else str(wait)
+        print(f"{label:37s} {len(imps):>5,} {len(clicks):>7,} {wait_shown:>6} {got:>5,} "
+              f"{best_shown:>5}  {shown}")
+    print(f"all {len(EXAMPLES)} examples agree with the offline matcher and the window rule")
+
+
 def main():
+    show_examples()
     lateness = measured_lateness(IMPRESSIONS)
     print(f"IMPRESSIONS (shown, arrived) = {IMPRESSIONS}")
     print(f"CLICKS = {CLICKS}")

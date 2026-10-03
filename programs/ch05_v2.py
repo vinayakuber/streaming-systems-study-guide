@@ -14,6 +14,13 @@ name, and there is no position to keep at all, because the file's existence IS t
 You can often manufacture an atomic step instead of needing a transaction.  What it costs, and
 where it stops working, are both measured below.
 
+WORKED EXAMPLES: the EXAMPLES table below holds 19 input/output pairs -- both sides of the
+commit boundary for all three orderings (killed before the last chunk, killed with every byte
+uploaded but the rename not yet run, and not killed at all), a crash point past the end of the
+stream that never fires, a zero-chunk backup, a one-chunk backup, and a 5,000-chunk file at
+scale; each row prints what a restart costs with and without resuming the staging file.  Every
+row is ASSERTED, so the table cannot drift from the code.
+
 Run it:  python3 programs/ch05_v2.py
 """
 
@@ -36,6 +43,43 @@ FINAL, TEMP = "backup", "backup.tmp"
 STALE_TEMP = "XXXXXXXXXXXXXXX"
 
 N = len(CHUNKS)
+
+# A one-chunk upload, a zero-chunk upload, and a large generated file at the scale the
+# statement's "large file" implies.  These are inputs for the examples table, not alternative
+# versions of the problem.  The big file's chunks repeat letters rather than being distinct,
+# which is fine here because those rows test SCALE and not attribution.
+ONE_CHUNK = ["z"]
+EMPTY_FILE = []
+BIG_CHUNKS = [chr(97 + i % 26) * (1 + i % 7) for i in range(5_000)]
+BIG_FILE = "".join(BIG_CHUNKS)
+MID = len(BIG_CHUNKS) // 2
+
+# ------------------------------------------------------------------- WORKED EXAMPLES
+# (what it exercises, chunks, policy, crash_at, what a restore would read).  Every row is
+# asserted by show_examples() against the program AND against an independent formula for the
+# same answer, which is why the table is data and not a comment: a comment can go stale
+# silently, and this cannot.
+EXAMPLES = [
+    ("rename, no crash -> committed",          CHUNKS,     "rename",       None,   COMPLETE),
+    ("rename, killed before chunk 0",          CHUNKS,     "rename",       0,      None),
+    ("rename, killed before chunk 1",          CHUNKS,     "rename",       1,      None),
+    ("rename, killed before the LAST chunk",   CHUNKS,     "rename",       N - 1,  None),
+    ("rename, bytes all up, commit not run",   CHUNKS,     "rename",       N,      None),
+    ("crash point past the end never fires",   CHUNKS,     "rename",       N + 7,  COMPLETE),
+    ("direct, killed before chunk 0",          CHUNKS,     "direct",       0,      None),
+    ("direct, killed before chunk 1",          CHUNKS,     "direct",       1,      "aaaaa"),
+    ("direct, killed before the LAST chunk",   CHUNKS,     "direct",       N - 1,  "".join(CHUNKS[:N - 1])),
+    ("direct, bytes all up, record not set",   CHUNKS,     "direct",       N,      COMPLETE),
+    ("record_first, killed before chunk 0",    CHUNKS,     "record_first", 0,      None),
+    ("record_first, killed before chunk 1",    CHUNKS,     "record_first", 1,      "aaaaa"),
+    ("record_first, bytes all up",             CHUNKS,     "record_first", N,      COMPLETE),
+    ("zero-chunk backup, rename -> empty",     EMPTY_FILE, "rename",       None,   ""),
+    ("zero-chunk backup, direct -> no file",   EMPTY_FILE, "direct",       None,   None),
+    ("one chunk, killed before its only one",  ONE_CHUNK,  "rename",       0,      None),
+    ("one chunk, no crash",                    ONE_CHUNK,  "rename",       None,   "z"),
+    ("5,000 chunks, rename, no crash",         BIG_CHUNKS, "rename",       None,   BIG_FILE),
+    ("5,000 chunks, rename, killed midway",    BIG_CHUNKS, "rename",       MID,    None),
+]
 
 
 def attempt(chunks, policy, crash_at, store, record, resume=False):
@@ -133,7 +177,66 @@ def cross_store(chunks, crash_at):
     return archive.get(FINAL)
 
 
+def show_examples():
+    """Print the examples table and assert every row, twice over.
+
+    `one_night` and `until_done` are hard-wired to the chapter's CHUNKS, so the two helpers
+    below run the SAME `attempt` against an arbitrary chunk list -- that is the only reason
+    they exist.  The second check on each row is an independent formula for what a restore
+    should read, so a row has to agree with the program and with the rule the program claims
+    to implement.  The two byte columns are the price of a restart: `scratch` re-sends
+    everything, `resume` continues from the staging file, and they TIE whenever the crash left
+    nothing staged to resume from.
+    """
+    def one(chunks, policy, crash_at):
+        store, record = {}, {"ok": False}
+        moved = attempt(chunks, policy, crash_at, store, record)
+        return visible(store), record["ok"], moved
+
+    def until(chunks, policy, crash_points, resume):
+        store, record = {}, {"ok": False}
+        total = 0
+        for c in list(crash_points) + [None]:
+            total += attempt(chunks, policy, c, store, record, resume=resume)
+            if visible(store) is not None and (policy == "rename" or record["ok"]):
+                break
+        return visible(store), total
+
+    print(f"{'what it exercises':38s} {'chunks':>7} {'policy':>13} {'crash':>6} "
+          f"{'visible':>11} {'rec':>4} {'scratch':>8} {'resume':>7}")
+    for label, chunks, policy, crash_at, want in EXAMPLES:
+        whole = "".join(chunks)
+        got, rec, moved = one(chunks, policy, crash_at)
+        assert got == want, (label, got, want)
+
+        # the independent reference: the rule each policy claims to follow, written out
+        if crash_at is None or crash_at > len(chunks):
+            ref = whole if (policy == "rename" or chunks) else None
+        elif policy == "rename" or crash_at == 0:
+            ref = None
+        else:
+            ref = "".join(chunks[:crash_at])
+        assert ref == want, (label, 'the rule disagrees', ref, want)
+        if policy == "rename":
+            assert got in (None, whole), (label, 'a partial file became visible', len(got or ''))
+
+        pts = [] if crash_at is None else [crash_at]
+        done_s, bytes_s = until(chunks, policy, pts, resume=False)
+        done_r, bytes_r = until(chunks, policy, pts, resume=True)
+        assert done_s == done_r, (label, done_s, done_r)
+        assert bytes_r <= bytes_s, (label, bytes_r, bytes_s)
+
+        shown = ('absent' if got is None else 'empty' if got == '' else
+                 'COMPLETE' if got == whole else f'{len(got)}B part')
+        crash = 'none' if crash_at is None else str(crash_at)
+        print(f"{label:38s} {len(chunks):>7} {policy:>13} {crash:>6} "
+              f"{shown:>11} {str(rec):>4} {bytes_s:>8} {bytes_r:>7}")
+    print(f"all {len(EXAMPLES)} examples agree with the rule they claim to implement")
+    print()
+
+
 def main():
+    show_examples()
     print(f"CHUNKS = {CHUNKS}")
     print(f"the finished file is {SIZE} bytes: {COMPLETE!r}\n")
 

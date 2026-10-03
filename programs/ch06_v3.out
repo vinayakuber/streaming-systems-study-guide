@@ -1,3 +1,25 @@
+what it exercises                   entries  record         date        answer       present   scan    replay  verdict
+audit: the day before 'a' exists          9       a   2024-02-09  UNANSWERABLE            24      9       360  scan wins, present WRONG
+audit: a's first effective day            9       a   2024-02-10             5            24      9       369  scan wins, present WRONG
+audit: the day before a change            9       a   2024-07-08             5            24      9      1710  scan wins, present WRONG
+audit: the effective day itself           9       a   2024-07-09             8            24      9      1719  scan wins, present WRONG
+audit: the regulator's own day            9       a   2024-10-27             8            24      9      2709  scan wins, present WRONG
+audit: today                              9       a   2026-09-27            24            24      9      9009  scan wins, present agrees
+audit: an unknown record                  9      zz   2026-09-27  UNANSWERABLE  UNANSWERABLE      9      9009  scan wins, present agrees
+state: the regulator's own day            5       a   2024-10-27  UNANSWERABLE            24      5      1505  scan wins, present WRONG
+state: the day before a's edge            5       a   2025-05-14  UNANSWERABLE            24      5      2500  scan wins, present WRONG
+state: a's edge day                       5       a   2025-05-15            16            24      5      2505  scan wins, present WRONG
+state: the day before b's edge            5       b   2025-07-13  UNANSWERABLE            21      5      2800  scan wins, present WRONG
+state: b's edge day                       5       b   2025-07-14             8            21      5      2805  scan wins, present WRONG
+state: today, still answerable            5       a   2026-09-27            24            24      5      5005  scan wins, present agrees
+one entry: the day before it              1       a   2024-02-09  UNANSWERABLE             5      1        40  scan wins, present WRONG
+one entry: that very day                  1       a   2024-02-10             5             5      1        41  scan wins, present agrees
+an empty log answers nothing              0       a   2026-09-27  UNANSWERABLE  UNANSWERABLE      0         0  tie, present agrees
+5,000 changes: day 0                   5000      r1   2024-01-01             1          4951   5000      5000  tie, present WRONG
+5,000 changes: mid-history             5000      r0   2028-12-30          2500          4950   5000   9130000  scan wins, present WRONG
+5,000 changes: today                   5000     r49   2033-12-29          4999          4999   5000  18255000  scan wins, present agrees
+all 19 examples agree with a max over the surviving entries, and with a day-by-day replay wherever one is affordable
+
 RECORD_LOG:
   2024-02-10  record 'a' becomes  5  <- deleted by the retention job
   2024-07-09  record 'a' becomes  8  <- deleted by the retention job

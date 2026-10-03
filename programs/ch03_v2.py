@@ -14,6 +14,14 @@ makes the back useless: the later one is both smaller and closer, so it would al
 shorter run.  Same eviction argument as the sliding maximum, opposite ordering, different
 quantity.  "Both better AND newer" is the giveaway that it generalises.
 
+WORKED EXAMPLES: the EXAMPLES table below holds 18 input/output pairs -- the smallest K that
+is reachable at all and the largest, an ordinary mid-range K, both sides of the 21/22
+boundary where the answer has to grow, both sides of the single second that does or does not
+reach K, an empty stream, an all-idle stream at K = 0 and K = 1, idle seconds spliced into
+the middle, a signed stream where the two-pointer answers wrongly, a K no run can reach (and
+what is returned instead of a guess), and two rows at 20,000 seconds.  Every row is ASSERTED,
+so the table cannot drift from the code: change an answer and this file stops running.
+
 Run it:  python3 programs/ch03_v2.py
 """
 
@@ -34,6 +42,89 @@ IDLE = [5, 3, 7, 0, 0, 0, 2, 6, 1, 9, 4, 8]
 KS = (15, 21, 22, 999)
 
 N = len(COUNTS)
+
+# An empty load test, a single second, an all-idle stream, a four-second stream (the length
+# at which the two costs below come out exactly equal), a signed stream where the running
+# total is NOT non-decreasing, and the 20,000-second scale the program measures at the end.
+# These are inputs for the examples table, not alternative versions of the problem.
+EMPTY = []
+SINGLE = [7]
+ALL_IDLE = [0, 0, 0]
+FOUR = COUNTS[:4]                                  # [5, 3, 7, 2]
+SIGNED = [0, -2, 5]                                # net connections opened minus closed
+BIG_COUNTS = [(i * 7919) % 50 for i in range(20_000)]   # deterministic, no seed needed
+
+# ------------------------------------------------------------------- WORKED EXAMPLES
+# (what it exercises, counts, K, expected shortest length).  Every row is asserted by
+# show_examples() against the pair scan AND the two-pointer, which is why the table is data
+# and not a comment: a comment can go stale silently, and this cannot.
+EXAMPLES = [
+    ("smallest K that is reachable",        COUNTS,      0,          1),
+    ("ordinary K, mid-range",               COUNTS,      15,         3),
+    ("K = 21, three seconds reach it",      COUNTS,      21,         3),
+    ("K = 22, three no longer enough",      COUNTS,      22,         4),
+    ("K = the whole load test",             COUNTS,      45,         9),
+    ("one past the whole total -> none",    COUNTS,      46,         None),
+    ("far beyond reach -> none",            COUNTS,      999,        None),
+    ("idle seconds spliced in",             IDLE,        15,         3),
+    ("idle seconds, across the boundary",   IDLE,        22,         4),
+    ("empty stream -> none",                EMPTY,       1,          None),
+    ("one second, exactly K",               SINGLE,      7,          1),
+    ("one second, one short of K",          SINGLE,      8,          None),
+    ("all-idle stream, K = 0",              ALL_IDLE,    0,          1),
+    ("all-idle stream, K = 1 -> none",      ALL_IDLE,    1,          None),
+    ("four seconds: the two costs tie",     FOUR,        15,         3),
+    ("signed data: two-pointer is wrong",   SIGNED,      4,          1),
+    ("20,000 seconds, K = 2000",            BIG_COUNTS,  2000,       80),
+    ("20,000 seconds, K unreachable",       BIG_COUNTS,  10 ** 9,    None),
+]
+
+
+def show_examples():
+    """Print the examples table and assert every row, two ways.
+
+    Every row is checked against the increasing list (loose AND strict) and, where the stream
+    is small enough to afford it, against the quadratic pair scan as well.  The two cost
+    columns are the point of the table: `pairs` is what the pair scan examines -- exactly
+    n(n+1)/2, since it never breaks early -- and `list ops` is the ceiling on the increasing
+    list's work, n+1 pushes and at most n+1 pops.  On short streams the pair scan is the
+    cheaper program, and the table says so rather than implying otherwise.
+
+    The two-pointer is asserted only where it is entitled to be right: non-negative counts
+    AND K >= 1.  MEASURED, and not what was expected: it also disagrees at K = 0, where it
+    returns 0 because it allows the left edge to pass the right one and reports the EMPTY run.
+    So the three rows it gets wrong are the two K = 0 rows and the signed one, and that count
+    is asserted below -- the docstring's "correct only for non-negative counts" is true but
+    incomplete.
+    """
+    print(f"{'what it exercises':36s} {'secs':>6} {'K':>11} {'answer':>7} "
+          f"{'pairs':>12} {'list ops':>9}  verdict")
+    disagreements = 0
+    for label, counts, k, want in EXAMPLES:
+        n = len(counts)
+        got, widest = shortest_deque(counts, k)
+        strict, _ = shortest_deque(counts, k, strict=True)
+        assert got == want, (label, got, want)
+        assert strict == want, (label, 'the strict comparison disagrees', strict, want)
+        pairs = n * (n + 1) // 2
+        if n <= 200:                      # the pair scan is affordable here, so run it
+            nv, ops = shortest_naive(counts, k)
+            assert nv == want, (label, 'the pair scan disagrees', nv, want)
+            assert ops == pairs, (label, ops, pairs)
+        tp = shortest_two_pointer(counts, k)
+        if k > 0 and min(counts, default=0) >= 0:
+            assert tp == want, (label, 'the two-pointer disagrees', tp, want)
+        else:
+            disagreements += tp != want
+        list_ops = 2 * (n + 1)
+        verdict = ("list wins" if list_ops < pairs else
+                   "list LOSES" if list_ops > pairs else "tie")
+        shown = 'none' if got is None else str(got)
+        print(f"{label:36s} {n:>6} {k:>11} {shown:>7} {pairs:>12,} {list_ops:>9,}  {verdict}")
+    assert disagreements == 3, (
+        f"{disagreements} two-pointer disagreements, expected 3 (two K=0 rows and the signed one)")
+    print(f"all {len(EXAMPLES)} examples agree with the pair scan")
+    print()
 
 
 def prefix(counts):
@@ -112,6 +203,7 @@ def shortest_deque(counts, k, strict=False):
 
 
 def main():
+    show_examples()
     pre = prefix(COUNTS)
     print("COUNTS =", "  ".join(f"{i}:{v}" for i, v in enumerate(COUNTS)))
     print(f"prefix  = {pre}\n")

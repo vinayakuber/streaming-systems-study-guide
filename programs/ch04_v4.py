@@ -14,6 +14,14 @@ to wait before paging, and how long before declaring the incident over -- and th
 the same number.  Measured below: at this data no single pair of numbers gives both zero double
 pages and a page for every incident.
 
+WORKED EXAMPLES: the EXAMPLES table below holds 16 input/output pairs -- an empty stream, a
+single firing that nobody is ever paged for, both sides of the quiet period (a gap of exactly
+CLOSE_AFTER groups, one more does not), both sides of the paging delay (a span of exactly
+PAGE_AFTER pages, one short of it does not), CLOSE_AFTER = 0 and PAGE_AFTER = 1000 at the two
+degenerate ends, the fitted (87, 0) pair, and 1,000 generated firings.  Every row is ASSERTED
+against the retrospective sweep as well as its expected answer, so the table cannot drift
+from the code.
+
 Run it:  python3 programs/ch04_v4.py
 """
 
@@ -35,6 +43,43 @@ WIDE = 120
 # Chosen because the 1..3 firings span exactly 2, so this is the smallest value at which that
 # pair pages -- and therefore the smallest value at which the double page happens.
 PAGE_AFTER = 2
+
+# A single firing, the two pairs that straddle the quiet period, a repeated firing, the same
+# nine in time order, and a generated stream at a scale a real monitor reaches.  These are
+# inputs for the examples table, not alternative versions of the problem.
+ONE_FIRING = [100]
+IN_TIME_ORDER = sorted(FIRINGS)
+GAP_AT_G = [0, CLOSE_AFTER]                 # 47 - 0 == CLOSE_AFTER: still ONE incident
+GAP_PAST_G = [0, CLOSE_AFTER + 1]           # one minute more: two incidents
+SPAN_PAIR = [0, PAGE_AFTER]                 # spans exactly PAGE_AFTER: pages at the second
+REPEATED = [100, 100, 100]                  # the monitor re-fires on the same minute
+BIG_N = 1_000
+BIG_FIRINGS = [5 * i for i in range(BIG_N)]           # 5 minutes apart: all one incident at 47
+BIG_SHUFFLED = BIG_FIRINGS[:]
+random.Random(20260303).shuffle(BIG_SHUFFLED)         # ... arriving in a thoroughly shuffled queue
+
+# ------------------------------------------------------------------- WORKED EXAMPLES
+# (what it exercises, firings, page_after, close_after, (incidents, pages, double pages)).
+# Every row is asserted by show_examples(), which is why the table is data and not a comment:
+# a comment can go stale silently, and this cannot.
+EXAMPLES = [
+    ("empty stream -> no incident, no page",       [],            PAGE_AFTER, CLOSE_AFTER, (0, 0, 0)),
+    ("one firing, span 0 -> NOBODY is paged",      ONE_FIRING,    PAGE_AFTER, CLOSE_AFTER, (1, 0, 0)),
+    ("one firing, PAGE_AFTER 0 -> paged at once",  ONE_FIRING,    0,          CLOSE_AFTER, (1, 1, 0)),
+    ("the same firing three times",                REPEATED,      0,          CLOSE_AFTER, (1, 1, 0)),
+    ("a gap of exactly CLOSE_AFTER: one incident", GAP_AT_G,      0,          CLOSE_AFTER, (1, 1, 0)),
+    ("a gap of CLOSE_AFTER + 1: two incidents",    GAP_PAST_G,    0,          CLOSE_AFTER, (2, 2, 0)),
+    ("a span of exactly PAGE_AFTER: it pages",     SPAN_PAIR,     PAGE_AFTER, CLOSE_AFTER, (1, 1, 0)),
+    ("a span one short of PAGE_AFTER: no page",    SPAN_PAIR,     PAGE_AFTER + 1, CLOSE_AFTER, (1, 0, 0)),
+    ("the chapter's nine, as the pager sees them", FIRINGS,       PAGE_AFTER, CLOSE_AFTER, (3, 3, 1)),
+    ("the same nine, in time order",               IN_TIME_ORDER, PAGE_AFTER, CLOSE_AFTER, (3, 2, 0)),
+    ("the wide close: nothing bridges",            FIRINGS,       PAGE_AFTER, WIDE,        (2, 1, 0)),
+    ("CLOSE_AFTER 0: every firing its own",        FIRINGS,       0,          0,           (9, 9, 0)),
+    ("PAGE_AFTER 1000: it never alerts at all",    FIRINGS,       1000,       CLOSE_AFTER, (3, 0, 0)),
+    ("the fitted pair (87, 0)",                    FIRINGS,       0,          87,          (3, 3, 0)),
+    ("1,000 firings shuffled, paging at once",     BIG_SHUFFLED,  0,          CLOSE_AFTER, (1, 52, 51)),
+    ("1,000 shuffled, waiting 20 minutes",         BIG_SHUFFLED,  20,         CLOSE_AFTER, (1, 34, 33)),
+]
 
 
 def sweep(firings, close_after):
@@ -119,7 +164,43 @@ def latencies(pages, incidents):
     return out
 
 
+def show_examples():
+    """Print the examples table and assert every row, two independent ways.
+
+    Every row's incidents are checked against `sweep` -- the retrospective truth, computed by
+    sorting -- as well as against the expected (incidents, pages, double pages), and the
+    coverage identity (paged + unpaged == incidents) and the inequality over_paged <= doubles
+    are checked on every row too.
+
+    The last two columns are the cost of the two answers, measured in the only currency that
+    matters here: how many firings had to arrive first.  `paged after` is how many the pager
+    had seen when it woke somebody; `sweep needs` is all of them, because a sorted walk cannot
+    start until the stream has ended.  On the rows where nothing pages the streaming answer
+    buys nothing at all -- a single firing with PAGE_AFTER = 2, and PAGE_AFTER = 1000, both
+    say `never` -- and that is the price of the same dial that removes the double pages.
+    """
+    print(f"{'what it exercises':44s} {'n':>6} {'page':>5} {'close':>6} {'inc':>5} "
+          f"{'pages':>6} {'dbl':>4} {'unpaged':>8} {'paged after':>12} {'sweep needs':>12}")
+    for label, firings, page_after, close_after, want in EXAMPLES:
+        pages, incidents, doubles = page_streaming(firings, page_after, close_after)
+        covered, over, uncovered = coverage(pages, incidents)
+        assert (len(incidents), len(pages), doubles) == want, (
+            label, (len(incidents), len(pages), doubles), want)
+        assert incidents == sweep(firings, close_after), (label, incidents)
+        assert covered + len(uncovered) == len(incidents), (label, covered, uncovered)
+        assert over <= doubles, (label, over, doubles)
+        app, lat = apparent_latencies(pages), latencies(pages, incidents)
+        assert all(t >= a for t, a in zip(lat, app)), (label, lat, app)
+        seen = f"{firings.index(pages[0][1]) + 1}" if pages else "never"
+        print(f"{label:44s} {len(firings):>6} {page_after:>5} {close_after:>6} "
+              f"{len(incidents):>5} {len(pages):>6} {doubles:>4} {len(uncovered):>8} "
+              f"{seen:>12} {len(firings):>12}")
+    print(f"all {len(EXAMPLES)} examples agree with the retrospective sweep")
+    print()
+
+
 def main():
+    show_examples()
     print(f"FIRINGS = {FIRINGS}   (sorted: {sorted(FIRINGS)})")
     print(f"CLOSE_AFTER = {CLOSE_AFTER}, PAGE_AFTER = {PAGE_AFTER}\n")
     truth = sweep(FIRINGS, CLOSE_AFTER)

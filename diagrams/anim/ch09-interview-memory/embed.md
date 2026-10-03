@@ -65,6 +65,16 @@ and falls.  The busiest moment is that count's maximum and an overlap exists whe
 exceeds one.  The span-pair framing was the obstacle, not the solution -- and the event sweep
 is strictly more general, because it also answers the chapter's two-list question.
 
+WORKED EXAMPLES: the EXAMPLES table below holds 12 booking lists and their answers -- an empty
+room, a single zero-length booking, a room with no clash at all, BOTH sides of the closed-span
+boundary (adjacent at 11 is free, touching at 10 is a clash), identical and nested bookings, the
+chapter's own data, the workshop that breaks the two-pointer rule, and two generated rooms of
+20,000 and 2,000 bookings.  Each row prints what the sweep costs in marks beside what the
+quadratic answer would cost in comparisons, and on the small rows the marks are the MORE
+expensive of the two.  Every row is ASSERTED -- against the answer below, against a direct
+per-instant count, and where it is affordable against every_pair() as well -- so the table
+cannot drift from the code.
+
 Run it:  python3 programs/ch09_v2.py
 """
 import random
@@ -83,6 +93,40 @@ RIGHT = [(50, 150), (220, 320)]
 # simultaneous booking exposes it.
 WITH_WORKSHOP = sorted(BOOKINGS + [(140, 230)])
 NONE = None                                  # these two bookings do not overlap at all
+
+# Rooms for the examples table, not alternative versions of the problem: the degenerate ones,
+# the two sides of the closed-span boundary, and two GENERATED rooms at scale -- a CHAIN in
+# which each booking overlaps only the next, and a STACK in which every booking covers one
+# instant, so the pair count is quadratic in the answer while the marks stay at 2 per booking.
+EMPTY_ROOM  = []                                  # nothing booked at all
+ONE_BOOKING = [(5, 5)]                            # one zero-length booking
+NO_CLASH    = [(0, 1), (5, 6), (10, 11)]          # a clean room: no pair to report
+ADJACENT    = [(0, 10), (11, 20)]                 # free side of the boundary
+TOUCHING    = [(0, 10), (10, 20)]                 # clash side: both occupy minute 10
+TWO_SAME    = [(0, 10), (0, 10)]                  # the same booking made twice
+FOUR_SAME   = [(0, 10)] * 4                       # one instant, 4 choose 2 = 6 pairs
+NESTED      = [(0, 100), (10, 20), (30, 40)]      # two bookings inside a third
+BIG_CHAIN   = [(i * 5, i * 5 + 7) for i in range(20_000)]
+BIG_STACK   = [(i, 50_000) for i in range(2_000)]
+
+# ------------------------------------------------------------------- WORKED EXAMPLES
+# (what it exercises, bookings, expected (max_live, busiest_moment, pair_count)).  Every row is
+# asserted by show_examples(), which is why the table is data and not a comment: a comment can
+# go stale silently, and this cannot.
+EXAMPLES = [
+    ("an empty room -> no busiest moment",   EMPTY_ROOM,     (0,    None, 0)),
+    ("one zero-length booking",              ONE_BOOKING,    (1,    5,    0)),
+    ("three bookings, no clash at all",      NO_CLASH,       (1,    0,    0)),
+    ("adjacent at 11: free (boundary)",      ADJACENT,       (1,    0,    0)),
+    ("touching at 10: a clash (boundary)",   TOUCHING,       (2,    10,   1)),
+    ("the same booking made twice",          TWO_SAME,       (2,    0,    1)),
+    ("four identical bookings",              FOUR_SAME,      (4,    0,    6)),
+    ("nesting, not merely overlap",          NESTED,         (2,    10,   2)),
+    ("the chapter's two lists, poured in",   BOOKINGS,       (2,    130,  2)),
+    ("...plus the workshop: three live",     WITH_WORKSHOP,  (3,    140,  5)),
+    ("20,000 bookings in a chain",           BIG_CHAIN,      (2,    5,    19_999)),
+    ("2,000 bookings over one instant",      BIG_STACK,      (2000, 1999, 1_999_000)),
+]
 
 
 def overlap_of(x, y):
@@ -214,7 +258,40 @@ def covering(bookings, t):
     return sum(1 for s, e in bookings if s <= t <= e)
 
 
+def show_examples():
+    """Print the examples table and assert every row.
+
+    Each row is checked at least twice: against the expected triple in the table, and against
+    covering(), a direct count of the bookings live at the instant the sweep calls busiest.  On
+    the rows small enough to afford it the quadratic every_pair() is run too, so the pair count
+    is confirmed by the reference implementation rather than by the sweep's own arithmetic.  The
+    two cost columns are printed side by side because the sweep does not win on every input: at
+    five bookings the marks and the comparisons are both 10, and below that the quadratic answer
+    is the cheaper one.
+    """
+    print(f"{'what it exercises':36s} {'bookings':>8} {'marks':>7} {'pair cmps':>12} "
+          f"{'busiest':>8} {'at':>6} {'pairs':>10}")
+    for label, bookings, want in EXAMPLES:
+        n = len(bookings)
+        got = event_sweep(bookings)
+        best, at, pairs = got
+        assert got == want, (label, got, want)
+        if at is None:
+            assert (best, pairs, n) == (0, 0, 0), (label, got)   # nothing booked, nothing to report
+        else:
+            assert covering(bookings, at) == best, (label, at, best)
+            assert any(s <= at <= e for s, e in bookings), (label, at)
+        if n <= 40:                       # the quadratic reference, where it is affordable
+            ref, cmps = every_pair(bookings)
+            assert len(ref) == pairs, (label, len(ref), pairs)
+            assert cmps == n * (n - 1) // 2, (label, cmps)
+        would = n * (n - 1) // 2          # what every_pair would cost on this room
+        print(f"{label:36s} {n:>8,} {2 * n:>7,} {would:>12,} {best:>8,} {str(at):>6} {pairs:>10,}")
+    print(f"all {len(EXAMPLES)} examples agree with a direct per-instant count")
+
+
 def main():
+    show_examples()
     print(f"BOOKINGS = {BOOKINGS}   ({len(BOOKINGS)} bookings, closed spans)")
     pairs, cmp = every_pair(BOOKINGS)
     best, at, count = event_sweep(BOOKINGS)
@@ -369,6 +446,20 @@ if __name__ == "__main__":
 Running it prints:
 
 ```
+what it exercises                    bookings   marks    pair cmps  busiest     at      pairs
+an empty room -> no busiest moment          0       0            0        0   None          0
+one zero-length booking                     1       2            0        1      5          0
+three bookings, no clash at all             3       6            3        1      0          0
+adjacent at 11: free (boundary)             2       4            1        1      0          0
+touching at 10: a clash (boundary)          2       4            1        2     10          1
+the same booking made twice                 2       4            1        2      0          1
+four identical bookings                     4       8            6        4      0          6
+nesting, not merely overlap                 3       6            3        2     10          2
+the chapter's two lists, poured in          5      10           10        2    130          2
+...plus the workshop: three live            6      12           15        3    140          5
+20,000 bookings in a chain             20,000  40,000  199,990,000        2      5     19,999
+2,000 bookings over one instant         2,000   4,000    1,999,000    2,000   1999  1,999,000
+all 12 examples agree with a direct per-instant count
 BOOKINGS = [(1, 3), (50, 150), (130, 245), (220, 320), (540, 540)]   (5 bookings, closed spans)
   marks   = [(1, 1), (4, -1), (50, 1), (130, 1), (151, -1), (220, 1), (246, -1), (321, -1), (540, 1), (541, -1)]
 
@@ -460,6 +551,18 @@ early is wrong in BOTH directions -- measured below, it sometimes reports more a
 than the correct answer, so no count can audit it.  And "nearest" and "as many matches as
 possible" are different objectives; the spec asks for the first one.
 
+WORKED EXAMPLES: the EXAMPLES table below holds 17 input/output pairs -- no impressions and no
+clicks at all, BOTH sides of the attribution window (shown exactly W before is inside, W + 1 is
+outside), an impression shown after its click, two clicks competing for one impression, the
+chapter's own streams answered at four different waits (0, W, the measured lateness, and
+offline), the case where nearest-first loses a match, the case where answering early reports
+MORE attributions than the correct answer, and three generated pairs of 300 streams each.  Every
+row prints what nearest-first attributed beside the most any rule could have, so the rows where
+the cheap answer merely ties and the row where it loses are both visible.  Every row is
+ASSERTED -- against the count below, against the offline matcher wherever the wait is long
+enough to equal it, and against the window and one-to-one rules on every credited impression --
+so the table cannot drift from the code.
+
 Run it:  python3 programs/ch09_v3.py
 """
 import random
@@ -476,6 +579,50 @@ CLICKS = [50, 90, 220, 260, 265]
 W = 60                    # the attribution window: the chapter's widening constant J
 TRUE_LATENESS = 85        # measured below, not assumed: max(arrived_at - shown_at)
 UNATTRIBUTED = None       # not an impression: this click is credited to nobody
+
+# Streams for the examples table, not alternative versions of the problem: the degenerate ones,
+# a single impression to push a click against each edge of the window, the two pathological
+# pairs the prose below discusses, and three GENERATED pairs at scale -- 300 impressions and 300
+# clicks, punctual in one and 120 seconds late in the other, so the wait can be seen deciding
+# every attribution at once rather than one of them.
+NO_IMPS       = []                                  # nothing to attribute to
+NO_CLICKS     = []                                  # nothing to attribute
+ONE_IMP       = [(100, 100)]                        # one punctual impression, shown at 100
+GREEDY_IMPS   = [(100, 100), (150, 150)]            # nearest-first strands the second click
+GREEDY_CLICKS = [160, 199]
+RUSHED_IMPS   = [(31, 31), (109, 109), (115, 155), (132, 172), (199, 199)]
+RUSHED_CLICKS = [30, 51, 89, 154, 181]              # answering at once over-reports on these
+BIG_N         = 300
+BIG_PUNCTUAL  = [(i * 10, i * 10) for i in range(BIG_N)]
+BIG_LATE      = [(i * 10, i * 10 + 120) for i in range(BIG_N)]
+BIG_CLICKS    = [i * 10 + 5 for i in range(BIG_N)]
+FOREVER       = float("inf")                        # the offline wait: every impression in hand
+
+# ------------------------------------------------------------------- WORKED EXAMPLES
+# (what it exercises, impressions, clicks, W, wait, attributed, the most any rule could get).
+# The last column is None where max_matching() is too expensive to run -- it is O(clicks x
+# impressions) with backtracking and takes half a minute at 300 streams, which is itself a fact
+# about the yardstick.  Every row is asserted by show_examples(), which is why the table is data
+# and not a comment: a comment can go stale silently, and this cannot.
+EXAMPLES = [
+    ("no impressions -> credited to nobody", NO_IMPS,      [100],         W, 0,             0,   0),
+    ("no clicks -> an empty answer",         ONE_IMP,      NO_CLICKS,     W, 0,             0,   0),
+    ("shown at the click's own second",      ONE_IMP,      [100],         W, 0,             1,   1),
+    ("shown exactly W before: inside",       ONE_IMP,      [160],         W, 0,             1,   1),
+    ("shown W + 1 before: outside",          ONE_IMP,      [161],         W, 0,             0,   0),
+    ("shown AFTER the click: never",         ONE_IMP,      [99],          W, 0,             0,   0),
+    ("two clicks, one impression",           ONE_IMP,      [120, 120],    W, 0,             1,   1),
+    ("chapter streams, answered at once",    IMPRESSIONS,  CLICKS,        W, 0,             1,   2),
+    ("chapter streams, waiting W",           IMPRESSIONS,  CLICKS,        W, W,             1,   2),
+    ("chapter streams, waiting lateness",    IMPRESSIONS,  CLICKS,        W, TRUE_LATENESS, 2,   2),
+    ("chapter streams, offline",             IMPRESSIONS,  CLICKS,        W, FOREVER,       2,   2),
+    ("nearest-first LOSES a match",          GREEDY_IMPS,  GREEDY_CLICKS, W, 0,             1,   2),
+    ("answering early reports MORE",         RUSHED_IMPS,  RUSHED_CLICKS, W, 0,             3,   3),
+    ("...and the right answer is fewer",     RUSHED_IMPS,  RUSHED_CLICKS, W, FOREVER,       2,   3),
+    ("300 punctual streams, no wait",        BIG_PUNCTUAL, BIG_CLICKS,    W, 0,             300, None),
+    ("300 late by 120, no wait",             BIG_LATE,     BIG_CLICKS,    W, 0,             0,   None),
+    ("300 late by 120, waiting 120",         BIG_LATE,     BIG_CLICKS,    W, 120,          300, None),
+]
 
 
 def measured_lateness(impressions):
@@ -577,7 +724,50 @@ def droppable(impressions, bound):
     return [(s, a) for s, a in impressions if s < bound]
 
 
+def show_examples():
+    """Print the examples table and assert every row.
+
+    Each row is checked two ways.  The count is compared with the table, and the attributions
+    themselves are compared with attribute_offline() -- the batch reference -- on every row
+    whose wait is at least the lateness measured on its own impressions, which is the only
+    circumstance under which the stream is entitled to equal the batch.  Independently of both,
+    every credited impression is re-tested against in_window() and checked to be credited once,
+    so a row cannot pass by returning a legal-looking count built from illegal matches.  The
+    `best` column is max_matching(), the most any rule could attribute: where it exceeds
+    `got`, nearest-first is losing money by specification rather than by bug.
+    """
+    print(f"{'what it exercises':37s} {'imps':>5} {'clicks':>7} {'wait':>6} {'got':>5} "
+          f"{'best':>5}  attributions")
+    for label, imps, clicks, w, wait, want, want_best in EXAMPLES:
+        res = attribute(imps, clicks, w, wait)
+        got = matched_count(res)
+        assert got == want, (label, got, want)
+        late = measured_lateness(imps) if imps else 0
+        if wait >= late:                  # only then may the stream claim the batch answer
+            assert res == attribute_offline(imps, clicks, w), (label, res)
+        credited = [i for _, i in res if i is not UNATTRIBUTED]
+        assert len(credited) == len(set(credited)), (label, credited)
+        for click_t, i in res:
+            if i is not UNATTRIBUTED:
+                assert in_window(i, click_t, w), (label, click_t, i)
+        if want_best is None:
+            best_shown = "-"              # the yardstick does not scale; see the table's comment
+        else:
+            best = max_matching(imps, clicks, w)
+            assert best == want_best, (label, best, want_best)
+            assert got <= best, (label, got, best)
+            best_shown = str(best)
+        shown = "  ".join(f"{c}->{'-' if i is UNATTRIBUTED else i}" for c, i in res) or "(none)"
+        if len(shown) > 29:
+            shown = shown[:26] + "..."
+        wait_shown = "inf" if wait == FOREVER else str(wait)
+        print(f"{label:37s} {len(imps):>5,} {len(clicks):>7,} {wait_shown:>6} {got:>5,} "
+              f"{best_shown:>5}  {shown}")
+    print(f"all {len(EXAMPLES)} examples agree with the offline matcher and the window rule")
+
+
 def main():
+    show_examples()
     lateness = measured_lateness(IMPRESSIONS)
     print(f"IMPRESSIONS (shown, arrived) = {IMPRESSIONS}")
     print(f"CLICKS = {CLICKS}")
@@ -738,6 +928,25 @@ if __name__ == "__main__":
 Running it prints:
 
 ```
+what it exercises                      imps  clicks   wait   got  best  attributions
+no impressions -> credited to nobody      0       1      0     0     0  100->-
+no clicks -> an empty answer              1       0      0     0     0  (none)
+shown at the click's own second           1       1      0     1     1  100->100
+shown exactly W before: inside            1       1      0     1     1  160->100
+shown W + 1 before: outside               1       1      0     0     0  161->-
+shown AFTER the click: never              1       1      0     0     0  99->-
+two clicks, one impression                1       2      0     1     1  120->100  120->-
+chapter streams, answered at once         5       5      0     1     2  50->3  90->-  220->-  260-...
+chapter streams, waiting W                5       5     60     1     2  50->3  90->-  220->-  260-...
+chapter streams, waiting lateness         5       5     85     2     2  50->3  90->-  220->-  260-...
+chapter streams, offline                  5       5    inf     2     2  50->3  90->-  220->-  260-...
+nearest-first LOSES a match               2       2      0     1     2  160->150  199->-
+answering early reports MORE              5       5      0     3     3  30->-  51->31  89->-  154-...
+...and the right answer is fewer          5       5    inf     2     3  30->-  51->31  89->-  154-...
+300 punctual streams, no wait           300     300      0   300     -  5->0  15->10  25->20  35->...
+300 late by 120, no wait                300     300      0     0     -  5->-  15->-  25->-  35->- ...
+300 late by 120, waiting 120            300     300    120   300     -  5->0  15->10  25->20  35->...
+all 17 examples agree with the offline matcher and the window rule
 IMPRESSIONS (shown, arrived) = [(1, 1), (3, 3), (130, 130), (245, 330), (540, 540)]
 CLICKS = [50, 90, 220, 260, 265]
   W = 60 seconds (the attribution window), measured lateness = 85 seconds
@@ -828,6 +1037,18 @@ the chapter handed over as a promise.  Both versions that quietly assume them ar
 below, and both report time as free when the person is busy -- the one direction of error a
 calendar must never have.
 
+WORKED EXAMPLES: the EXAMPLES table below holds 17 input/output pairs -- an empty calendar and a
+calendar busy throughout (which has no free span at all, and says so rather than guessing one),
+busy at each end of the window, BOTH sides of the adjacency boundary (spans that touch leave no
+gap, spans one minute apart leave a one-minute gap), a zero-length meeting, a one-minute window
+both busy and free, spans that start before or end after the window, a nested meeting, a window
+whose start is after its end, the chapter's own calendar, and two generated years of 525,600
+minutes.  Each row prints the spans the one pass reads beside the minutes the per-minute walk
+would examine, and on a crowded ten-minute window the walk is the cheaper of the two.  Every row
+is ASSERTED -- against the answer below, against free plus busy summing to the whole window,
+and wherever the range is small enough against free_by_walking() minute by minute -- so the
+table cannot drift from the code.
+
 Run it:  python3 programs/ch09_v4.py
 """
 import random
@@ -838,6 +1059,46 @@ import random
 BUSY = [(1, 3), (130, 245), (540, 540)]
 START, END = 0, 600
 YEAR_MINUTES = 525_600
+
+# Calendars for the examples table, not alternative versions of the problem: the degenerate
+# ones, the two sides of the adjacency boundary, and two GENERATED years -- one with a meeting
+# every 250 minutes, and one whose meetings are booked back to back from the first minute, so
+# that 2,000 of them leave exactly one free span in 525,600 minutes.
+EMPTY_DAY    = []                                   # no meetings at all
+ALL_DAY      = [(0, 10)]                            # busy throughout the window
+ADJACENT     = [(0, 3), (4, 7)]                     # touching: no gap between them
+ONE_APART    = [(0, 3), (5, 7)]                     # one minute apart: a one-minute gap
+ZERO_LENGTH  = [(5, 5)]                             # a meeting lasting one minute
+NESTED_DAY   = [(0, 100), (10, 20)]                 # one meeting inside another
+CROWDED      = [(i, i) for i in range(0, 11, 2)] * 2  # 12 meetings in an 11-minute window
+BIG_YEAR     = [(i * 250 + 10, i * 250 + 70) for i in range(2_000)]
+BACK_TO_BACK = [(i * 61, i * 61 + 60) for i in range(2_000)]
+
+# ------------------------------------------------------------------- WORKED EXAMPLES
+# (what it exercises, busy, start, end, expected (free spans, free minutes)).  The pair pins the
+# answer from both directions -- a lost span changes the count, an off-by-one changes the
+# minutes -- and the spans themselves are compared with the per-minute walk on every row whose
+# range is small enough to walk.  Every row is asserted by show_examples(), which is why the
+# table is data and not a comment: a comment can go stale silently, and this cannot.
+EXAMPLES = [
+    ("no meetings: the whole window",     EMPTY_DAY,    0,  10,           (1,     11)),
+    ("busy throughout -> nothing free",   ALL_DAY,      0,  10,           (0,     0)),
+    ("busy at the start",                 [(0, 5)],     0,  10,           (1,     5)),
+    ("busy at the end",                   [(5, 10)],    0,  10,           (1,     5)),
+    ("adjacent spans: no gap between",    ADJACENT,     0,  10,           (1,     3)),
+    ("one minute between: a gap",         ONE_APART,    0,  10,           (2,     4)),
+    ("a zero-length meeting splits it",   ZERO_LENGTH,  0,  10,           (2,     10)),
+    ("a one-minute window, busy",         ALL_DAY,      5,  5,            (0,     0)),
+    ("a one-minute window, free",         [(0, 1)],     5,  5,            (1,     1)),
+    ("a span covering it from outside",   [(-5, 20)],   0,  10,           (0,     0)),
+    ("a span entirely after the window",  [(20, 30)],   0,  10,           (1,     11)),
+    ("a meeting nested in a longer one",  NESTED_DAY,   0,  120,          (1,     20)),
+    ("more meetings than minutes",        CROWDED,      0,  10,           (5,     5)),
+    ("the chapter's own calendar",        BUSY,         0,  600,          (4,     481)),
+    ("start after end: empty, no error",  EMPTY_DAY,    10, 5,            (0,     0)),
+    ("a year, 2,000 meetings",            BIG_YEAR,     0,  YEAR_MINUTES, (2_001, 403_601)),
+    ("a year, booked back to back",       BACK_TO_BACK, 0,  YEAR_MINUTES, (1,     403_601)),
+]
 
 
 def free_spans(busy, start, end):
@@ -935,7 +1196,37 @@ def busy_inside(busy, start, end):
     return len(covered)
 
 
+def show_examples():
+    """Print the examples table and assert every row.
+
+    Each row is checked at least twice: the span count and the free minutes against the table,
+    and the partition against busy_inside() -- free minutes plus busy minutes must come to the
+    whole window, which is the one check that catches an off-by-one at either end.  On every row
+    whose range is short enough to walk, the spans themselves are compared minute by minute with
+    free_by_walking(), the reference that cannot have an off-by-one.  The two cost columns say
+    why the pass exists and also where it does not pay: on a crowded ten-minute window the walk
+    examines fewer minutes than the pass reads spans, and on a one-minute window they tie.
+    """
+    print(f"{'what it exercises':33s} {'spans':>6} {'window':>10} {'free':>5} {'free min':>9} "
+          f"{'walk min':>9}  gaps")
+    for label, busy, lo, hi, want in EXAMPLES:
+        got = free_spans(busy, lo, hi)
+        mins = minutes(got)
+        assert (len(got), mins) == want, (label, (len(got), mins), want)
+        assert mins + busy_inside(busy, lo, hi) == max(hi - lo + 1, 0), (label, mins)
+        if hi - lo <= 2_000:              # the per-minute reference, where it is affordable
+            assert got == free_by_walking(busy, lo, hi), (label, got)
+        walk = max(hi - lo + 1, 0)
+        gaps = str(got)
+        if len(gaps) > 25:
+            gaps = gaps[:22] + "..."
+        print(f"{label:33s} {len(busy):>6,} {f'{lo}..{hi}':>10} {len(got):>5,} {mins:>9,} "
+              f"{walk:>9,}  {gaps}")
+    print(f"all {len(EXAMPLES)} examples partition their window and agree with the per-minute walk")
+
+
 def main():
+    show_examples()
     free = free_spans(BUSY, START, END)
     walked = free_by_walking(BUSY, START, END)
     print(f"BUSY   = {BUSY}")
@@ -1090,6 +1381,25 @@ if __name__ == "__main__":
 Running it prints:
 
 ```
+what it exercises                  spans     window  free  free min  walk min  gaps
+no meetings: the whole window          0      0..10     1        11        11  [(0, 10)]
+busy throughout -> nothing free        1      0..10     0         0        11  []
+busy at the start                      1      0..10     1         5        11  [(6, 10)]
+busy at the end                        1      0..10     1         5        11  [(0, 4)]
+adjacent spans: no gap between         2      0..10     1         3        11  [(8, 10)]
+one minute between: a gap              2      0..10     2         4        11  [(4, 4), (8, 10)]
+a zero-length meeting splits it        1      0..10     2        10        11  [(0, 4), (6, 10)]
+a one-minute window, busy              1       5..5     0         0         1  []
+a one-minute window, free              1       5..5     1         1         1  [(5, 5)]
+a span covering it from outside        1      0..10     0         0        11  []
+a span entirely after the window       1      0..10     1        11        11  [(0, 10)]
+a meeting nested in a longer one       2     0..120     1        20       121  [(101, 120)]
+more meetings than minutes            12      0..10     5         5        11  [(1, 1), (3, 3), (5, 5...
+the chapter's own calendar             3     0..600     4       481       601  [(0, 0), (4, 129), (24...
+start after end: empty, no error       0      10..5     0         0         0  []
+a year, 2,000 meetings             2,000  0..525600 2,001   403,601   525,601  [(0, 9), (71, 259), (3...
+a year, booked back to back        2,000  0..525600     1   403,601   525,601  [(122000, 525600)]
+all 17 examples partition their window and agree with the per-minute walk
 BUSY   = [(1, 3), (130, 245), (540, 540)]
 window = 0..600
   one pass        : [(0, 0), (4, 129), (246, 539), (541, 600)]

@@ -15,6 +15,18 @@ the chapter handed over as a promise.  Both versions that quietly assume them ar
 below, and both report time as free when the person is busy -- the one direction of error a
 calendar must never have.
 
+WORKED EXAMPLES: the EXAMPLES table below holds 17 input/output pairs -- an empty calendar and a
+calendar busy throughout (which has no free span at all, and says so rather than guessing one),
+busy at each end of the window, BOTH sides of the adjacency boundary (spans that touch leave no
+gap, spans one minute apart leave a one-minute gap), a zero-length meeting, a one-minute window
+both busy and free, spans that start before or end after the window, a nested meeting, a window
+whose start is after its end, the chapter's own calendar, and two generated years of 525,600
+minutes.  Each row prints the spans the one pass reads beside the minutes the per-minute walk
+would examine, and on a crowded ten-minute window the walk is the cheaper of the two.  Every row
+is ASSERTED -- against the answer below, against free plus busy summing to the whole window,
+and wherever the range is small enough against free_by_walking() minute by minute -- so the
+table cannot drift from the code.
+
 Run it:  python3 programs/ch09_v4.py
 """
 import random
@@ -25,6 +37,46 @@ import random
 BUSY = [(1, 3), (130, 245), (540, 540)]
 START, END = 0, 600
 YEAR_MINUTES = 525_600
+
+# Calendars for the examples table, not alternative versions of the problem: the degenerate
+# ones, the two sides of the adjacency boundary, and two GENERATED years -- one with a meeting
+# every 250 minutes, and one whose meetings are booked back to back from the first minute, so
+# that 2,000 of them leave exactly one free span in 525,600 minutes.
+EMPTY_DAY    = []                                   # no meetings at all
+ALL_DAY      = [(0, 10)]                            # busy throughout the window
+ADJACENT     = [(0, 3), (4, 7)]                     # touching: no gap between them
+ONE_APART    = [(0, 3), (5, 7)]                     # one minute apart: a one-minute gap
+ZERO_LENGTH  = [(5, 5)]                             # a meeting lasting one minute
+NESTED_DAY   = [(0, 100), (10, 20)]                 # one meeting inside another
+CROWDED      = [(i, i) for i in range(0, 11, 2)] * 2  # 12 meetings in an 11-minute window
+BIG_YEAR     = [(i * 250 + 10, i * 250 + 70) for i in range(2_000)]
+BACK_TO_BACK = [(i * 61, i * 61 + 60) for i in range(2_000)]
+
+# ------------------------------------------------------------------- WORKED EXAMPLES
+# (what it exercises, busy, start, end, expected (free spans, free minutes)).  The pair pins the
+# answer from both directions -- a lost span changes the count, an off-by-one changes the
+# minutes -- and the spans themselves are compared with the per-minute walk on every row whose
+# range is small enough to walk.  Every row is asserted by show_examples(), which is why the
+# table is data and not a comment: a comment can go stale silently, and this cannot.
+EXAMPLES = [
+    ("no meetings: the whole window",     EMPTY_DAY,    0,  10,           (1,     11)),
+    ("busy throughout -> nothing free",   ALL_DAY,      0,  10,           (0,     0)),
+    ("busy at the start",                 [(0, 5)],     0,  10,           (1,     5)),
+    ("busy at the end",                   [(5, 10)],    0,  10,           (1,     5)),
+    ("adjacent spans: no gap between",    ADJACENT,     0,  10,           (1,     3)),
+    ("one minute between: a gap",         ONE_APART,    0,  10,           (2,     4)),
+    ("a zero-length meeting splits it",   ZERO_LENGTH,  0,  10,           (2,     10)),
+    ("a one-minute window, busy",         ALL_DAY,      5,  5,            (0,     0)),
+    ("a one-minute window, free",         [(0, 1)],     5,  5,            (1,     1)),
+    ("a span covering it from outside",   [(-5, 20)],   0,  10,           (0,     0)),
+    ("a span entirely after the window",  [(20, 30)],   0,  10,           (1,     11)),
+    ("a meeting nested in a longer one",  NESTED_DAY,   0,  120,          (1,     20)),
+    ("more meetings than minutes",        CROWDED,      0,  10,           (5,     5)),
+    ("the chapter's own calendar",        BUSY,         0,  600,          (4,     481)),
+    ("start after end: empty, no error",  EMPTY_DAY,    10, 5,            (0,     0)),
+    ("a year, 2,000 meetings",            BIG_YEAR,     0,  YEAR_MINUTES, (2_001, 403_601)),
+    ("a year, booked back to back",       BACK_TO_BACK, 0,  YEAR_MINUTES, (1,     403_601)),
+]
 
 
 def free_spans(busy, start, end):
@@ -122,7 +174,37 @@ def busy_inside(busy, start, end):
     return len(covered)
 
 
+def show_examples():
+    """Print the examples table and assert every row.
+
+    Each row is checked at least twice: the span count and the free minutes against the table,
+    and the partition against busy_inside() -- free minutes plus busy minutes must come to the
+    whole window, which is the one check that catches an off-by-one at either end.  On every row
+    whose range is short enough to walk, the spans themselves are compared minute by minute with
+    free_by_walking(), the reference that cannot have an off-by-one.  The two cost columns say
+    why the pass exists and also where it does not pay: on a crowded ten-minute window the walk
+    examines fewer minutes than the pass reads spans, and on a one-minute window they tie.
+    """
+    print(f"{'what it exercises':33s} {'spans':>6} {'window':>10} {'free':>5} {'free min':>9} "
+          f"{'walk min':>9}  gaps")
+    for label, busy, lo, hi, want in EXAMPLES:
+        got = free_spans(busy, lo, hi)
+        mins = minutes(got)
+        assert (len(got), mins) == want, (label, (len(got), mins), want)
+        assert mins + busy_inside(busy, lo, hi) == max(hi - lo + 1, 0), (label, mins)
+        if hi - lo <= 2_000:              # the per-minute reference, where it is affordable
+            assert got == free_by_walking(busy, lo, hi), (label, got)
+        walk = max(hi - lo + 1, 0)
+        gaps = str(got)
+        if len(gaps) > 25:
+            gaps = gaps[:22] + "..."
+        print(f"{label:33s} {len(busy):>6,} {f'{lo}..{hi}':>10} {len(got):>5,} {mins:>9,} "
+              f"{walk:>9,}  {gaps}")
+    print(f"all {len(EXAMPLES)} examples partition their window and agree with the per-minute walk")
+
+
 def main():
+    show_examples()
     free = free_spans(BUSY, START, END)
     walked = free_by_walking(BUSY, START, END)
     print(f"BUSY   = {BUSY}")

@@ -1,3 +1,21 @@
+what it exercises                            secs    L  answer    from      runs    dq ops  fewer steps
+L = 0, distinct readings: every run is 1        9    0       1       0        17        42  naive
+L = 2, an ordinary tolerance                    9    2       2       0        18        42  naive
+L = 4, the middle of the range                  9    4       3       0        21        40  naive
+L = 5, one below the chapter's L                9    5       5       0        30        38  naive
+L = 6, the stretch spans exactly L              9    6       6       0        33        38  naive
+L = 7, one more buys nothing                    9    7       6       0        33        38  naive
+L = 8 = the full spread: everything             9    8       9       0        45        31  deques
+L = 99, far above the full spread               9   99       9       0        45        31  deques
+L = 0 on a flat run: a real question            5    0       5       0        15        18  naive
+an empty log -> 0, not a guess                  0    5       0       0         0         0  tie
+a single reading, no tolerance                  1    0       1       0         1         2  naive
+two seconds, L below their gap                  2    1       1       0         3         7  naive
+two seconds, L exactly their gap                2    2       2       0         3         5  naive
+20,000 seconds, L = 0 (constant runs)       20000    0       3   5,971    40,217    99,997  naive
+20,000 seconds, L = 20                      20000   20       8  13,079    50,096    99,997  naive
+all 15 examples agree with the brute-force scan
+
 READINGS = 0:5  1:3  2:7  3:2  4:6  5:1  6:9  7:4  8:8    L = 6
   naive  : 6 seconds from second 0   (33 runs measured)
   deques : 6 seconds from second 0 -> [5, 3, 7, 2, 6, 1], spread 6 <= 6

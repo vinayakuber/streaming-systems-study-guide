@@ -1,3 +1,25 @@
+what it exercises                        events          design crash  counter       wh  lag   dual    derv  cheaper
+counter-first, crash on the FIRST event       9   counter_first     0        5        0    0      1       0  derived
+counter-first, ordinary middle event          9   counter_first     4       23       17    0      9       7  derived
+counter-first, crash on the LAST event        9   counter_first     8       45       37    0     17      17      tie
+counter-first, no crash at all                9   counter_first  none       45       45    0     18      27     dual
+crash point past the end never fires          9   counter_first    99       45       45    0     18      27     dual
+warehouse-first, FIRST event (sign flip)      9 warehouse_first     0        0        5    0      1       0  derived
+warehouse-first, crash on the LAST event      9 warehouse_first     8       37       45    0     17      17      tie
+derived@3, crash before anything ran          9       derived@3     0        0        0    0      1       0  derived
+derived@3, middle event, lag 1                9       derived@3     4       15       17    1      9       7  derived
+derived@3, LAST event, lag 2 (the bound)      9       derived@3     8       24       37    2     17      17      tie
+derived@3, no crash -> caught up              9       derived@3  none       45       45    0     18      27     dual
+derived@1, rebuild every event, lag 0         9       derived@1     8       37       37    0     17      44     dual
+derived@20, interval > whole stream           9      derived@20  none        0       45    9     18       9  derived
+a ZERO-valued event: the pair AGREES         10   counter_first     4       17       17    0      9       7  derived
+one-event stream, crash on it                 1   counter_first     0        5        0    0      1       0  derived
+empty stream: nothing to split                0   counter_first     0        0        0    0      0       0      tie
+3,000 events, counter-first, midway        3000   counter_first  1500    10507    10500    0   3001  377250     dual
+3,000 events, derived@500, lag 200         3000     derived@500  1700    10500    11900  200   3401    4700     dual
+3,000 events, derived@500, no crash        3000     derived@500  none    21000    21000    0   6000   13500     dual
+all 19 examples agree with the prefix sums of their own stream
+
 ITEMS = 0:5  1:3  2:7  3:2  4:6  5:1  6:9  7:4  8:8   total 45
 the 10 totals the stream legitimately passes through: [0, 5, 8, 15, 17, 23, 24, 33, 37, 45]
 

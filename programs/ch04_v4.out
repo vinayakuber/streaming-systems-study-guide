@@ -1,3 +1,22 @@
+what it exercises                                 n  page  close   inc  pages  dbl  unpaged  paged after  sweep needs
+empty stream -> no incident, no page              0     2     47     0      0    0        0        never            0
+one firing, span 0 -> NOBODY is paged             1     2     47     1      0    0        1        never            1
+one firing, PAGE_AFTER 0 -> paged at once         1     0     47     1      1    0        0            1            1
+the same firing three times                       3     0     47     1      1    0        0            1            3
+a gap of exactly CLOSE_AFTER: one incident        2     0     47     1      1    0        0            1            2
+a gap of CLOSE_AFTER + 1: two incidents           2     0     47     2      2    0        0            1            2
+a span of exactly PAGE_AFTER: it pages            2     2     47     1      1    0        0            2            2
+a span one short of PAGE_AFTER: no page           2     3     47     1      0    0        1        never            2
+the chapter's nine, as the pager sees them        9     2     47     3      3    1        1            2            9
+the same nine, in time order                      9     2     47     3      2    0        1            2            9
+the wide close: nothing bridges                   9     2    120     2      1    0        1            2            9
+CLOSE_AFTER 0: every firing its own               9     0      0     9      9    0        0            1            9
+PAGE_AFTER 1000: it never alerts at all           9  1000     47     3      0    0        3        never            9
+the fitted pair (87, 0)                           9     0     87     3      3    0        0            1            9
+1,000 firings shuffled, paging at once         1000     0     47     1     52   51        0            1         1000
+1,000 shuffled, waiting 20 minutes             1000    20     47     1     34   33        0           28         1000
+all 16 examples agree with the retrospective sweep
+
 FIRINGS = [1, 3, 90, 130, 245, 260, 220, 50, 540]   (sorted: [1, 3, 50, 90, 130, 220, 245, 260, 540])
 CLOSE_AFTER = 47, PAGE_AFTER = 2
 

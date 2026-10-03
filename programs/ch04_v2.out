@@ -1,3 +1,27 @@
+what it exercises                                ops  acc                  busy view   busy    free  sweep     grid
+empty stream -> nothing held, whole day free       0    0                         []      0     600      0      600
+a single booking                                   1    1                 [(10, 20)]     10     590      1      600
+the day's FIRST minute                             1    1                   [(0, 1)]      1     599      1      600
+the day's LAST minute                              1    1               [(599, 600)]      1     599      1      600
+two disjoint bookings, both held                   2    2     [(10, 20), (100, 130)]     40     560      2      600
+back-to-back at 130: no clash, one block           2    2                [(90, 160)]     70     530      2      600
+one minute of overlap at 129: REJECTED             2    1                [(90, 130)]     40     560      1      600
+a zero-length hold occupies no minute              1    1                 [(50, 50)]      0     600      1      600
+a zero-length hold still blocks 40..60             2    1                 [(50, 50)]      0     600      1      600
+cancel splits the block the merge made             3    3               [(130, 160)]     30     570      1      600
+cancel a start nobody booked -> no answer          2    1                [(90, 130)]     40     560      1      600
+a booking running past the day's end               1    1               [(590, 700)]     10     590      1      600
+the whole day in one booking -> NO free gap        1    1                 [(0, 600)]    600       0      1      600
+the chapter's nine requests                        9    6                   5 blocks    190     410      6      600
+the nine, then the cancel at 90                   10    7                   5 blocks    150     450      5      600
+a 4-minute day, filled minute by minute            4    4                   [(0, 4)]      4       0      4        4
+three holds in a 2-minute day (grid wins)          3    3                   [(0, 2)]      2       0      3        2
+first and last minute of a 100,000 day             2    2  [(0, 1), (99999, 100000)]      2   99998      2   100000
+400 abutting bookings -> one block               400  400                 [(0, 800)]    800       0    400      800
+the same 400 in random request order             400  400                 [(0, 800)]    800       0    400      800
+all 400 requested twice -> half rejected         800  400                 [(0, 800)]    800       0    400      800
+all 21 examples agree with the per-minute grid
+
 REQUESTS (minutes from 09:00, half-open):
     1..31   ACCEPTED
     3..33   REJECTED  clashes with [(1, 31)]

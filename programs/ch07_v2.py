@@ -16,6 +16,13 @@ there a dropped accumulator UNDERSTATED a total, here a dropped visitor is recou
 OVERSTATES the distinct count.  The way out is to stop being exact: a sketch answers "how
 many distinct" in a fixed few kilobytes at any cardinality, with a small, measurable error.
 
+WORKED EXAMPLES: the EXAMPLES table below holds 13 input/output pairs -- the chapter's own
+nine views, both sides of the 295-hour silence the expiry turns on, a day-long allowance that
+saves nothing, an empty day, a single view, a thousand views from one visitor, both sides of
+the sketch's k-th slot, and two generated streams at 4,000 and 12,000 distinct visitors.
+Every row is ASSERTED against the exact set AND against the sketch, so the table cannot drift
+from the code: change an answer and this file stops running.
+
 Run it:  python3 programs/ch07_v2.py
 """
 import hashlib
@@ -32,6 +39,13 @@ TRUE_DISTINCT = 2
 DAY = 86_400           # the window the question names: distinct per DAY
 K = 256                # the sketch's size, in retained hash values
 INFINITY = float("inf")
+
+# Inputs for the examples table, not alternative versions of the problem: an empty day, one
+# view, and one visitor who will not stop clicking.  The generated streams the table also
+# needs are built just below `stream_of`, which is the function that makes them.
+EMPTY_DAY = []
+ONE_VIEW = [("a", 0)]
+ONE_VISITOR = [("solo", 0)] * 1_000
 
 
 def exact_distinct(views):
@@ -138,7 +152,86 @@ def stream_of(cardinality, repeats, seed=20260303):
     return views
 
 
+# More inputs for the examples table -- these need `stream_of`, so they are declared here
+# rather than with the constants above.  They are inputs, not alternative versions of the
+# problem: the two sides of the sketch's k-th slot, a mid-range day, and two generated days at
+# the scale that forces the question (the statement says tens of millions; 12,000 is as far as
+# a program meant to finish in seconds can honestly go, and the sketch's state is already flat
+# by then).
+UNDER_K = stream_of(K - 1, 3)        # 255 distinct: one short of the sketch's capacity
+AT_K = stream_of(K, 3)               # 256 distinct: exactly full
+MID_STREAM = stream_of(1_000, 2)
+BIG_STREAM = stream_of(4_000, 1)
+BIGGER_STREAM = stream_of(12_000, 1)
+
+# ------------------------------------------------------------------- WORKED EXAMPLES
+# (what it exercises, views, ttl, distinct, expiry's count, sketch estimate, visitors saved).
+# A ttl of None means no expiry is applied on that row -- `distinct_with_expiry` rescans the
+# live set on every view, which is quadratic, and running it on 12,000 visitors would cost
+# more than the whole program.  That cost is itself part of the objection to keeping the
+# visitors.  Every row is asserted by show_examples(), which is why the table is data and not
+# a comment: a comment can go stale silently, and this cannot.
+EXAMPLES = [
+    ("the chapter's 9 views, 2 visitors",    VIEWS,         None,     2,  None,     2, None),
+    ("ttl = 295, the longest silence",       VIEWS,          295,     2,     2,     2,    0),
+    ("ttl = 294, one hour tighter",          VIEWS,          294,     2,     3,     2,    0),
+    ("ttl = a whole day: saves nothing",     VIEWS,          DAY,     2,     2,     2,    0),
+    ("ttl = 0: saves 2, overstates to 9",    VIEWS,            0,     2,     9,     2,    2),
+    ("an empty day -> 0, not an error",      EMPTY_DAY,     None,     0,  None,     0, None),
+    ("a single view",                        ONE_VIEW,      None,     1,  None,     1, None),
+    ("1 visitor, 1,000 views",               ONE_VISITOR,   None,     1,  None,     1, None),
+    ("255 distinct: no estimate, the set",   UNDER_K,       None,   255,  None,   255, None),
+    ("256 distinct: estimator takes over",   AT_K,          None,   256,  None,   257, None),
+    ("1,000 distinct, mid-range",            MID_STREAM,    None, 1_000,  None,   983, None),
+    ("4,000 distinct (generated)",           BIG_STREAM,    None, 4_000,  None,  3_721, None),
+    ("12,000 distinct (generated)",          BIGGER_STREAM, None, 12_000, None, 11_544, None),
+]
+
+
+def show_examples():
+    """Print the examples table and assert every row, two ways.
+
+    Each row is checked against `exact_distinct` -- the brute-force set, which is the
+    reference answer and cannot be wrong -- and against the sketch, which must agree EXACTLY
+    below k and stay inside three of its own standard errors above it.  The two slot columns
+    are the costs, printed per row so the reader can see where the sketch wins: above k it
+    holds 256 slots against the exact set's thousands, and at or below k it holds the same
+    number the set does and buys nothing at all.  The `saved` column is the same story for the
+    expiry -- inside one day it saves zero visitors, every time.
+    """
+    se = K ** -0.5
+    print(f"{'what it exercises':36s} {'views':>7} {'ttl':>6} {'distinct':>9} {'estimate':>9} "
+          f"{'set slots':>10} {'sketch':>7} {'expiry':>7} {'saved':>6}")
+    for label, views, ttl, want, want_expiry, want_est, want_saved in EXAMPLES:
+        exact, exact_slots = exact_distinct(views)
+        est, sketch_slots = kmv_sketch(views)
+        assert exact == want, (label, exact, want)
+        assert est == want_est, (label, est, want_est)
+        if exact < K:
+            assert est == exact, (label, "below k the sketch IS the set", est, exact)
+            assert sketch_slots == exact_slots, (label, sketch_slots, exact_slots)
+        else:
+            assert sketch_slots == K, (label, sketch_slots)
+            assert abs(est - exact) / exact < 3 * se, (label, est, exact, se)
+        if ttl is None:
+            ttl_s, exp_s, sav_s = "-", "-", "-"
+        else:
+            got, _, _ = distinct_with_expiry(views, ttl)
+            end = max(t for _, t in views)
+            saved = max(held_at(views, INFINITY, t) - held_at(views, ttl, t)
+                        for t in range(end + 1))
+            assert got == want_expiry, (label, got, want_expiry)
+            assert saved == want_saved, (label, saved, want_saved)
+            assert got >= exact, (label, "the expiry can only overstate", got, exact)
+            ttl_s, exp_s, sav_s = str(ttl), str(got), str(saved)
+        print(f"{label:36s} {len(views):>7,} {ttl_s:>6} {exact:>9,} {est:>9,} "
+              f"{exact_slots:>10,} {sketch_slots:>7,} {exp_s:>7} {sav_s:>6}")
+    print(f"all {len(EXAMPLES)} examples agree with the exact set")
+    print()
+
+
 def main():
+    show_examples()
     print("VIEWS =", "  ".join(f"{v}@{t}" for v, t in VIEWS), f"   ({len(VIEWS)} views)")
     distinct, slots = exact_distinct(VIEWS)
     views_count = count_the_views(VIEWS)

@@ -1,3 +1,27 @@
+what it exercises                           items             ordering crash   key  duplicated        lost  parcel  charge better for
+effect-first, crash on the FIRST item           9 effect_then_position     0 False         [0]          []       1      50     parcel
+effect-first, the traced middle item            9 effect_then_position     3 False         [3]          []       1      50     parcel
+effect-first, crash on the LAST item            9 effect_then_position     8 False         [8]          []       1      50     parcel
+effect-first, no crash at all                   9 effect_then_position  none False          []          []       0       0     either
+crash point past the end never fires            9 effect_then_position    99 False          []          []       0       0     either
+position-first, FIRST item (mirrored)           9 position_then_effect     0 False          []         [0]      20       2     charge
+position-first, crash on the LAST item          9 position_then_effect     8 False          []         [8]      20       2     charge
+position-first, no crash at all                 9 position_then_effect  none False          []          []       0       0     either
+send-then-remember == effect-first              9     send_then_dedupe     3 False         [3]          []       1      50     parcel
+remember-then-send == position-first            9     dedupe_then_send     3 False          []         [3]      20       2     charge
+effect-first, crashed at EVERY item             9 effect_then_position   all False     9 items          []       9     450     parcel
+position-first, crashed at EVERY item           9 position_then_effect   all False          []     9 items     180      18     charge
+far-end key rescues effect-first                9 effect_then_position     3  True          []          []       0       0     either
+far-end key does NOT rescue position            9 position_then_effect     3  True          []         [3]      20       2     charge
+far-end key, crashed at EVERY item              9 effect_then_position   all  True          []          []       0       0     either
+empty queue: nothing to send                    0 effect_then_position     0 False          []          []       0       0     either
+one item, effect-first, crash on it             1 effect_then_position     0 False         [0]          []       1      50     parcel
+one item, position-first, crash on it           1 position_then_effect     0 False          []         [0]      20       2     charge
+20,000 items, effect-first, midway          20000 effect_then_position 10000 False     [10000]          []       1      50     parcel
+20,000 items, position-first, midway        20000 position_then_effect 10000 False          []     [10000]      20       2     charge
+20,000 items, far-end key, midway           20000 effect_then_position 10000  True          []          []       0       0     either
+all 21 examples agree with the send sequence their ordering forces
+
 ITEMS = [0, 1, 2, 3, 4, 5, 6, 7, 8], values [5, 3, 7, 2, 6, 1, 9, 4, 8]
   with no crash, all four orderings send exactly [0, 1, 2, 3, 4, 5, 6, 7, 8]
 
