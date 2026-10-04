@@ -2,12 +2,50 @@
 """Variation 3 -- the audit log that was compacted (looks like compliance).
 Standalone and runnable.
 
-  Every change to a customer record is written to a log as an entry carrying the record's
-  new value and the date it took effect.  A regulator asks what one record HELD on a date
-  two years ago.
+  WHAT THE WORDS MEAN, before any of them is used:
+    record    -- one customer's row, named by a key: 'a' and 'b' here.
+    entry     -- one line of the log: (record, new value, the day it took effect).
+    day       -- days are numbered from 0, and day 0 is 2024-01-01.  Day 300 is therefore
+                 2024-10-27 and "today" is day 1000.
+    held      -- what a record held ON a given day means the value of its latest entry whose
+                 effective day is <= that day.  The effective day counts as already in
+                 force, so an entry effective on day 190 is what the record held on day 190.
+    UNANSWERABLE -- the answer when no entry survives that could say.  It is a refusal, not
+                 a value: the system knows it cannot answer rather than guessing.
+    compaction -- the retention job: for everything older than the day it ran (day 640
+                 here), keep only the LAST entry per record and delete the superseded ones.
+                 It leaves the record's present value intact and its history gone.
 
-  The log was compacted last year: for everything older than that day, one entry per record
-  was kept and the superseded ones deleted.
+  Every change to a customer record is logged: 'a' becomes 5 on day 40, 8 on day 190, 10 on
+  day 420, 16 on day 500, 24 on day 900; 'b' becomes 7 on day 260, 8 on day 560, 17 on day
+  700, 21 on day 760.  A regulator asks what record 'a' held on day 300 -- and the log was
+  compacted on day 640, which left only five of those nine entries.
+
+  GIVEN A RECORD AND A DAY, WHAT VALUE DID THAT RECORD HOLD ON THAT DAY?
+
+  Worked, on the nine entries above -- which between them define record 'a' from day 40 and
+  record 'b' from day 260, up to today at day 1000:
+    'a', day 39   -> UNANSWERABLE   the day before 'a' first existed.  A refusal, NOT 5 --
+                                    5 only became true the next day
+    'a', day 40   -> 5              its first effective day, which counts as in force
+    'a', day 189  -> 5              the day before the next change: still 5
+    'a', day 190  -> 8              the effective day itself, so the other side of that edge
+    'a', day 300  -> 8              the regulator's own day, answered from the full log
+    'a', day 1000 -> 24             today, the last day there is anything to ask about
+    'zz', day 1000 -> UNANSWERABLE  a record the log has never heard of: off the end in the
+                                    other direction.  A refusal, NOT the value of some
+                                    other record and NOT a default
+  And after compaction -- the same questions, the five surviving entries:
+    'a', day 300  -> UNANSWERABLE   the entries that could answer were deleted on day 640
+    'a', day 499  -> UNANSWERABLE   the day before 'a's surviving edge
+    'a', day 500  -> 16             its surviving edge: from here on it can still answer
+  And on a 5,000-change audit log over 50 records and ten years:
+    'r0',  day 1825 -> 2500         mid-history, five years in
+    'r49', day 3650 -> 4999         the last day of the log
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted twice --
+  against a maximum over the surviving entries and, wherever it is affordable, against a
+  day-by-day replay -- so these answers cannot drift from what the program returns.
 
 The answer is that the question cannot be answered, and the valuable part is that it was
 decided a year ago by somebody reclaiming disk.  The framing that helps separates two logs

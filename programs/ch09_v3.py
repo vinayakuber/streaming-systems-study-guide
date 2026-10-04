@@ -1,9 +1,60 @@
 #!/usr/bin/env python3
 """Variation 3 -- the attributed click (looks like advertising). Standalone and runnable.
 
-  Impressions and clicks arrive on two streams.  Match each click to the impression that
-  preceded it by at most W seconds, and to the NEAREST such impression if several qualify.  An
-  impression may be credited with at most one click.
+  WHAT THE WORDS MEAN, before any of them is used:
+    impression -- an ad being shown, written (shown_at, arrived_at): the second it was shown
+                  to somebody, and the second the matcher actually received the record.
+                  Those differ, and the difference is the whole problem.
+    click      -- a second at which somebody clicked.  Clicks here are punctual.
+    lateness   -- arrived_at minus shown_at for an impression.  Measured, not assumed: the
+                  largest here is 85 seconds, for the impression shown at 245 that arrives
+                  at 330.
+    W          -- the attribution window, 60 seconds: a click may only be credited to an
+                  impression shown at most W seconds BEFORE it.  Exactly W before is inside;
+                  W + 1 is outside; an impression shown after the click never qualifies.
+    nearest    -- when several impressions qualify, the click goes to the latest of them.
+    one-to-one -- an impression may be credited with at most ONE click, so a second click
+                  competing for the same impression goes uncredited.
+    wait       -- how long the matcher holds a click before answering.  0 means answer
+                  immediately; "offline" means wait until every record is in hand.  This is
+                  NOT W: W is a business rule in seconds, the wait is a lateness allowance
+                  in seconds, and the two numbers are different here (60 against 85).
+    the answer -- how many clicks end up attributed.  A click credited to nobody is
+                  UNATTRIBUTED, which is an answer and not a failure.
+
+  Impressions and clicks arrive on two streams.  The impressions were shown at 1, 3, 130,
+  245 and 540, and the one shown at 245 does not reach the matcher until 330.  The clicks
+  come at 50, 90, 220, 260 and 265 -- and the last two both want the same impression.
+
+  GIVEN W AND A WAIT, HOW MANY CLICKS GET ATTRIBUTED?
+
+  Worked, on one punctual impression shown at second 100, and then on the streams above:
+    click at 100, wait 0 -> 1 attributed    the click's own second counts as "preceded by 0"
+    click at 160, wait 0 -> 1 attributed    exactly W = 60 seconds later: inside the window
+    click at 161, wait 0 -> 0 attributed    one second more, off the end of the window.  The
+                                            click is credited to NOBODY, not to the
+                                            impression 61 seconds back -- crediting the
+                                            nearest one would invoice an advertiser for a
+                                            click their ad did not cause
+    click at 99,  wait 0 -> 0 attributed    the impression was shown AFTER the click
+    two clicks at 120, wait 0 -> 1 attributed   one-to-one: the second click gets nothing
+    no impressions at all, one click -> 0 attributed    nothing to credit it to
+    no clicks at all, one impression -> 0 attributed    an empty answer, not an error
+    the five streams above, wait 0   -> 1 of 2   answering immediately loses an attribution
+    the five streams above, wait 60  -> 1 of 2   waiting W is not enough: W is the wrong
+                                            number to wait, and it looks right
+    the five streams above, wait 85  -> 2 of 2   waiting the MEASURED lateness recovers it
+    the five streams above, offline  -> 2 of 2   and waiting forever adds nothing more
+  And on 300 impressions and 300 clicks:
+    punctual, wait 0        -> 300 attributed   nothing is late, so no wait is needed
+    late by 120, wait 0     -> 0 attributed     every record arrives after its click has
+                                            already been answered
+    late by 120, wait 120   -> 300 attributed   the same data, the same W, one number changed
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted against
+  the offline matcher wherever the wait is long enough to equal it, and against the window
+  and one-to-one rules on every credited impression, so these answers cannot drift from what
+  the program returns.
 
 Both halves of the chapter's problem are here -- two streams, and a bound on what may be
 forgotten -- and a third thing is added: the match is asymmetric and one-to-one, so "nearest"

@@ -1,9 +1,45 @@
 #!/usr/bin/env python3
 """Variation 3 — the time-based window (looks like monitoring). Standalone and runnable.
 
-  A dashboard shows the average latency over THE LAST 60 SECONDS, not the last W samples.
-  Probes report whenever they feel like it, so arrivals are irregular: three may land in
-  the same second and then nothing for four minutes.
+  WHAT THE WORDS MEAN, before any of them is used:
+    sample  -- one latency measurement a probe reported, written (t, v): t is the second it
+               was taken, counted from 0, and v is the latency in milliseconds.
+    now     -- the instant you are asking about, in the same seconds.  It is a CLOCK
+               reading, not an arrival: you may ask at a second when nothing was reported.
+    window  -- the samples taken in the last 60 seconds, which means the half-open range
+               (now - 60, now]: a sample taken AT `now` is in, a sample taken exactly 60
+               seconds ago is out.
+    average -- the mean of the v's of the samples in that window.  A window holding no
+               samples has no average at all, which is not the same as an average of 0.
+
+  A dashboard is fed nine samples: (1, 5), (3, 3), (50, 7), (90, 2), (130, 6), (220, 1),
+  (245, 9), (260, 4), (540, 8) -- so one at second 1 measuring 5ms, and so on.  Probes
+  report whenever they feel like it, so the gaps are uneven: two land within two seconds of
+  each other, then nothing arrives for four and a half minutes.
+
+  GIVEN AN INSTANT `now`, WHAT IS THE AVERAGE LATENCY OVER THE PRECEDING 60 SECONDS?
+
+  Worked, on the nine samples above -- which between them run from second 1 to second 540:
+    now = 0    -> None     the earliest instant: nothing has been reported yet
+    now = 3    -> 4.0      (1,5) and (3,3) are both inside (-57, 3], so (5 + 3) / 2
+    now = 191  -> None     an instant with NO arrival, and the last sample (130, 6) has just
+                           aged out at 190.  The answer is "no average", not 6.0 and not 0.0
+    now = 540  -> 8.0      the last arrival of all; only (540, 8) is still in the window
+    now = 10000 -> None    far past the end.  "Undefined", NOT the last value seen -- a
+                           dashboard that shows 8.0 forever is reporting a latency nobody
+                           measured in the last two and a half hours
+  The two sides of the window EDGE cannot be shown on those nine: no two of them are
+  exactly 60 seconds apart, so the inclusive end is invisible there.  On a two-sample
+  stream [(0, 10), (60, 20)], which is in the table for exactly this reason:
+    now = 59   -> 10.0     (0,10) is 59 seconds old, so still inside (-1, 59]
+    now = 60   -> 20.0     (0,10) is now exactly 60 old, so OUT; only (60,20) remains
+  And on a generated 20,000-sample stream, gaps of 0-2 seconds:
+    now = 10000 -> 21.523076923076925   the mean of the 65 samples inside that minute
+    now = 20100 -> None                 past the last sample, so the window is empty again
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted twice --
+  against the rescan and against the timer-driven scan -- so these answers cannot drift
+  from what the program returns.
 
 Two things break.  The count stops being fixed, so "exactly one leaves when one arrives"
 is false in both directions -- zero, one or many may expire -- and the divisor therefore

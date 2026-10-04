@@ -50,10 +50,58 @@ This is **the cache that must not go stale** solved on its own: a complete file,
 """Variation 2 -- the cache that must not go stale (looks like web infrastructure).
 Standalone and runnable.
 
-  A service keeps an in-memory copy of a table.  Every change to that table is written
-  to a log, one entry per change, each saying what a key BECAME.  Keep the copy current.
+  WHAT THE WORDS MEAN, before any of them is used:
+    entry     -- one line of the log, a pair (key, value) saying what that key BECAME.  Not
+                 what changed by: the value replaces whatever the key held.
+    version   -- how many entries have been written, counted from 0.  "Version 7" is the
+                 state after the first 7 entries, so a nine-entry log has versions 0..9.
+    table     -- the in-memory copy: the result of folding the entries in order.  A key the
+                 log never mentions is NOT IN THE TABLE, which is a different thing from a
+                 key whose value is None.
+    tombstone -- an entry whose value is None.  It means "this key is gone" and it is a
+                 recorded fact, so folding it REMOVES the key.
+    snapshot  -- a compacted log: the last entry per key as of some version.  Folding it
+                 gives the same table as folding every entry up to that version, which is
+                 what makes it a legal thing to start from.
+    subscribe from v -- where the service begins reading the live log after loading the
+                 snapshot.  Choosing v wrongly is the whole problem.
 
-  The service restarts.  It must rebuild the copy and then follow live changes again.
+  A service keeps an in-memory copy of a table.  Every change is written to a log: a=5,
+  a=8, b=7, a=10, a=16, b=8, b=17, b=21, a=24 -- nine entries, two keys.  The snapshot on
+  disk was taken at version 7, so it holds a=16 and b=17: two entries standing in for seven
+  changes.  The service restarts, loads that snapshot, and while it is coming up a live
+  change a=30 arrives.  It must end up with the table a cold replay of everything would
+  have produced: a=30, b=21.
+
+  GIVEN A SNAPSHOT VERSION AND A SUBSCRIBE POINT, WHAT TABLE DOES THE SERVICE END UP WITH?
+
+  Worked, on the nine entries above -- which between them define versions 0..9 only:
+    snapshot v0, subscribe from 0 -> a=30 b=21   a cold start: no snapshot, fold everything
+    snapshot v7, subscribe from 7 -> a=30 b=21   the correct handover, and the cheap one
+    snapshot v7, subscribe from 6 -> a=30 b=21   one entry of OVERLAP: b=17 is applied
+                                                 twice, which is harmless because assigning
+                                                 a value twice is the same as once
+    snapshot v7, subscribe from 8 -> a=30 b=17   one entry of GAP, the other side of that
+                                                 boundary: b=21 is never seen by anybody and
+                                                 the copy answers reads with 17 forever
+    snapshot v7, subscribe from 9 -> a=30 b=17   subscribing from "now", which is the same
+                                                 bug written more plausibly
+    an EMPTY log, subscribe from 0 -> the empty table   nothing was ever written
+    ask that table for key "c"     -> NOT PRESENT.  The log never mentions c, so there is
+                                                 no value to give.  "Absent" is the answer,
+                                                 NOT None -- None is the tombstone, which
+                                                 means "c was deleted", a claim the log
+                                                 never made
+  And on a 20,000-change log over 50 keys:
+    snapshot v20000, subscribe from 20000 -> 50 keys, k0=19950   the correct handover again,
+                                                 reading 50 entries instead of 20,000
+    snapshot v19950, subscribe from 20000 -> 50 keys, k0=19900   a 50-entry gap: every key
+                                                 is exactly one change stale, and nothing
+                                                 ever says so
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted against
+  a cold start, so these answers cannot drift from what the program returns.  (The key-"c"
+  line is read straight off the table those rows produce: it holds a and b and nothing else.)
 
 The question sounds like "apply changes as they arrive" and the loop is trivial.  The
 operational content is the START-UP: the copy has to be folded from somewhere, and a
@@ -442,12 +490,50 @@ This is **the audit log that was compacted** solved on its own: a complete file,
 """Variation 3 -- the audit log that was compacted (looks like compliance).
 Standalone and runnable.
 
-  Every change to a customer record is written to a log as an entry carrying the record's
-  new value and the date it took effect.  A regulator asks what one record HELD on a date
-  two years ago.
+  WHAT THE WORDS MEAN, before any of them is used:
+    record    -- one customer's row, named by a key: 'a' and 'b' here.
+    entry     -- one line of the log: (record, new value, the day it took effect).
+    day       -- days are numbered from 0, and day 0 is 2024-01-01.  Day 300 is therefore
+                 2024-10-27 and "today" is day 1000.
+    held      -- what a record held ON a given day means the value of its latest entry whose
+                 effective day is <= that day.  The effective day counts as already in
+                 force, so an entry effective on day 190 is what the record held on day 190.
+    UNANSWERABLE -- the answer when no entry survives that could say.  It is a refusal, not
+                 a value: the system knows it cannot answer rather than guessing.
+    compaction -- the retention job: for everything older than the day it ran (day 640
+                 here), keep only the LAST entry per record and delete the superseded ones.
+                 It leaves the record's present value intact and its history gone.
 
-  The log was compacted last year: for everything older than that day, one entry per record
-  was kept and the superseded ones deleted.
+  Every change to a customer record is logged: 'a' becomes 5 on day 40, 8 on day 190, 10 on
+  day 420, 16 on day 500, 24 on day 900; 'b' becomes 7 on day 260, 8 on day 560, 17 on day
+  700, 21 on day 760.  A regulator asks what record 'a' held on day 300 -- and the log was
+  compacted on day 640, which left only five of those nine entries.
+
+  GIVEN A RECORD AND A DAY, WHAT VALUE DID THAT RECORD HOLD ON THAT DAY?
+
+  Worked, on the nine entries above -- which between them define record 'a' from day 40 and
+  record 'b' from day 260, up to today at day 1000:
+    'a', day 39   -> UNANSWERABLE   the day before 'a' first existed.  A refusal, NOT 5 --
+                                    5 only became true the next day
+    'a', day 40   -> 5              its first effective day, which counts as in force
+    'a', day 189  -> 5              the day before the next change: still 5
+    'a', day 190  -> 8              the effective day itself, so the other side of that edge
+    'a', day 300  -> 8              the regulator's own day, answered from the full log
+    'a', day 1000 -> 24             today, the last day there is anything to ask about
+    'zz', day 1000 -> UNANSWERABLE  a record the log has never heard of: off the end in the
+                                    other direction.  A refusal, NOT the value of some
+                                    other record and NOT a default
+  And after compaction -- the same questions, the five surviving entries:
+    'a', day 300  -> UNANSWERABLE   the entries that could answer were deleted on day 640
+    'a', day 499  -> UNANSWERABLE   the day before 'a's surviving edge
+    'a', day 500  -> 16             its surviving edge: from here on it can still answer
+  And on a 5,000-change audit log over 50 records and ten years:
+    'r0',  day 1825 -> 2500         mid-history, five years in
+    'r49', day 3650 -> 4999         the last day of the log
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted twice --
+  against a maximum over the surviving entries and, wherever it is affordable, against a
+  day-by-day replay -- so these answers cannot drift from what the program returns.
 
 The answer is that the question cannot be answered, and the valuable part is that it was
 decided a year ago by somebody reclaiming disk.  The framing that helps separates two logs
@@ -892,9 +978,55 @@ This is **the counter changelog** solved on its own: a complete file, every help
 #!/usr/bin/env python3
 """Variation 4 -- the counter changelog (looks like metrics). Standalone and runnable.
 
-  A service ships counters, and each entry says what CHANGED -- "errors +5" -- rather than
-  what the counter became.  Fold the entries into the current counters.  Then: the log is
-  too long to keep.  Compact it.
+  WHAT THE WORDS MEAN, before any of them is used:
+    counter   -- a named number: "errors", "hits".  It starts at nothing, not at 0 -- a
+                 counter no entry has ever mentioned is ABSENT, which is not the same as a
+                 counter whose value is 0.
+    entry     -- one line of the log, written "errors +5".  It says what CHANGED, not what
+                 the counter became, so every entry contributes and none supersedes another.
+    fold      -- apply the entries in order to get the current counters.  For a delta log
+                 that means ADDING them up; for the chapter's log of states it meant
+                 assigning.  Order does not matter to a sum, which is why the same log
+                 reversed gives the same totals.
+    tombstone -- an entry whose value is None.  It means "this counter is gone", so folding
+                 it removes the counter entirely rather than setting it to 0.
+    compaction -- dropping entries you believe you no longer need.  On a log of STATES,
+                 keeping the last entry per key is safe.  That is the thing to test here.
+
+  A service ships nine entries: errors +5, errors +3, hits +7, errors +2, errors +6, hits
+  +1, hits +9, hits +4, errors +8.  Fold them and you have errors=24 and hits=21.  Then the
+  log gets too long to keep, and somebody compacts it the way the chapter's log was
+  compacted -- keeping the last entry per counter, which here is errors +8 and hits +4.
+
+  GIVEN A DELTA LOG, WHAT ARE THE CURRENT COUNTERS?
+
+  Worked, on logs of the entries above:
+    errors +5                       -> errors=5         one entry, the smallest real log
+    the nine entries above          -> errors=24, hits=21    5+3+2+6+8 and 7+1+9+4
+    the same nine REVERSED          -> errors=24, hits=21    addition does not care about
+                                       order, so the fold is unchanged.  Compaction is what
+                                       cares: keeping the last entry per counter now keeps
+                                       different entries and gets a different wrong answer
+    errors +5, errors -2            -> errors=3         deltas may be negative
+    drops +0, drops +5              -> drops=5          and here keeping only the LAST entry
+                                       happens to be exactly right, because everything
+                                       before it summed to zero.  Luck, not correctness
+    retries +5, retries -5, errors +1 -> retries=0, errors=1    a counter at 0 that EXISTS
+    the nine, then hits DELETED     -> errors=24        and "hits" is absent, not 0
+    a log that is ONLY a delete     -> no counters at all
+    an EMPTY log                    -> no counters at all
+    ask the result for "disk"       -> NOT PRESENT.  No entry ever mentioned it, so there is
+                                       nothing to report.  The answer is "absent", NOT 0 --
+                                       0 is a measurement and this is the absence of one
+  And on a 20,000-entry log over 50 counters:
+    increments of 1, 2, 3 cycling   -> 50 counters, m0=799
+    increments cycling -3..+3       -> 50 counters, m0=-3, and here the wrong compaction is
+                                       EXACT: each counter's earlier increments cancel, so
+                                       its last one equals its total
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted three
+  ways -- against a per-counter reference sum and against both safe compactions -- so these
+  answers cannot drift from what the program returns.
 
 The fold needs addition where the chapter's needed assignment, which still works and is
 barely a change.  Compaction BREAKS: you cannot keep "the last +5" and drop the earlier

@@ -2,9 +2,56 @@
 """Variation 2 — the calendar that will not double-book (looks like scheduling). Standalone
 and runnable.
 
-  Meetings are booked and cancelled continuously.  REJECT any booking that overlaps one
-  already held, and report the free gaps in the day.  A cancellation names the meeting -- in
-  practice "cancel my 10:30" -- not a span.
+  WHAT THE WORDS MEAN, before any of them is used:
+    minute  -- the unit everything is counted in.  Minute 0 is 09:00 and the day runs to
+               minute 600, which is 19:00, so the bookable minutes are 0..599.
+    booking -- a request for the span [start, end), HALF-OPEN: it occupies the start minute
+               and NOT the end minute.  So 90..130 and 130..160 do not clash -- that is the
+               only convention a human would accept for back-to-back meetings.
+    clash   -- two bookings clash when they share at least one minute.  Touching at an
+               endpoint is not sharing a minute.
+    block   -- what the calendar SHOWS as busy: adjacent and touching bookings merged into
+               one span, so 90..130 and 130..160 are displayed as the single block 90..160.
+    free gap -- the complement of the blocks inside 0..600: the spans nobody has booked.
+    cancel  -- a cancellation names a meeting by its START minute ("cancel my 10:30"), not
+               by a span.  It cannot name part of a meeting and it cannot name a block.
+
+  Nine booking requests arrive in the order people send them, not in time order:
+  1..31, 3..33, 90..130, 130..160, 245..275, 260..290, 220..250, 50..80, 540..570.
+  Each one must be accepted or rejected as it arrives, and then the day's busy blocks and
+  free gaps reported.  Later, somebody cancels their 90.
+
+  GIVEN A STREAM OF BOOKINGS AND CANCELLATIONS, WHICH ARE ACCEPTED, AND WHAT IS BUSY?
+
+  Worked, on a 600-minute day -- which between them define only minutes 0..599:
+    book 0..1                      -> accepted; busy [(0, 1)]       the day's first minute
+    book 90..130, then book 130..160 -> both accepted; busy [(90, 160)]   they touch at 130
+                                       and so do not clash; the two are DISPLAYED as one
+                                       block, which is why a cancel can no longer be served
+                                       from the displayed state
+    book 90..130, then book 129..160 -> the second is REJECTED; busy [(90, 130)]   one
+                                       single minute of overlap, the other side of that edge
+    book 599..600                  -> accepted; busy [(599, 600)]   the day's last minute
+    book 590..700                  -> accepted; busy [(590, 700)]   a booking that runs past
+                                       19:00 is held in full, not silently clipped to 600
+    book 90..130, then cancel 91   -> the cancel does NOTHING; busy still [(90, 130)]
+                                       no meeting starts at 91, so there is nothing to
+                                       cancel.  The answer is "no such meeting", NOT the
+                                       nearest one -- cancelling the 90 would delete a
+                                       booking nobody asked to cancel
+    the nine requests above        -> 6 accepted; busy [(1, 31), (50, 80), (90, 160),
+                                       (245, 275), (540, 570)], so 190 minutes busy and 410
+                                       free.  3 of the 9 clashed with something already held
+    the nine, then cancel 90       -> 7 operations accepted; busy [(1, 31), (50, 80),
+                                       (130, 160), (245, 275), (540, 570)] -- the merged
+                                       90..160 block has been SPLIT, which is the hard part
+  And on an 800-minute day booked 400 times:
+    400 abutting bookings 0..2, 2..4, ... -> all 400 accepted; busy [(0, 800)], one block
+    the same 400 requested a second time  -> still 400 accepted; the repeats all clash
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted twice --
+  against its expected answer and against a per-minute grid of the whole day -- so these
+  answers cannot drift from what the program returns.
 
 Insertion is the chapter's `touching` with the gap set to zero, and the new operation is the
 hard one: CANCELLATION SPLITS A RUN, which nothing in the chapter can do.  Merging is easy

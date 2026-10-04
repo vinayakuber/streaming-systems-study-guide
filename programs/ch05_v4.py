@@ -2,9 +2,59 @@
 """Variation 4 — the retry that must not re-send (looks like notifications). Standalone and
 runnable.
 
-  A worker reads items from a queue and sends one push notification per item.  A crash must
-  not send it twice.  The push service has NO transaction and NO idempotency key, and a person
-  reads the notification, so a duplicate is not harmless.
+  WHAT THE WORDS MEAN, before any of them is used:
+    item       -- one entry in the queue, needing one push notification.  Items are numbered
+                  0, 1, 2, ... in queue order, nine of them here.
+    send       -- hand the notification to the push service.  It cannot be undone, it cannot
+                  be made invisible, and a PERSON reads it.
+    position   -- the worker's record of how far it has got, so a restart knows where to
+                  resume.  Writing it and sending are two separate steps.
+    ordering   -- which of those two steps goes first.  "Effect first" sends and then records
+                  the position; "position first" records and then sends.  There is no third
+                  option and no transaction to put them in.
+    crash at k -- the worker is killed between its two steps for item k, then restarted from
+                  the position it had recorded.  "No crash" means it ran to the end.
+    duplicate  -- an item whose notification a person received TWICE.
+    loss       -- an item whose notification was never sent at all.
+    the answer -- always a pair: (which items were duplicated, which items were lost).
+    far-end key -- an idempotency key the push service itself honours, so a second send of
+                  the same item is swallowed.  The statement says there is none; the table
+                  asks what changes if there were.
+
+  A worker reads nine items off a queue and sends one push notification per item.  A crash
+  must not send any of them twice.  The push service offers NO transaction and NO idempotency
+  key, and a person reads the notification, so a duplicate is not harmless either.
+
+  GIVEN A CRASH POINT AND AN ORDERING, WHICH ITEMS ARE DUPLICATED AND WHICH ARE LOST?
+
+  Worked, as (duplicated, lost) on the nine items above -- which between them define crash
+  points 0..8 only:
+    effect first, crash at 0  -> ([0], [])   the earliest crash: item 0 was sent, the
+                                             position was not written, so the restart sends
+                                             it again
+    effect first, crash at 3  -> ([3], [])   an ordinary middle crash, same shape
+    effect first, crash at 8  -> ([8], [])   the last item there is, same shape again
+    effect first, no crash    -> ([], [])    nothing duplicated, nothing lost
+    effect first, crash at 99 -> ([], [])    off the end: there is no item 99, so the kill
+                                             never fires.  The honest answer is the
+                                             uninterrupted run, NOT the worst case -- a
+                                             crash that cannot happen does nothing
+    position first, crash at 0 -> ([], [0])  the SAME crash, the other ordering: the failure
+                                             mirrors exactly, from a duplicate to a loss
+    position first, crash at 8 -> ([], [8])  and it mirrors at the last item too
+    effect first, crash at 3, far-end key  -> ([], [])    the key rescues this ordering
+    position first, crash at 3, far-end key -> ([], [3])  and does NOT rescue the other one:
+                                             a notification that was never sent cannot be
+                                             de-duplicated by anybody
+    an EMPTY queue, crash at 0 -> ([], [])   no items, so nothing to send and nothing to
+                                             duplicate -- not an error
+  And on a 20,000-item queue killed at item 10,000:
+    effect first   -> ([10000], [])   exactly one person told twice
+    position first -> ([], [10000])   exactly one person never told
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted twice --
+  against the program and against a closed form for the send sequence that ordering forces --
+  so these answers cannot drift from what the program returns.
 
 Every tool the chapter had is gone: no transaction, no idempotency at the far end, and an
 effect that cannot be made invisible.  So the question is not how to avoid the choice but WHICH

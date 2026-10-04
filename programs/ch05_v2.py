@@ -1,9 +1,56 @@
 #!/usr/bin/env python3
 """Variation 2 — the file that is half uploaded (looks like backups). Standalone and runnable.
 
-  A nightly job uploads a large file to object storage and then records that the backup
-  succeeded.  It is killed partway through the upload.  No restore may ever read a partial
-  file, and no record may ever claim a backup that is not there.
+  WHAT THE WORDS MEAN, before any of them is used:
+    chunk      -- one piece of the file, uploaded in one write.  Chunks are numbered 0, 1,
+                  2, ... in upload order, so "chunk 0" is the first bytes to leave.
+    crash at k -- the job is killed just BEFORE it uploads chunk k, so chunks 0..k-1 are up
+                  and k..last are not.  "crash at 0" means it died having written nothing;
+                  "no crash" means it ran to the end.
+    record     -- the separate note, in a different system, saying "the backup succeeded".
+                  A restore trusts it.
+    visible    -- what a restore would actually read afterwards.  Three outcomes only:
+                  ABSENT (no file at all), a PARTIAL file (some leading bytes), or the
+                  COMPLETE file.  A partial file is the one outcome that must never happen.
+    staging name -- an upload can be written under a temporary name and RENAMED at the end.
+                  Nothing ever reads the temporary name, which is what makes it useful.
+
+  A nightly job uploads a file in nine chunks -- 'aaaaa', 'bbb', 'ccccccc', 'dd', 'eeeeee',
+  'f', 'ggggggggg', 'hhhh', 'iiiiiiii', 45 bytes finished -- and then records that the
+  backup succeeded.  It is killed partway through.  No restore may ever read a partial file,
+  and no record may ever claim a backup that is not there.
+
+  GIVEN A CRASH POINT AND A WRITE ORDERING, WHAT WOULD A RESTORE READ AFTERWARDS?
+
+  Worked, on the nine chunks above -- which between them define crash points 0..9 only:
+    rename, no crash          -> COMPLETE    all 45 bytes, and the record agrees
+    rename, crash at 0        -> ABSENT      the earliest crash: nothing was written
+    rename, crash at 1        -> ABSENT      5 bytes are in the staging slot, and a restore
+                                             still sees nothing, because nothing reads it
+    rename, crash at 8        -> ABSENT      killed before the LAST chunk, 37 of 45 bytes up
+    rename, crash at 9        -> ABSENT      the other side of the commit edge: every byte
+                                             is uploaded and the rename has not run, so the
+                                             backup does not exist.  Losing it is correct;
+                                             showing 45 unrenamed bytes would not be
+    rename, crash at 16       -> COMPLETE    off the end: there is no chunk 16, so the kill
+                                             never fires.  The honest answer is the
+                                             uninterrupted run, NOT the nearest crash's
+                                             outcome -- a crash that cannot happen does
+                                             nothing at all
+    upload direct, crash at 1 -> PARTIAL, 5 bytes   'aaaaa' under the real name: exactly the
+                                             outcome the statement forbids
+    upload direct, crash at 9 -> COMPLETE    the bytes are all there and the record is unset,
+                                             so a backup exists that nothing knows about
+    a ZERO-chunk backup, rename -> an EMPTY file   zero bytes, and it EXISTS: the rename
+                                             still runs, so a restore finds a real file
+    a ZERO-chunk backup, direct -> ABSENT    nothing was ever written, so there is no file
+  And on a generated 5,000-chunk file:
+    rename, no crash          -> COMPLETE    19,995 bytes
+    rename, crash at 2500     -> ABSENT      half the file staged, and a restore sees none
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted twice --
+  against the program and against an independent formula for the same answer -- so these
+  answers cannot drift from what the program returns.
 
 The same two writes, and the chapter's transaction is unavailable because the file store and
 the record live in different systems.  What makes it tractable is a property the queue problem

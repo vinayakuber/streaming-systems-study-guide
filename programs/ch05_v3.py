@@ -1,8 +1,58 @@
 #!/usr/bin/env python3
 """Variation 3 — the counter in two places (looks like analytics). Standalone and runnable.
 
-  Every event increments a counter in a fast store, for the live dashboard, and appends a row
-  to a warehouse, for the monthly report.  BOTH MUST AGREE.
+  WHAT THE WORDS MEAN, before any of them is used:
+    event      -- one thing that happened, carrying a number to count.  Events are numbered
+                  0, 1, 2, ... in arrival order; here their values are 5, 3, 7, 2, 6, 1, 9,
+                  4, 8, which add up to 45.
+    counter    -- a single running total in a fast store, read by the live dashboard.
+    warehouse  -- an append-only table of rows, one per event, read by the monthly report.
+                  "The warehouse total" means the sum of the rows it holds.
+    the answer -- always a PAIR: (what the counter says, what the warehouse total says).
+                  They agree only when both writes for every event landed.
+    crash at k -- the worker is killed between its TWO writes for event k, so one store has
+                  event k and the other does not.  "No crash" means it ran to the end.
+    derived@m  -- the alternative design: only the warehouse is written per event, and the
+                  counter is REBUILT from it every m events.  Its disagreement is a lag.
+
+  Every event has to increment the counter, for the dashboard, and append a row to the
+  warehouse, for the report, and the two live in different systems so there is no
+  transaction to put them in.  BOTH MUST AGREE.  The nine events above let the stream pass
+  legitimately through exactly ten totals: 0, 5, 8, 15, 17, 23, 24, 33, 37, 45.
+
+  GIVEN A CRASH POINT AND A DESIGN, WHAT DOES EACH STORE SAY AFTERWARDS?
+
+  Worked, as (counter, warehouse) on the nine events above -- which between them define
+  crash points 0..8 only:
+    counter first, crash at 0   -> (5, 0)      the earliest crash: the counter has the first
+                                               event and the warehouse has nothing
+    counter first, crash at 4   -> (23, 17)    an ordinary middle crash.  BOTH numbers are
+                                               legitimate totals, and the pair is not: no
+                                               moment in the stream ever had those two
+    counter first, crash at 8   -> (45, 37)    the last event there is: the dashboard is
+                                               complete and the report is one event short
+    counter first, no crash     -> (45, 45)    they agree, which is the only acceptable end
+    counter first, crash at 99  -> (45, 45)    off the end: there is no event 99, so the
+                                               kill never fires.  The honest answer is the
+                                               uninterrupted run, NOT the last real crash's
+                                               pair -- a crash that cannot happen does nothing
+    warehouse first, crash at 0 -> (0, 5)      the same crash, the other write order: the
+                                               disagreement flips sign and does not go away
+    derived@3, crash at 8       -> (24, 37)    the cache is two events behind, which is its
+                                               bound, and 24 was a real total two events ago
+    derived@20, no crash        -> (0, 45)     a rebuild interval longer than the whole
+                                               stream: the cache never ran, and is honestly
+                                               stale rather than wrong
+    a ZERO-valued event, crash at 4 -> (17, 17)   split exactly as above, and the two stores
+                                               AGREE anyway -- so agreement does not prove
+                                               the two writes both landed
+  And on 3,000 events of 7 each (21,000 in all):
+    counter first, crash at 1500 -> (10507, 10500)   off by one event out of three thousand
+    derived@500, crash at 1700   -> (10500, 11900)   200 events of lag, which is its bound
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted twice --
+  against the program and against an independent formula for the same pair -- so these
+  answers cannot drift from what the program returns.
 
 Two outputs rather than one output and a position, so there is no store the bookkeeping can
 live in and the chapter's transaction is genuinely unavailable -- `together` has nothing to be

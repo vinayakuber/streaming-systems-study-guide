@@ -467,11 +467,54 @@ This is **the unique-visitor count** solved on its own: a complete file, every h
 #!/usr/bin/env python3
 """Variation 2 -- the unique-visitor count (looks like analytics). Standalone and runnable.
 
-  Page views arrive forever, each carrying a visitor id.  Report how many DISTINCT visitors
-  were seen today.  10**9 views a day, tens of millions of visitors.
+  WHAT THE WORDS MEAN, before any of them is used:
+    view     -- one page load, carrying (visitor id, the second it happened).  Seconds count
+                from 0 and a day is 86,400 of them.
+    visitor  -- the id a view carries.  The same visitor may appear in a thousand views; a
+                thousand views from one visitor is still one visitor.
+    distinct -- how many DIFFERENT visitor ids appeared.  Not how many views: that is the
+                question the chapter's running total answers, and it is the wrong one here.
+    expiry (ttl) -- how long an id is remembered before being dropped to save space, in the
+                same seconds.  A gap of exactly ttl between two views by the same visitor
+                still counts as remembered; one second more and the id has been forgotten,
+                so the visitor is counted a second time.
+    sketch   -- an approximate counter that keeps at most K = 256 hash values however many
+                visitors there are, and answers "how many distinct" from them.  Below 256
+                distinct it is exact; above, it estimates.
 
-  The chapter's answer -- one accumulator per key, with an expiry to bound it -- does not
-  survive the word "distinct".
+  A view log carries nine views from two visitors: a@1, a@3, b@50, b@90, a@130, b@220,
+  a@245, b@260, a@540.  The true answer is 2.  Visitor 'a' is silent from second 245 to
+  second 540 -- a gap of 295 -- and that silence is what an expiry gets wrong.  At the scale
+  the question names there are 10**9 views a day and tens of millions of visitors.
+
+  GIVEN A DAY'S VIEWS AND AN EXPIRY, HOW MANY DISTINCT VISITORS WERE SEEN?
+
+  Worked, on the nine views above -- the input here is a log and an expiry, so no input is
+  "off the end"; what the rows pin instead are both degenerate ends and both sides of the
+  expiry boundary:
+    an EMPTY day, no expiry   -> 0    no views, so no visitors.  0, honestly, not an error
+    one view, no expiry       -> 1    the smallest real day
+    the nine views, no expiry -> 2    the true answer: two ids, nine views
+    1,000 views, all 'solo'   -> 1    one visitor, and the tempting answer 1,000 is the
+                                      count of VIEWS, which nobody asked for
+    the nine views, ttl = 295 -> 2    exactly the length of 'a's silence, so 'a' is still
+                                      remembered when it returns: still right
+    the nine views, ttl = 294 -> 3    one second tighter, the other side of that edge: 'a'
+                                      has been forgotten and is counted TWICE, so the answer
+                                      reads 3 for a day that had 2.  Note the direction --
+                                      an expiry OVERSTATES a distinct count
+    the nine views, ttl = 0   -> 9    every view its own visitor, which is the view count
+    the nine views, ttl = a whole day -> 2   right again, and it saved nothing at all: at
+                                      this size the expiry frees 0 slots in every row above
+  And at the sketch's own boundary, and at scale:
+    255 distinct visitors   -> 255     below K = 256, so the sketch is exact
+    256 distinct visitors   -> 257     at K, the estimator takes over and is 1 high
+    4,000 distinct visitors -> 3,721   7% low, in 256 slots instead of 4,000
+    12,000 distinct         -> 11,544  4% low, in the same 256 slots
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted against
+  the exact set AND against the sketch, so these answers cannot drift from what the program
+  returns.
 
 The chapter's bound works because a sum is ONE NUMBER: a key's accumulator is the same size
 after a billion events as after one.  A distinct count is not one number -- to know whether
@@ -483,7 +526,7 @@ OVERSTATES the distinct count.  The way out is to stop being exact: a sketch ans
 many distinct" in a fixed few kilobytes at any cardinality, with a small, measurable error.
 
 WORKED EXAMPLES: the EXAMPLES table below holds 13 input/output pairs -- the chapter's own
-nine views, both sides of the 295-hour silence the expiry turns on, a day-long allowance that
+nine views, both sides of the 295-second silence the expiry turns on, a day-long allowance that
 saves nothing, an empty day, a single view, a thousand views from one visitor, both sides of
 the sketch's k-th slot, and two generated streams at 4,000 and 12,000 distinct visitors.
 Every row is ASSERTED against the exact set AND against the sketch, so the table cannot drift
@@ -944,9 +987,64 @@ This is **the abandoned shopping cart** solved on its own: a complete file, ever
 #!/usr/bin/env python3
 """Variation 3 -- the abandoned shopping cart (looks like commerce). Standalone and runnable.
 
-  Hold each shopper's cart while they shop.  Carts that have been inactive for a week are
-  expired, because there are far more shoppers than active ones.  A shopper comes back after
-  ten days and expects their cart to be there.
+  WHAT THE WORDS MEAN, before any of them is used:
+    addition  -- one item going into a cart: (shopper, the item's price, the hour).  Hours
+                 count from 0, so hour 168 is a week in and hour 540 is twenty-two days in.
+    cart      -- every item that shopper has added, in order.  "Cart value" is the sum of
+                 its prices, and the answer below adds up the value still held across ALL
+                 shoppers -- 45 when nothing has been lost.
+    inactive  -- a shopper is inactive at hour t if their last addition was before t.  The
+                 gap is t minus that hour.
+    allowance (ttl) -- how long a cart survives inactivity, in hours.  A week is 168.  A gap
+                 of exactly ttl still keeps the cart; one hour more and it is expired.
+    expire    -- what happens when the allowance runs out.  Two different things are being
+                 conflated and the problem turns on separating them: DELETING the cart, so
+                 the items are gone, versus WRITING IT OUT to durable storage, so memory is
+                 freed and the shopper can still have their items back.
+    carts saved -- how many carts memory is NOT holding at the hour you look.  It has to be
+                 measured at a named hour: an expiry is usually followed straight away by
+                 the addition that re-creates the cart, so counting at the end shows nothing.
+
+  Nine additions arrive: a adds a 5 at hour 1 and a 3 at hour 3; b adds a 4 at hour 50 and a
+  7 at hour 90; a adds a 2 at hour 130; b adds a 9 at hour 220; a adds a 6 at hour 245; b
+  adds a 1 at hour 260; and a adds an 8 at hour 540.  The true carts are a = 5+3+2+6+8 = 24
+  and b = 4+7+9+1 = 21, so 45 of value in all.  Shopper 'a' goes quiet from hour 245 to hour
+  540 -- 295 hours, which is over ten days -- and then comes back expecting their cart.
+
+  GIVEN AN ALLOWANCE AND AN HOUR TO LOOK AT, HOW MUCH CART VALUE SURVIVES, AND HOW MANY
+  CARTS HAS MEMORY BEEN SPARED?
+
+  Worked, as (value kept by deleting, carts saved) on the nine additions above -- which
+  between them cover hours 1..540:
+    never expire, at hour 540  -> (45, 0)   nothing is ever dropped, so nothing is lost and
+                                            nothing is saved: the baseline
+    ttl = 295, at hour 540     -> (45, 0)   exactly the length of 'a's silence, so the cart
+                                            is still there when they return
+    ttl = 294, at hour 540     -> (29, 0)   one hour tighter, the other side of that edge:
+                                            'a's first four items are gone, 16 of value lost
+    ttl = 168, at hour 540     -> (8, 1)    the week the product actually chose: 'a' comes
+                                            back to a cart holding only the item they just
+                                            added, and 37 of value has been thrown away
+    ttl = 168, at hour 413     -> (8, 0)    the SAME allowance, looked at 127 hours earlier:
+                                            it has saved NOTHING yet
+    ttl = 168, at hour 429     -> (8, 2)    sixteen hours later, both carts are out of
+                                            memory -- so "how much does the expiry save" has
+                                            no answer without an hour attached to it
+    ttl = 0, at hour 540       -> (8, 1)    one cart at a time, the tightest allowance
+    an EMPTY stream, at hour 0 -> (0, 0)    no additions, so no carts.  0, not an error
+    a single addition, at hour 0 -> (5, 0)  the smallest real stream
+    two additions 10 hours apart, ttl = 10 -> (8, 0)   the gap equals the allowance: kept
+    the same two, ttl = 9                  -> (3, 0)   one hour short: the first item is gone
+  And on 2,000 shoppers who visit once plus one who never leaves:
+    ttl = 100, at hour 2000 -> (301, 1899)   1,899 carts out of memory, and 1,899 shoppers
+                                             who would find their cart empty
+    ttl = 0,   at hour 2000 -> (1, 2000)     everything saved, everything lost
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted twice --
+  against the true cart and against the store -- so these answers cannot drift from what the
+  program returns.  (Looking at an hour outside the stream is defined too and reported by
+  the same function: hour 0 holds 0 carts because nothing has arrived, and hour 10000 holds
+  0 because everything has expired -- neither is an error.)
 
 Here the expiry is the FEATURE, not the compromise -- the chapter's silent restart is the
 specified behaviour -- and that inverts the whole problem, leaving one real contradiction:
@@ -1452,9 +1550,62 @@ This is **the fraud score over a lifetime** solved on its own: a complete file, 
 #!/usr/bin/env python3
 """Variation 4 -- the fraud score over a lifetime (looks like risk). Standalone and runnable.
 
-  Every account carries a risk score: the sum of the points its events have ever earned.
-  Score each account on its ENTIRE history.  Accounts lie dormant for years and must come
-  back with the score they left with.
+  WHAT THE WORDS MEAN, before any of them is used:
+    signal   -- one risk event: (account, points, the day it happened).  Days count from 0.
+    score    -- an account's LIFETIME total: the sum of the points of every signal it has
+                ever had, with no window and no decay.  The answer below adds the surviving
+                points across all accounts -- 45 when nothing has been forgotten.
+    dormant  -- an account with no signal for a while.  Account 'a' here is dormant for 295
+                days, from day 245 to day 540.
+    allowance (ttl) -- how long the streaming layer keeps an account's running score before
+                dropping it.  A gap of exactly ttl keeps the score; one day more drops it.
+    restart  -- what a dropped score costs: the account comes back and starts from zero, so
+                its history is gone.  Count of restarts is part of the answer.
+    store    -- a database keyed by account, read and written per signal.  It holds the score
+                outside the stream, so nothing is ever dropped.
+    cache    -- a bounded number of slots in front of the store.  Its bound looks like the
+                expiry's and is NOT the same thing: a cache miss RE-READS the score, while
+                an expiry RESTARTS it.  Capacity 0 means every signal goes to the store.
+
+  Nine signals arrive: a earns 5 on day 1 and 3 on day 3; b earns 4 on day 50 and 7 on day
+  90; a earns 2 on day 130; b earns 9 on day 220; a earns 6 on day 245; b earns 1 on day
+  260; and a earns 8 on day 540.  The true lifetime scores are a = 24 and b = 21, so 45 in
+  all.  Accounts lie dormant for months and must come back with the score they left with.
+
+  GIVEN AN ALLOWANCE AND A CACHE SIZE, HOW MANY POINTS SURVIVE, AND HOW MANY RESTARTS?
+
+  Worked, as (points the expiry still has, restarts) on the nine signals above -- which
+  between them cover days 1..540.  The store and every cache size return the true 45 on
+  every one of these rows; only the expiry moves:
+    never expire, cache 1   -> (45, 0)   the baseline: nothing dropped, nothing restarted
+    ttl = 295, cache 1      -> (45, 0)   exactly 'a's dormancy, so its score survives
+    ttl = 294, cache 1      -> (29, 1)   one day tighter, the other side of that edge: 'a'
+                                         restarts and 16 points of history vanish
+    ttl = 100, cache 2      -> (8, 4)    four restarts, and 37 of the 45 points gone
+    ttl = 0, cache 0        -> (8, 7)    the last signal per account only
+    an EMPTY stream         -> (0, 0)    no signals, so no score.  0, not an error
+    a single signal         -> (7, 0)    the smallest real stream
+    cache of 0 slots        -> (45, 0)   write-through: 9 store reads instead of 2, and the
+                                         score is still exact -- a cache bound costs TIME
+    cache bigger than the data -> (45, 0)   2 store reads, and the same exact score
+    account 'zz'            -> no score at all.  'zz' has never been seen, so there is
+                                         nothing to report.  The answer is "absent", NOT 0 --
+                                         0 is the score of a clean account, which is a claim
+    a two-signal mule, 20 points then 4 points 295 days later:
+      ttl = 295             -> (24, 0)   the pair is kept together
+      ttl = 294             -> (4, 1)    one day tighter and the 20 is WASHED: the same
+                                         bound that merely costs time in the cache is a
+                                         published laundering schedule here
+  And on 2,000 accounts seen once plus one that never stops:
+    ttl = 100, cache 64     -> (301, 0)      1,899 accounts out of memory and 1,899 histories
+                                             thrown away; at the nine-signal size above, the
+                                             same expiry saves 0 accounts
+    ttl = 0, cache 0        -> (1, 199)      everything saved, everything lost
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted three
+  ways -- against the true score, the store and the cache -- so these answers cannot drift
+  from what the program returns.  (The 'zz' line is read off the store those rows build: it
+  holds 'a' and 'b' and nothing else.)
 
 The requirement forbids every bound, which makes this the one variation where the chapter's
 answer is simply unavailable -- and the useful response is to stop treating the score as

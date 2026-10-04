@@ -465,9 +465,56 @@ This is **the file that is half uploaded** solved on its own: a complete file, e
 #!/usr/bin/env python3
 """Variation 2 — the file that is half uploaded (looks like backups). Standalone and runnable.
 
-  A nightly job uploads a large file to object storage and then records that the backup
-  succeeded.  It is killed partway through the upload.  No restore may ever read a partial
-  file, and no record may ever claim a backup that is not there.
+  WHAT THE WORDS MEAN, before any of them is used:
+    chunk      -- one piece of the file, uploaded in one write.  Chunks are numbered 0, 1,
+                  2, ... in upload order, so "chunk 0" is the first bytes to leave.
+    crash at k -- the job is killed just BEFORE it uploads chunk k, so chunks 0..k-1 are up
+                  and k..last are not.  "crash at 0" means it died having written nothing;
+                  "no crash" means it ran to the end.
+    record     -- the separate note, in a different system, saying "the backup succeeded".
+                  A restore trusts it.
+    visible    -- what a restore would actually read afterwards.  Three outcomes only:
+                  ABSENT (no file at all), a PARTIAL file (some leading bytes), or the
+                  COMPLETE file.  A partial file is the one outcome that must never happen.
+    staging name -- an upload can be written under a temporary name and RENAMED at the end.
+                  Nothing ever reads the temporary name, which is what makes it useful.
+
+  A nightly job uploads a file in nine chunks -- 'aaaaa', 'bbb', 'ccccccc', 'dd', 'eeeeee',
+  'f', 'ggggggggg', 'hhhh', 'iiiiiiii', 45 bytes finished -- and then records that the
+  backup succeeded.  It is killed partway through.  No restore may ever read a partial file,
+  and no record may ever claim a backup that is not there.
+
+  GIVEN A CRASH POINT AND A WRITE ORDERING, WHAT WOULD A RESTORE READ AFTERWARDS?
+
+  Worked, on the nine chunks above -- which between them define crash points 0..9 only:
+    rename, no crash          -> COMPLETE    all 45 bytes, and the record agrees
+    rename, crash at 0        -> ABSENT      the earliest crash: nothing was written
+    rename, crash at 1        -> ABSENT      5 bytes are in the staging slot, and a restore
+                                             still sees nothing, because nothing reads it
+    rename, crash at 8        -> ABSENT      killed before the LAST chunk, 37 of 45 bytes up
+    rename, crash at 9        -> ABSENT      the other side of the commit edge: every byte
+                                             is uploaded and the rename has not run, so the
+                                             backup does not exist.  Losing it is correct;
+                                             showing 45 unrenamed bytes would not be
+    rename, crash at 16       -> COMPLETE    off the end: there is no chunk 16, so the kill
+                                             never fires.  The honest answer is the
+                                             uninterrupted run, NOT the nearest crash's
+                                             outcome -- a crash that cannot happen does
+                                             nothing at all
+    upload direct, crash at 1 -> PARTIAL, 5 bytes   'aaaaa' under the real name: exactly the
+                                             outcome the statement forbids
+    upload direct, crash at 9 -> COMPLETE    the bytes are all there and the record is unset,
+                                             so a backup exists that nothing knows about
+    a ZERO-chunk backup, rename -> an EMPTY file   zero bytes, and it EXISTS: the rename
+                                             still runs, so a restore finds a real file
+    a ZERO-chunk backup, direct -> ABSENT    nothing was ever written, so there is no file
+  And on a generated 5,000-chunk file:
+    rename, no crash          -> COMPLETE    19,995 bytes
+    rename, crash at 2500     -> ABSENT      half the file staged, and a restore sees none
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted twice --
+  against the program and against an independent formula for the same answer -- so these
+  answers cannot drift from what the program returns.
 
 The same two writes, and the chapter's transaction is unavailable because the file store and
 the record live in different systems.  What makes it tractable is a property the queue problem
@@ -946,8 +993,58 @@ This is **the counter in two places** solved on its own: a complete file, every 
 #!/usr/bin/env python3
 """Variation 3 — the counter in two places (looks like analytics). Standalone and runnable.
 
-  Every event increments a counter in a fast store, for the live dashboard, and appends a row
-  to a warehouse, for the monthly report.  BOTH MUST AGREE.
+  WHAT THE WORDS MEAN, before any of them is used:
+    event      -- one thing that happened, carrying a number to count.  Events are numbered
+                  0, 1, 2, ... in arrival order; here their values are 5, 3, 7, 2, 6, 1, 9,
+                  4, 8, which add up to 45.
+    counter    -- a single running total in a fast store, read by the live dashboard.
+    warehouse  -- an append-only table of rows, one per event, read by the monthly report.
+                  "The warehouse total" means the sum of the rows it holds.
+    the answer -- always a PAIR: (what the counter says, what the warehouse total says).
+                  They agree only when both writes for every event landed.
+    crash at k -- the worker is killed between its TWO writes for event k, so one store has
+                  event k and the other does not.  "No crash" means it ran to the end.
+    derived@m  -- the alternative design: only the warehouse is written per event, and the
+                  counter is REBUILT from it every m events.  Its disagreement is a lag.
+
+  Every event has to increment the counter, for the dashboard, and append a row to the
+  warehouse, for the report, and the two live in different systems so there is no
+  transaction to put them in.  BOTH MUST AGREE.  The nine events above let the stream pass
+  legitimately through exactly ten totals: 0, 5, 8, 15, 17, 23, 24, 33, 37, 45.
+
+  GIVEN A CRASH POINT AND A DESIGN, WHAT DOES EACH STORE SAY AFTERWARDS?
+
+  Worked, as (counter, warehouse) on the nine events above -- which between them define
+  crash points 0..8 only:
+    counter first, crash at 0   -> (5, 0)      the earliest crash: the counter has the first
+                                               event and the warehouse has nothing
+    counter first, crash at 4   -> (23, 17)    an ordinary middle crash.  BOTH numbers are
+                                               legitimate totals, and the pair is not: no
+                                               moment in the stream ever had those two
+    counter first, crash at 8   -> (45, 37)    the last event there is: the dashboard is
+                                               complete and the report is one event short
+    counter first, no crash     -> (45, 45)    they agree, which is the only acceptable end
+    counter first, crash at 99  -> (45, 45)    off the end: there is no event 99, so the
+                                               kill never fires.  The honest answer is the
+                                               uninterrupted run, NOT the last real crash's
+                                               pair -- a crash that cannot happen does nothing
+    warehouse first, crash at 0 -> (0, 5)      the same crash, the other write order: the
+                                               disagreement flips sign and does not go away
+    derived@3, crash at 8       -> (24, 37)    the cache is two events behind, which is its
+                                               bound, and 24 was a real total two events ago
+    derived@20, no crash        -> (0, 45)     a rebuild interval longer than the whole
+                                               stream: the cache never ran, and is honestly
+                                               stale rather than wrong
+    a ZERO-valued event, crash at 4 -> (17, 17)   split exactly as above, and the two stores
+                                               AGREE anyway -- so agreement does not prove
+                                               the two writes both landed
+  And on 3,000 events of 7 each (21,000 in all):
+    counter first, crash at 1500 -> (10507, 10500)   off by one event out of three thousand
+    derived@500, crash at 1700   -> (10500, 11900)   200 events of lag, which is its bound
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted twice --
+  against the program and against an independent formula for the same pair -- so these
+  answers cannot drift from what the program returns.
 
 Two outputs rather than one output and a position, so there is no store the bookkeeping can
 live in and the chapter's transaction is genuinely unavailable -- `together` has nothing to be
@@ -1401,9 +1498,59 @@ This is **the retry that must not re-send** solved on its own: a complete file, 
 """Variation 4 — the retry that must not re-send (looks like notifications). Standalone and
 runnable.
 
-  A worker reads items from a queue and sends one push notification per item.  A crash must
-  not send it twice.  The push service has NO transaction and NO idempotency key, and a person
-  reads the notification, so a duplicate is not harmless.
+  WHAT THE WORDS MEAN, before any of them is used:
+    item       -- one entry in the queue, needing one push notification.  Items are numbered
+                  0, 1, 2, ... in queue order, nine of them here.
+    send       -- hand the notification to the push service.  It cannot be undone, it cannot
+                  be made invisible, and a PERSON reads it.
+    position   -- the worker's record of how far it has got, so a restart knows where to
+                  resume.  Writing it and sending are two separate steps.
+    ordering   -- which of those two steps goes first.  "Effect first" sends and then records
+                  the position; "position first" records and then sends.  There is no third
+                  option and no transaction to put them in.
+    crash at k -- the worker is killed between its two steps for item k, then restarted from
+                  the position it had recorded.  "No crash" means it ran to the end.
+    duplicate  -- an item whose notification a person received TWICE.
+    loss       -- an item whose notification was never sent at all.
+    the answer -- always a pair: (which items were duplicated, which items were lost).
+    far-end key -- an idempotency key the push service itself honours, so a second send of
+                  the same item is swallowed.  The statement says there is none; the table
+                  asks what changes if there were.
+
+  A worker reads nine items off a queue and sends one push notification per item.  A crash
+  must not send any of them twice.  The push service offers NO transaction and NO idempotency
+  key, and a person reads the notification, so a duplicate is not harmless either.
+
+  GIVEN A CRASH POINT AND AN ORDERING, WHICH ITEMS ARE DUPLICATED AND WHICH ARE LOST?
+
+  Worked, as (duplicated, lost) on the nine items above -- which between them define crash
+  points 0..8 only:
+    effect first, crash at 0  -> ([0], [])   the earliest crash: item 0 was sent, the
+                                             position was not written, so the restart sends
+                                             it again
+    effect first, crash at 3  -> ([3], [])   an ordinary middle crash, same shape
+    effect first, crash at 8  -> ([8], [])   the last item there is, same shape again
+    effect first, no crash    -> ([], [])    nothing duplicated, nothing lost
+    effect first, crash at 99 -> ([], [])    off the end: there is no item 99, so the kill
+                                             never fires.  The honest answer is the
+                                             uninterrupted run, NOT the worst case -- a
+                                             crash that cannot happen does nothing
+    position first, crash at 0 -> ([], [0])  the SAME crash, the other ordering: the failure
+                                             mirrors exactly, from a duplicate to a loss
+    position first, crash at 8 -> ([], [8])  and it mirrors at the last item too
+    effect first, crash at 3, far-end key  -> ([], [])    the key rescues this ordering
+    position first, crash at 3, far-end key -> ([], [3])  and does NOT rescue the other one:
+                                             a notification that was never sent cannot be
+                                             de-duplicated by anybody
+    an EMPTY queue, crash at 0 -> ([], [])   no items, so nothing to send and nothing to
+                                             duplicate -- not an error
+  And on a 20,000-item queue killed at item 10,000:
+    effect first   -> ([10000], [])   exactly one person told twice
+    position first -> ([], [10000])   exactly one person never told
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted twice --
+  against the program and against a closed form for the send sequence that ordering forces --
+  so these answers cannot drift from what the program returns.
 
 Every tool the chapter had is gone: no transaction, no idempotency at the far end, and an
 effect that cannot be made invisible.  So the question is not how to avoid the choice but WHICH

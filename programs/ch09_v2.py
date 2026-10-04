@@ -1,9 +1,51 @@
 #!/usr/bin/env python3
 """Variation 2 -- the double-booked room (looks like facilities). Standalone and runnable.
 
-  One list this time: the bookings for a meeting room, sorted by start.  Report every pair
-  that overlaps, and the busiest moment -- the time at which the most bookings are live at
-  once.  Up to 10**6 bookings.
+  WHAT THE WORDS MEAN, before any of them is used:
+    booking -- one reservation, written (start, end) in minutes.  The span is CLOSED: the
+               booking occupies its start minute AND its end minute, so (0, 10) and (10, 20)
+               both occupy minute 10 and therefore clash.  A booking may be zero-length,
+               (5, 5), which still occupies minute 5.
+    live    -- a booking is live at minute t when start <= t <= end.
+    busiest moment -- the EARLIEST minute at which the most bookings are live at once.  A
+               room with nothing booked has no busiest moment at all.
+    overlapping pair -- two bookings that are live at some common minute.  Four identical
+               bookings make 4 choose 2 = 6 pairs, not 4: the count is of pairs, not of
+               bookings involved.
+    the answer -- always a triple: (how many are live at the busiest moment, which minute
+               that is, how many overlapping pairs there are in the room).
+
+  One list this time: a meeting room's bookings, sorted by start -- (1, 3), (50, 150),
+  (130, 245), (220, 320), (540, 540).  Two of those clash: 130..245 overlaps 50..150 over
+  minutes 130..150, and 220..320 overlaps 130..245 over 220..245.  Up to 10**6 bookings.
+
+  GIVEN A ROOM'S BOOKINGS, HOW MANY CLASH AT ONCE, WHERE, AND HOW MANY PAIRS CLASH?
+
+  Worked, as (live at the busiest moment, which minute, overlapping pairs):
+    []                      -> (0, None, 0)   an empty room: no bookings, so there is NO
+                                              busiest moment.  None, NOT minute 0 -- naming
+                                              a minute would claim somebody was in the room
+    [(5, 5)]                -> (1, 5, 0)      one zero-length booking: it still occupies a
+                                              minute, and one booking cannot clash
+    [(0, 1), (5, 6), (10, 11)] -> (1, 0, 0)   a clean room: one live at a time, no pairs
+    [(0, 10), (11, 20)]     -> (1, 0, 0)      ADJACENT, one minute apart: free side of the
+                                              boundary, nothing clashes
+    [(0, 10), (10, 20)]     -> (2, 10, 1)     TOUCHING at 10: clash side of that same
+                                              boundary, because the spans are closed
+    [(0, 10), (0, 10)]      -> (2, 0, 1)      the same booking made twice
+    [(0, 10)] four times    -> (4, 0, 6)      four bookings, SIX pairs
+    [(0, 100), (10, 20), (30, 40)] -> (2, 10, 2)   nesting: the inner two never meet each
+                                              other, and each clashes with the outer one
+    the five bookings above -> (2, 130, 2)    two live at minute 130, and two clashing pairs
+    the same five plus a workshop 140..230 -> (3, 140, 5)   now three are live at once, which
+                                              is what breaks the pair-wise reasoning
+  And at the scale the problem names:
+    20,000 bookings in a chain, each overlapping only the next -> (2, 5, 19999)
+    2,000 bookings all covering one instant                    -> (2000, 1999, 1999000)
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted against
+  a direct per-instant count -- and, where it is affordable, against every pair -- so these
+  answers cannot drift from what the program returns.
 
 The chapter had two lists and leaned on a promise about each one: within a list, spans never
 overlap.  Here there is one list and it overlaps ITSELF, so "the span that ends first is

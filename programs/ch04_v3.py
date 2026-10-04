@@ -1,8 +1,47 @@
 #!/usr/bin/env python3
 """Variation 3 — the island count (looks like puzzles). Standalone and runnable.
 
-  Positions on a line are turned on one at a time, in any order.  After each one, report HOW
-  MANY CONTIGUOUS STRETCHES are on.
+  WHAT THE WORDS MEAN, before any of them is used:
+    position -- one integer coordinate on an endless line.  Any integer: they may be
+                negative, they may be a billion apart, and they arrive in ANY order, not
+                sorted.  A position that arrives twice is already on and changes nothing.
+    on       -- a position is on once it has arrived, and it never goes off again.
+    island   -- a maximal run of CONSECUTIVE positions that are all on.  "Consecutive"
+                means a step of exactly 1, so 5 and 6 are one island of two positions while
+                5 and 7 are two islands of one.
+    count    -- how many islands exist, reported after EVERY arrival, not just at the end.
+                Each arrival moves the count by exactly +1, 0 or -1 and by nothing else.
+
+  Positions arrive one at a time in this order: 5, 7, 6, 1, 2, 3, 4, 4.  After each one you
+  must say how many islands are on.  The interesting arrival is the 6: it has a neighbour on
+  each side, so it does not add an island -- it welds two existing ones together and the
+  count goes DOWN.
+
+  GIVEN A STREAM OF POSITIONS, WHAT IS THE ISLAND COUNT AFTER THE LAST ONE?
+
+  Worked, on streams of these positions -- coordinates are unbounded, so nothing here is
+  "off the end" of a range; what is undefined is a count before anything has arrived:
+    [7]             -> 1   the first arrival of all: one position on, so one island
+    [7, 7, 7]       -> 1   the same position three times.  A repeat is not a second island
+    [5, 7]          -> 2   a gap of 2 between them, so they do NOT merge
+    [5, 6]          -> 1   a gap of 1, so they DO -- the two sides of the adjacency test
+    [5, 7, 6]       -> 1   the arrival that joins two islands: the count went 1, 2, then 1
+    [-3, -1, -2, 0] -> 1   negative coordinates are ordinary coordinates
+    [0, 10**9]      -> 2   a billion apart, and still just two entries to keep
+    [5, 7, 6, 1, 2, 3, 4, 4] -> 1   the full stream above: the 4 welds 1..3 onto 5..7
+    [1, 3, 90, 130, 245, 260, 220, 50, 540] -> 9   nine positions, no two of them adjacent,
+                           so nothing ever merges and every one is its own island
+    []              -> no count: the report is due "after each arrival", and no arrival ever
+                           happened, so there is no count to give.  The answer is undefined,
+                           NOT 0 -- reporting 0 islands would answer a question nobody
+                           reached the point of asking
+  And at the scale the problem names:
+    10,000 positions 0..9,999 shuffled -> 1       they fill the line, so one island
+    10,000 even positions 0, 2, 4, ... -> 10000   none of them touch, so each is its own
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted against
+  a full rescan AND against the chapter's run structure, so these answers cannot drift from
+  what the program returns.
 
 It is the chapter's problem with the gap set to 1 and only a count wanted, and dropping the
 detail makes a much better answer available.  A new position can join at most TWO stretches --

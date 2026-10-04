@@ -2,10 +2,58 @@
 """Variation 2 -- the cache that must not go stale (looks like web infrastructure).
 Standalone and runnable.
 
-  A service keeps an in-memory copy of a table.  Every change to that table is written
-  to a log, one entry per change, each saying what a key BECAME.  Keep the copy current.
+  WHAT THE WORDS MEAN, before any of them is used:
+    entry     -- one line of the log, a pair (key, value) saying what that key BECAME.  Not
+                 what changed by: the value replaces whatever the key held.
+    version   -- how many entries have been written, counted from 0.  "Version 7" is the
+                 state after the first 7 entries, so a nine-entry log has versions 0..9.
+    table     -- the in-memory copy: the result of folding the entries in order.  A key the
+                 log never mentions is NOT IN THE TABLE, which is a different thing from a
+                 key whose value is None.
+    tombstone -- an entry whose value is None.  It means "this key is gone" and it is a
+                 recorded fact, so folding it REMOVES the key.
+    snapshot  -- a compacted log: the last entry per key as of some version.  Folding it
+                 gives the same table as folding every entry up to that version, which is
+                 what makes it a legal thing to start from.
+    subscribe from v -- where the service begins reading the live log after loading the
+                 snapshot.  Choosing v wrongly is the whole problem.
 
-  The service restarts.  It must rebuild the copy and then follow live changes again.
+  A service keeps an in-memory copy of a table.  Every change is written to a log: a=5,
+  a=8, b=7, a=10, a=16, b=8, b=17, b=21, a=24 -- nine entries, two keys.  The snapshot on
+  disk was taken at version 7, so it holds a=16 and b=17: two entries standing in for seven
+  changes.  The service restarts, loads that snapshot, and while it is coming up a live
+  change a=30 arrives.  It must end up with the table a cold replay of everything would
+  have produced: a=30, b=21.
+
+  GIVEN A SNAPSHOT VERSION AND A SUBSCRIBE POINT, WHAT TABLE DOES THE SERVICE END UP WITH?
+
+  Worked, on the nine entries above -- which between them define versions 0..9 only:
+    snapshot v0, subscribe from 0 -> a=30 b=21   a cold start: no snapshot, fold everything
+    snapshot v7, subscribe from 7 -> a=30 b=21   the correct handover, and the cheap one
+    snapshot v7, subscribe from 6 -> a=30 b=21   one entry of OVERLAP: b=17 is applied
+                                                 twice, which is harmless because assigning
+                                                 a value twice is the same as once
+    snapshot v7, subscribe from 8 -> a=30 b=17   one entry of GAP, the other side of that
+                                                 boundary: b=21 is never seen by anybody and
+                                                 the copy answers reads with 17 forever
+    snapshot v7, subscribe from 9 -> a=30 b=17   subscribing from "now", which is the same
+                                                 bug written more plausibly
+    an EMPTY log, subscribe from 0 -> the empty table   nothing was ever written
+    ask that table for key "c"     -> NOT PRESENT.  The log never mentions c, so there is
+                                                 no value to give.  "Absent" is the answer,
+                                                 NOT None -- None is the tombstone, which
+                                                 means "c was deleted", a claim the log
+                                                 never made
+  And on a 20,000-change log over 50 keys:
+    snapshot v20000, subscribe from 20000 -> 50 keys, k0=19950   the correct handover again,
+                                                 reading 50 entries instead of 20,000
+    snapshot v19950, subscribe from 20000 -> 50 keys, k0=19900   a 50-entry gap: every key
+                                                 is exactly one change stale, and nothing
+                                                 ever says so
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted against
+  a cold start, so these answers cannot drift from what the program returns.  (The key-"c"
+  line is read straight off the table those rows produce: it holds a and b and nothing else.)
 
 The question sounds like "apply changes as they arrive" and the loop is trivial.  The
 operational content is the START-UP: the copy has to be folded from somewhere, and a

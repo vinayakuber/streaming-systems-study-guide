@@ -462,9 +462,56 @@ This is **the calendar that will not double-book** solved on its own: a complete
 """Variation 2 — the calendar that will not double-book (looks like scheduling). Standalone
 and runnable.
 
-  Meetings are booked and cancelled continuously.  REJECT any booking that overlaps one
-  already held, and report the free gaps in the day.  A cancellation names the meeting -- in
-  practice "cancel my 10:30" -- not a span.
+  WHAT THE WORDS MEAN, before any of them is used:
+    minute  -- the unit everything is counted in.  Minute 0 is 09:00 and the day runs to
+               minute 600, which is 19:00, so the bookable minutes are 0..599.
+    booking -- a request for the span [start, end), HALF-OPEN: it occupies the start minute
+               and NOT the end minute.  So 90..130 and 130..160 do not clash -- that is the
+               only convention a human would accept for back-to-back meetings.
+    clash   -- two bookings clash when they share at least one minute.  Touching at an
+               endpoint is not sharing a minute.
+    block   -- what the calendar SHOWS as busy: adjacent and touching bookings merged into
+               one span, so 90..130 and 130..160 are displayed as the single block 90..160.
+    free gap -- the complement of the blocks inside 0..600: the spans nobody has booked.
+    cancel  -- a cancellation names a meeting by its START minute ("cancel my 10:30"), not
+               by a span.  It cannot name part of a meeting and it cannot name a block.
+
+  Nine booking requests arrive in the order people send them, not in time order:
+  1..31, 3..33, 90..130, 130..160, 245..275, 260..290, 220..250, 50..80, 540..570.
+  Each one must be accepted or rejected as it arrives, and then the day's busy blocks and
+  free gaps reported.  Later, somebody cancels their 90.
+
+  GIVEN A STREAM OF BOOKINGS AND CANCELLATIONS, WHICH ARE ACCEPTED, AND WHAT IS BUSY?
+
+  Worked, on a 600-minute day -- which between them define only minutes 0..599:
+    book 0..1                      -> accepted; busy [(0, 1)]       the day's first minute
+    book 90..130, then book 130..160 -> both accepted; busy [(90, 160)]   they touch at 130
+                                       and so do not clash; the two are DISPLAYED as one
+                                       block, which is why a cancel can no longer be served
+                                       from the displayed state
+    book 90..130, then book 129..160 -> the second is REJECTED; busy [(90, 130)]   one
+                                       single minute of overlap, the other side of that edge
+    book 599..600                  -> accepted; busy [(599, 600)]   the day's last minute
+    book 590..700                  -> accepted; busy [(590, 700)]   a booking that runs past
+                                       19:00 is held in full, not silently clipped to 600
+    book 90..130, then cancel 91   -> the cancel does NOTHING; busy still [(90, 130)]
+                                       no meeting starts at 91, so there is nothing to
+                                       cancel.  The answer is "no such meeting", NOT the
+                                       nearest one -- cancelling the 90 would delete a
+                                       booking nobody asked to cancel
+    the nine requests above        -> 6 accepted; busy [(1, 31), (50, 80), (90, 160),
+                                       (245, 275), (540, 570)], so 190 minutes busy and 410
+                                       free.  3 of the 9 clashed with something already held
+    the nine, then cancel 90       -> 7 operations accepted; busy [(1, 31), (50, 80),
+                                       (130, 160), (245, 275), (540, 570)] -- the merged
+                                       90..160 block has been SPLIT, which is the hard part
+  And on an 800-minute day booked 400 times:
+    400 abutting bookings 0..2, 2..4, ... -> all 400 accepted; busy [(0, 800)], one block
+    the same 400 requested a second time  -> still 400 accepted; the repeats all clash
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted twice --
+  against its expected answer and against a per-minute grid of the whole day -- so these
+  answers cannot drift from what the program returns.
 
 Insertion is the chapter's `touching` with the gap set to zero, and the new operation is the
 hard one: CANCELLATION SPLITS A RUN, which nothing in the chapter can do.  Merging is easy
@@ -933,8 +980,47 @@ This is **the island count** solved on its own: a complete file, every helper in
 #!/usr/bin/env python3
 """Variation 3 — the island count (looks like puzzles). Standalone and runnable.
 
-  Positions on a line are turned on one at a time, in any order.  After each one, report HOW
-  MANY CONTIGUOUS STRETCHES are on.
+  WHAT THE WORDS MEAN, before any of them is used:
+    position -- one integer coordinate on an endless line.  Any integer: they may be
+                negative, they may be a billion apart, and they arrive in ANY order, not
+                sorted.  A position that arrives twice is already on and changes nothing.
+    on       -- a position is on once it has arrived, and it never goes off again.
+    island   -- a maximal run of CONSECUTIVE positions that are all on.  "Consecutive"
+                means a step of exactly 1, so 5 and 6 are one island of two positions while
+                5 and 7 are two islands of one.
+    count    -- how many islands exist, reported after EVERY arrival, not just at the end.
+                Each arrival moves the count by exactly +1, 0 or -1 and by nothing else.
+
+  Positions arrive one at a time in this order: 5, 7, 6, 1, 2, 3, 4, 4.  After each one you
+  must say how many islands are on.  The interesting arrival is the 6: it has a neighbour on
+  each side, so it does not add an island -- it welds two existing ones together and the
+  count goes DOWN.
+
+  GIVEN A STREAM OF POSITIONS, WHAT IS THE ISLAND COUNT AFTER THE LAST ONE?
+
+  Worked, on streams of these positions -- coordinates are unbounded, so nothing here is
+  "off the end" of a range; what is undefined is a count before anything has arrived:
+    [7]             -> 1   the first arrival of all: one position on, so one island
+    [7, 7, 7]       -> 1   the same position three times.  A repeat is not a second island
+    [5, 7]          -> 2   a gap of 2 between them, so they do NOT merge
+    [5, 6]          -> 1   a gap of 1, so they DO -- the two sides of the adjacency test
+    [5, 7, 6]       -> 1   the arrival that joins two islands: the count went 1, 2, then 1
+    [-3, -1, -2, 0] -> 1   negative coordinates are ordinary coordinates
+    [0, 10**9]      -> 2   a billion apart, and still just two entries to keep
+    [5, 7, 6, 1, 2, 3, 4, 4] -> 1   the full stream above: the 4 welds 1..3 onto 5..7
+    [1, 3, 90, 130, 245, 260, 220, 50, 540] -> 9   nine positions, no two of them adjacent,
+                           so nothing ever merges and every one is its own island
+    []              -> no count: the report is due "after each arrival", and no arrival ever
+                           happened, so there is no count to give.  The answer is undefined,
+                           NOT 0 -- reporting 0 islands would answer a question nobody
+                           reached the point of asking
+  And at the scale the problem names:
+    10,000 positions 0..9,999 shuffled -> 1       they fill the line, so one island
+    10,000 even positions 0, 2, 4, ... -> 10000   none of them touch, so each is its own
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted against
+  a full rescan AND against the chapter's run structure, so these answers cannot drift from
+  what the program returns.
 
 It is the chapter's problem with the gap set to 1 and only a count wanted, and dropping the
 detail makes a much better answer available.  A new position can join at most TWO stretches --
@@ -1349,9 +1435,59 @@ This is **the deduplicated alert** solved on its own: a complete file, every hel
 #!/usr/bin/env python3
 """Variation 4 — the deduplicated alert (looks like operations). Standalone and runnable.
 
-  A monitor fires repeatedly while a system is unhealthy.  Group the firings into INCIDENTS --
-  no gap longer than G -- and page once per incident.  Firings arrive out of order, because
-  they travel through a queue.
+  WHAT THE WORDS MEAN, before any of them is used:
+    firing      -- one alert from the monitor, stamped with the minute it fired.  Minutes
+                   count from 0.  Firings reach the pager through a queue, so they arrive
+                   OUT OF ORDER: the 220 arrives after the 260 here.
+    incident    -- a group of firings with no quiet gap longer than CLOSE_AFTER between
+                   consecutive ones, in TIME order.  A gap of exactly CLOSE_AFTER still
+                   belongs to one incident; one minute more starts a new one.
+    CLOSE_AFTER -- 47 minutes here: how long the monitor must stay quiet before the incident
+                   is declared over.
+    PAGE_AFTER  -- 2 minutes here: how long an incident must already have been running
+                   before a human is woken.  A span of exactly PAGE_AFTER pages; one minute
+                   short of it does not.
+    page        -- one human being woken.  The target is exactly one page per incident.
+    double page -- the failure: the same incident wakes somebody twice, which happens when
+                   two already-paged incidents turn out to be one after a late firing
+                   bridges the gap between them.
+
+  A monitor fires nine times while a system is unhealthy, and the pager receives them in
+  this order: 1, 3, 90, 130, 245, 260, 220, 50, 540.  In time order they are 1, 3, 50, 90,
+  130, 220, 245, 260, 540.  The firing that causes the trouble is the 50: it arrives second
+  to last, and when it does it bridges the 1..3 incident and the 90..130 one, both of which
+  have already woken somebody.
+
+  GIVEN THE FIRINGS AND THE TWO DELAYS, HOW MANY INCIDENTS, PAGES AND DOUBLE PAGES?
+
+  Worked, as (incidents, pages, double pages).  Both delays are free parameters with no
+  upper end, so no input here is "off the end" -- what the table pins instead is each side
+  of the two boundaries they set:
+    no firings at all, (2, 47)      -> (0, 0, 0)   nothing fired, so there is no incident to
+                                                   page for.  0, honestly, not 1
+    one firing at 100, (2, 47)      -> (1, 0, 0)   one incident, and NOBODY is paged: its
+                                                   span is 0 minutes, short of PAGE_AFTER
+    one firing at 100, (0, 47)      -> (1, 1, 0)   page with no delay, and it pages
+    firings 0 and 47, (0, 47)       -> (1, 1, 0)   a gap of exactly CLOSE_AFTER: ONE incident
+    firings 0 and 48, (0, 47)       -> (2, 2, 0)   one minute more: two incidents, two pages
+    firings 0 and 2, (2, 47)        -> (1, 1, 0)   a span of exactly PAGE_AFTER: it pages
+    firings 0 and 2, (3, 47)        -> (1, 0, 0)   one minute short of it: it does not
+    the nine above, (2, 47)         -> (3, 3, 1)   three incidents, three pages, and one of
+                                                   them is a DOUBLE: somebody was woken twice
+                                                   for what turned out to be a single incident
+    the same nine in TIME order, (2, 47) -> (3, 2, 0)   identical data, identical rules, no
+                                                   double page -- the out-of-order arrival is
+                                                   the whole cause
+    the nine, (1000, 47)            -> (3, 0, 0)   a paging delay longer than the entire
+                                                   540-minute stream: three incidents and
+                                                   nobody is ever told about any of them
+  And on 1,000 firings five minutes apart, arriving thoroughly shuffled:
+    (0, 47)  -> (1, 52, 51)   one true incident, 52 pages, 51 of them duplicates
+    (20, 47) -> (1, 34, 33)   waiting 20 minutes before paging removes 18 of the duplicates
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted against
+  the retrospective sweep as well as its expected answer, so these answers cannot drift from
+  what the program returns.
 
 The grouping is the chapter's, unchanged.  The PAGING is what breaks.  You must page while the
 incident is still open, which means acting on a run before you know it is finished, and then a

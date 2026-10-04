@@ -51,9 +51,39 @@ This is **the rolling maximum** solved on its own: a complete file, every helper
 #!/usr/bin/env python3
 """Variation 2 — the rolling maximum (looks like risk). Standalone and runnable.
 
-  A risk screen shows the LARGEST exposure among the last W ticks and must update on
-  every tick.  Same window, same "you may not re-read it" rule as the average: one
-  arrival in, one departure out, an answer after each tick.
+  WHAT THE WORDS MEAN, before any of them is used:
+    tick     -- one arrival.  Ticks are numbered 0, 1, 2, ... in arrival order, so "tick 3"
+                is the 4th value the screen ever saw.
+    exposure -- the number a tick carries.  Here, one position's size in lakh.
+    window   -- the last W ticks, and W = 3 here.  Window i is ticks i, i+1, i+2, INCLUSIVE
+                at both ends, so window 0 is the first three ticks and no window exists at
+                all until three have arrived.
+    maximum  -- the largest of the three exposures in that window.  Not a total and not an
+                average: one of the values that is actually sitting there.
+
+  A risk screen watches nine exposures arrive, in this order: 5, 3, 7, 2, 6, 1, 9, 4, 8.
+  After each arrival it must show the largest of the last three.  It may not re-read the
+  window -- one value arrives, one value leaves, and an answer is due immediately.
+
+  GIVEN A WINDOW INDEX i, WHAT IS THE LARGEST EXPOSURE IN WINDOW i?
+
+  Worked, on the nine exposures above -- which between them define only windows 0..6:
+    window 0 -> 7    ticks 5, 3, 7: the first window there is, and 7 is in it
+    window 2 -> 7    ticks 7, 2, 6: 7 is the oldest member, so this is the LAST window it is in
+    window 3 -> 6    ticks 2, 6, 1: 7 has just left, and no single kept number could say so
+    window 4 -> 9    ticks 6, 1, 9: the arriving value is itself the answer
+    window 6 -> 9    ticks 9, 4, 8: the last window these nine ticks define at all
+    window 7 -> no maximum: nine ticks and W = 3 give seven windows, 0..6, so 7 is off the
+               end.  The answer is "undefined", NOT 8 -- answering from the two ticks that
+               do exist would report a maximum of a window that never happened.
+  And on a generated 5,000-tick stream with W = 500:
+    window 0    -> 997916   the largest of the first 500 exposures
+    window 4500 -> 998567   the largest of the last 500
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted three
+  ways -- deque, brute force, rescan -- so these answers cannot drift from what the program
+  returns.  (The off-the-end line is asserted in the form the table can hold it: a stream
+  shorter than its own window, whose expected answer is None.)
 
 The trick does not transfer, and seeing exactly why is the whole exercise.  A total can
 have a value subtracted out of it because addition is invertible; a maximum cannot --
@@ -510,9 +540,45 @@ This is **the time-based window** solved on its own: a complete file, every help
 #!/usr/bin/env python3
 """Variation 3 — the time-based window (looks like monitoring). Standalone and runnable.
 
-  A dashboard shows the average latency over THE LAST 60 SECONDS, not the last W samples.
-  Probes report whenever they feel like it, so arrivals are irregular: three may land in
-  the same second and then nothing for four minutes.
+  WHAT THE WORDS MEAN, before any of them is used:
+    sample  -- one latency measurement a probe reported, written (t, v): t is the second it
+               was taken, counted from 0, and v is the latency in milliseconds.
+    now     -- the instant you are asking about, in the same seconds.  It is a CLOCK
+               reading, not an arrival: you may ask at a second when nothing was reported.
+    window  -- the samples taken in the last 60 seconds, which means the half-open range
+               (now - 60, now]: a sample taken AT `now` is in, a sample taken exactly 60
+               seconds ago is out.
+    average -- the mean of the v's of the samples in that window.  A window holding no
+               samples has no average at all, which is not the same as an average of 0.
+
+  A dashboard is fed nine samples: (1, 5), (3, 3), (50, 7), (90, 2), (130, 6), (220, 1),
+  (245, 9), (260, 4), (540, 8) -- so one at second 1 measuring 5ms, and so on.  Probes
+  report whenever they feel like it, so the gaps are uneven: two land within two seconds of
+  each other, then nothing arrives for four and a half minutes.
+
+  GIVEN AN INSTANT `now`, WHAT IS THE AVERAGE LATENCY OVER THE PRECEDING 60 SECONDS?
+
+  Worked, on the nine samples above -- which between them run from second 1 to second 540:
+    now = 0    -> None     the earliest instant: nothing has been reported yet
+    now = 3    -> 4.0      (1,5) and (3,3) are both inside (-57, 3], so (5 + 3) / 2
+    now = 191  -> None     an instant with NO arrival, and the last sample (130, 6) has just
+                           aged out at 190.  The answer is "no average", not 6.0 and not 0.0
+    now = 540  -> 8.0      the last arrival of all; only (540, 8) is still in the window
+    now = 10000 -> None    far past the end.  "Undefined", NOT the last value seen -- a
+                           dashboard that shows 8.0 forever is reporting a latency nobody
+                           measured in the last two and a half hours
+  The two sides of the window EDGE cannot be shown on those nine: no two of them are
+  exactly 60 seconds apart, so the inclusive end is invisible there.  On a two-sample
+  stream [(0, 10), (60, 20)], which is in the table for exactly this reason:
+    now = 59   -> 10.0     (0,10) is 59 seconds old, so still inside (-1, 59]
+    now = 60   -> 20.0     (0,10) is now exactly 60 old, so OUT; only (60,20) remains
+  And on a generated 20,000-sample stream, gaps of 0-2 seconds:
+    now = 10000 -> 21.523076923076925   the mean of the 65 samples inside that minute
+    now = 20100 -> None                 past the last sample, so the window is empty again
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted twice --
+  against the rescan and against the timer-driven scan -- so these answers cannot drift
+  from what the program returns.
 
 Two things break.  The count stops being fixed, so "exactly one leaves when one arrives"
 is false in both directions -- zero, one or many may expire -- and the divisor therefore
@@ -1012,8 +1078,57 @@ This is **the average that must survive a restart** solved on its own: a complet
 """Variation 4 — the average that must survive a restart (looks like reliability).
 Standalone and runnable.
 
-  The same rolling average, and the process is restarted mid-stream -- a deploy, an OOM
-  kill, a node reboot.  The running average must CONTINUE, not start again.
+  WHAT THE WORDS MEAN, before any of them is used:
+    input      -- one value arriving.  Inputs are numbered 0, 1, 2, ... in arrival order,
+                  so "input 3" is the 4th value the worker ever read.
+    window     -- the last W inputs, W = 3 here, INCLUSIVE of the one just read.  The first
+                  answer is therefore due at input 2, not input 0: before that there is no
+                  full window to average.
+    answer     -- one average, emitted after each input from input 2 onwards.  Nine inputs
+                  with W = 3 give seven answers.
+    checkpoint -- what the worker writes to disk as it goes, so that a restart can carry on.
+                  Everything NOT in the checkpoint is gone when the process dies.
+    crash at k -- the process is killed just before it reads input k, then restarted from
+                  whatever its last checkpoint holds.  "No crash" means it ran straight
+                  through.
+
+  The same rolling average as the chapter -- values 5, 3, 7, 2, 6, 1, 9, 4, 8 and W = 3 --
+  except that the process is killed mid-stream (a deploy, an OOM kill, a node reboot) and
+  restarted.  The stream of answers must CONTINUE across the restart rather than start
+  again, so it must still be seven answers ending in the same number as an uninterrupted
+  run: (5 + 3 + 7) / 3 = 5.0 first and (9 + 4 + 8) / 3 = 7.0 last.
+
+  GIVEN A CRASH POINT k, HOW MANY ANSWERS COME OUT AND WHAT IS THE LAST ONE?
+
+  Worked, on the nine values above -- which between them define crash points 0..9 only.
+  Each line is (answers emitted, final answer), and the correct pair is always (7, 7.0):
+    crash at 1, keep the window -> (7, 7.0)   the earliest crash that has read anything
+    crash at 2, keep the window -> (7, 7.0)   killed one input BEFORE the first answer is due
+    crash at 3, keep the window -> (7, 7.0)   killed one input AFTER it -- the other side of
+                                              that edge, and both sides must come out alike
+    crash at 8, keep the window -> (7, 7.0)   the last input there is
+    crash at 4, keep the TOTAL  -> (7, 11.0)  the right NUMBER of answers and a wrong final
+                                              one: with the window gone, nothing can be
+                                              subtracted, so the total can only read high
+    crash at 4, position AHEAD  -> (6, 7.0)   one input lost: the final value still looks
+                                              right, and there are six answers, not seven
+    crash at 4, position BEHIND -> (8, 7.0)   one input read twice: eight answers
+    crash at 20                 -> (7, 7.0)   off the end: there is no input 20, so the
+                                              kill never fires and this is just the no-crash
+                                              run.  The honest answer to "what does a crash
+                                              at 20 do" is "nothing", not "the worst case"
+    a 2-value stream, W = 3     -> (0, None)  the window never fills, so NO answer is ever
+                                              emitted and the final answer is undefined --
+                                              not 0.0, and not the average of the two values
+                                              that did arrive
+  And on a generated 4,000-value stream with W = 50, killed at input 2000:
+    keep the window -> (3951, 1.52)   3,951 answers, the last one correct
+    keep the total  -> (3951, 0.02)   the same count, the final answer low by 1.5
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted against
+  the from-scratch reference, so these answers cannot drift from what the program returns.
+  (The crash-at-20 line is the table's no-crash row: the program does the same thing for
+  both, which is the point being made.)
 
 The total is one number and looks trivially checkpointable, and that is the trap: restoring
 the total without the last W values makes the next subtraction impossible, so the state

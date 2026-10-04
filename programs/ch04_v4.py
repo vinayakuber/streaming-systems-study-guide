@@ -1,9 +1,59 @@
 #!/usr/bin/env python3
 """Variation 4 — the deduplicated alert (looks like operations). Standalone and runnable.
 
-  A monitor fires repeatedly while a system is unhealthy.  Group the firings into INCIDENTS --
-  no gap longer than G -- and page once per incident.  Firings arrive out of order, because
-  they travel through a queue.
+  WHAT THE WORDS MEAN, before any of them is used:
+    firing      -- one alert from the monitor, stamped with the minute it fired.  Minutes
+                   count from 0.  Firings reach the pager through a queue, so they arrive
+                   OUT OF ORDER: the 220 arrives after the 260 here.
+    incident    -- a group of firings with no quiet gap longer than CLOSE_AFTER between
+                   consecutive ones, in TIME order.  A gap of exactly CLOSE_AFTER still
+                   belongs to one incident; one minute more starts a new one.
+    CLOSE_AFTER -- 47 minutes here: how long the monitor must stay quiet before the incident
+                   is declared over.
+    PAGE_AFTER  -- 2 minutes here: how long an incident must already have been running
+                   before a human is woken.  A span of exactly PAGE_AFTER pages; one minute
+                   short of it does not.
+    page        -- one human being woken.  The target is exactly one page per incident.
+    double page -- the failure: the same incident wakes somebody twice, which happens when
+                   two already-paged incidents turn out to be one after a late firing
+                   bridges the gap between them.
+
+  A monitor fires nine times while a system is unhealthy, and the pager receives them in
+  this order: 1, 3, 90, 130, 245, 260, 220, 50, 540.  In time order they are 1, 3, 50, 90,
+  130, 220, 245, 260, 540.  The firing that causes the trouble is the 50: it arrives second
+  to last, and when it does it bridges the 1..3 incident and the 90..130 one, both of which
+  have already woken somebody.
+
+  GIVEN THE FIRINGS AND THE TWO DELAYS, HOW MANY INCIDENTS, PAGES AND DOUBLE PAGES?
+
+  Worked, as (incidents, pages, double pages).  Both delays are free parameters with no
+  upper end, so no input here is "off the end" -- what the table pins instead is each side
+  of the two boundaries they set:
+    no firings at all, (2, 47)      -> (0, 0, 0)   nothing fired, so there is no incident to
+                                                   page for.  0, honestly, not 1
+    one firing at 100, (2, 47)      -> (1, 0, 0)   one incident, and NOBODY is paged: its
+                                                   span is 0 minutes, short of PAGE_AFTER
+    one firing at 100, (0, 47)      -> (1, 1, 0)   page with no delay, and it pages
+    firings 0 and 47, (0, 47)       -> (1, 1, 0)   a gap of exactly CLOSE_AFTER: ONE incident
+    firings 0 and 48, (0, 47)       -> (2, 2, 0)   one minute more: two incidents, two pages
+    firings 0 and 2, (2, 47)        -> (1, 1, 0)   a span of exactly PAGE_AFTER: it pages
+    firings 0 and 2, (3, 47)        -> (1, 0, 0)   one minute short of it: it does not
+    the nine above, (2, 47)         -> (3, 3, 1)   three incidents, three pages, and one of
+                                                   them is a DOUBLE: somebody was woken twice
+                                                   for what turned out to be a single incident
+    the same nine in TIME order, (2, 47) -> (3, 2, 0)   identical data, identical rules, no
+                                                   double page -- the out-of-order arrival is
+                                                   the whole cause
+    the nine, (1000, 47)            -> (3, 0, 0)   a paging delay longer than the entire
+                                                   540-minute stream: three incidents and
+                                                   nobody is ever told about any of them
+  And on 1,000 firings five minutes apart, arriving thoroughly shuffled:
+    (0, 47)  -> (1, 52, 51)   one true incident, 52 pages, 51 of them duplicates
+    (20, 47) -> (1, 34, 33)   waiting 20 minutes before paging removes 18 of the duplicates
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted against
+  the retrospective sweep as well as its expected answer, so these answers cannot drift from
+  what the program returns.
 
 The grouping is the chapter's, unchanged.  The PAGING is what breaks.  You must page while the
 incident is still open, which means acting on a run before you know it is finished, and then a

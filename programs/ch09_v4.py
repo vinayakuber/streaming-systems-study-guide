@@ -1,8 +1,57 @@
 #!/usr/bin/env python3
 """Variation 4 -- the unavailable hours (looks like scheduling). Standalone and runnable.
 
-  Given one person's busy spans, report their FREE spans between a start and an end.  A year of
-  minutes is 525,600 of them, so the range may not be walked.
+  WHAT THE WORDS MEAN, before any of them is used:
+    minute     -- the unit everything is counted in, numbered from 0.
+    busy span  -- one meeting, written (start, end), CLOSED at both ends: busy from 130 to
+                  245 means minute 245 is busy and minute 246 is not.  A meeting may be
+                  zero-length, (5, 5), which still occupies minute 5.
+    window     -- the range you are asked about, also closed at both ends.  The window 0..10
+                  is therefore ELEVEN minutes, not ten.
+    free span  -- a maximal run of minutes inside the window that no meeting covers.  Two
+                  meetings that touch, (0, 3) and (4, 7), leave NO gap between them, because
+                  minutes 3 and 4 are consecutive; one minute apart, (0, 3) and (5, 7), they
+                  leave the one-minute gap (4, 4).
+    the answer -- a pair: (how many free spans there are, how many free minutes in total).
+                  The count catches a lost span and the minutes catch an off-by-one, so the
+                  pair pins the answer from both directions.
+
+  One person's calendar holds three meetings -- 1..3, 130..245 and 540..540 -- and you are
+  asked for their free time in the window 0..600.  A year of minutes is 525,600 of them, so
+  whatever you do may not walk the range minute by minute.
+
+  GIVEN THE BUSY SPANS AND A WINDOW, WHAT ARE THE FREE SPANS?
+
+  Worked, as (free spans, free minutes):
+    no meetings, window 0..10      -> (1, 11)   the whole window is one free span, and it is
+                                                eleven minutes because both ends count
+    busy 0..10, window 0..10       -> (0, 0)    busy throughout: there is NO free span, and
+                                                the answer says so rather than inventing one
+    busy 0..5, window 0..10        -> (1, 5)    free 6..10, so the span starts the minute
+                                                after the meeting ends
+    busy 0..3 and 4..7, window 0..10  -> (1, 3) ADJACENT meetings: no gap between them at
+                                                all, only 8..10 after them
+    busy 0..3 and 5..7, window 0..10  -> (2, 4) one minute apart: the other side of that
+                                                boundary, and the gap (4, 4) is one minute
+    busy 5..5, window 0..10        -> (2, 10)   a zero-length meeting still splits the window
+    busy 0..10, window 5..5        -> (0, 0)    a one-minute window, busy
+    busy 0..1,  window 5..5        -> (1, 1)    the same one-minute window, free
+    busy -5..20, window 0..10      -> (0, 0)    a meeting that covers the window from outside
+    busy 20..30, window 0..10      -> (1, 11)   a meeting entirely after the window
+    the three meetings, window 0..600 -> (4, 481)   free 0..0, 4..129, 246..539 and 541..600
+    window 10..5 (start after end) -> (0, 0)    off the end: the window is empty, so there is
+                                                nothing free in it.  The answer is "no free
+                                                spans", NOT the window read backwards and NOT
+                                                an error
+  And on a year of 525,600 minutes:
+    2,000 meetings every 250 minutes  -> (2001, 403601)   a free span before, between and
+                                                after every meeting
+    2,000 booked back to back         -> (1, 403601)      the same free minutes in ONE span
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted three
+  ways -- against its expected answer, against free plus busy summing to the whole window,
+  and wherever the range is small enough against a per-minute walk -- so these answers
+  cannot drift from what the program returns.
 
 The complement rather than the intersection, and it is almost all boundary conditions: before
 the first busy span, between consecutive ones, after the last, and the empty cases where

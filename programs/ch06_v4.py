@@ -1,9 +1,55 @@
 #!/usr/bin/env python3
 """Variation 4 -- the counter changelog (looks like metrics). Standalone and runnable.
 
-  A service ships counters, and each entry says what CHANGED -- "errors +5" -- rather than
-  what the counter became.  Fold the entries into the current counters.  Then: the log is
-  too long to keep.  Compact it.
+  WHAT THE WORDS MEAN, before any of them is used:
+    counter   -- a named number: "errors", "hits".  It starts at nothing, not at 0 -- a
+                 counter no entry has ever mentioned is ABSENT, which is not the same as a
+                 counter whose value is 0.
+    entry     -- one line of the log, written "errors +5".  It says what CHANGED, not what
+                 the counter became, so every entry contributes and none supersedes another.
+    fold      -- apply the entries in order to get the current counters.  For a delta log
+                 that means ADDING them up; for the chapter's log of states it meant
+                 assigning.  Order does not matter to a sum, which is why the same log
+                 reversed gives the same totals.
+    tombstone -- an entry whose value is None.  It means "this counter is gone", so folding
+                 it removes the counter entirely rather than setting it to 0.
+    compaction -- dropping entries you believe you no longer need.  On a log of STATES,
+                 keeping the last entry per key is safe.  That is the thing to test here.
+
+  A service ships nine entries: errors +5, errors +3, hits +7, errors +2, errors +6, hits
+  +1, hits +9, hits +4, errors +8.  Fold them and you have errors=24 and hits=21.  Then the
+  log gets too long to keep, and somebody compacts it the way the chapter's log was
+  compacted -- keeping the last entry per counter, which here is errors +8 and hits +4.
+
+  GIVEN A DELTA LOG, WHAT ARE THE CURRENT COUNTERS?
+
+  Worked, on logs of the entries above:
+    errors +5                       -> errors=5         one entry, the smallest real log
+    the nine entries above          -> errors=24, hits=21    5+3+2+6+8 and 7+1+9+4
+    the same nine REVERSED          -> errors=24, hits=21    addition does not care about
+                                       order, so the fold is unchanged.  Compaction is what
+                                       cares: keeping the last entry per counter now keeps
+                                       different entries and gets a different wrong answer
+    errors +5, errors -2            -> errors=3         deltas may be negative
+    drops +0, drops +5              -> drops=5          and here keeping only the LAST entry
+                                       happens to be exactly right, because everything
+                                       before it summed to zero.  Luck, not correctness
+    retries +5, retries -5, errors +1 -> retries=0, errors=1    a counter at 0 that EXISTS
+    the nine, then hits DELETED     -> errors=24        and "hits" is absent, not 0
+    a log that is ONLY a delete     -> no counters at all
+    an EMPTY log                    -> no counters at all
+    ask the result for "disk"       -> NOT PRESENT.  No entry ever mentioned it, so there is
+                                       nothing to report.  The answer is "absent", NOT 0 --
+                                       0 is a measurement and this is the absence of one
+  And on a 20,000-entry log over 50 counters:
+    increments of 1, 2, 3 cycling   -> 50 counters, m0=799
+    increments cycling -3..+3       -> 50 counters, m0=-3, and here the wrong compaction is
+                                       EXACT: each counter's earlier increments cancel, so
+                                       its last one equals its total
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted three
+  ways -- against a per-counter reference sum and against both safe compactions -- so these
+  answers cannot drift from what the program returns.
 
 The fold needs addition where the chapter's needed assignment, which still works and is
 barely a change.  Compaction BREAKS: you cannot keep "the last +5" and drop the earlier

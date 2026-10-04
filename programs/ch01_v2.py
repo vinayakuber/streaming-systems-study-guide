@@ -1,9 +1,39 @@
 #!/usr/bin/env python3
 """Variation 2 — the rolling maximum (looks like risk). Standalone and runnable.
 
-  A risk screen shows the LARGEST exposure among the last W ticks and must update on
-  every tick.  Same window, same "you may not re-read it" rule as the average: one
-  arrival in, one departure out, an answer after each tick.
+  WHAT THE WORDS MEAN, before any of them is used:
+    tick     -- one arrival.  Ticks are numbered 0, 1, 2, ... in arrival order, so "tick 3"
+                is the 4th value the screen ever saw.
+    exposure -- the number a tick carries.  Here, one position's size in lakh.
+    window   -- the last W ticks, and W = 3 here.  Window i is ticks i, i+1, i+2, INCLUSIVE
+                at both ends, so window 0 is the first three ticks and no window exists at
+                all until three have arrived.
+    maximum  -- the largest of the three exposures in that window.  Not a total and not an
+                average: one of the values that is actually sitting there.
+
+  A risk screen watches nine exposures arrive, in this order: 5, 3, 7, 2, 6, 1, 9, 4, 8.
+  After each arrival it must show the largest of the last three.  It may not re-read the
+  window -- one value arrives, one value leaves, and an answer is due immediately.
+
+  GIVEN A WINDOW INDEX i, WHAT IS THE LARGEST EXPOSURE IN WINDOW i?
+
+  Worked, on the nine exposures above -- which between them define only windows 0..6:
+    window 0 -> 7    ticks 5, 3, 7: the first window there is, and 7 is in it
+    window 2 -> 7    ticks 7, 2, 6: 7 is the oldest member, so this is the LAST window it is in
+    window 3 -> 6    ticks 2, 6, 1: 7 has just left, and no single kept number could say so
+    window 4 -> 9    ticks 6, 1, 9: the arriving value is itself the answer
+    window 6 -> 9    ticks 9, 4, 8: the last window these nine ticks define at all
+    window 7 -> no maximum: nine ticks and W = 3 give seven windows, 0..6, so 7 is off the
+               end.  The answer is "undefined", NOT 8 -- answering from the two ticks that
+               do exist would report a maximum of a window that never happened.
+  And on a generated 5,000-tick stream with W = 500:
+    window 0    -> 997916   the largest of the first 500 exposures
+    window 4500 -> 998567   the largest of the last 500
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted three
+  ways -- deque, brute force, rescan -- so these answers cannot drift from what the program
+  returns.  (The off-the-end line is asserted in the form the table can hold it: a stream
+  shorter than its own window, whose expected answer is None.)
 
 The trick does not transfer, and seeing exactly why is the whole exercise.  A total can
 have a value subtracted out of it because addition is invertible; a maximum cannot --

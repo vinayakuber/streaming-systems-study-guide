@@ -1,9 +1,64 @@
 #!/usr/bin/env python3
 """Variation 3 -- the abandoned shopping cart (looks like commerce). Standalone and runnable.
 
-  Hold each shopper's cart while they shop.  Carts that have been inactive for a week are
-  expired, because there are far more shoppers than active ones.  A shopper comes back after
-  ten days and expects their cart to be there.
+  WHAT THE WORDS MEAN, before any of them is used:
+    addition  -- one item going into a cart: (shopper, the item's price, the hour).  Hours
+                 count from 0, so hour 168 is a week in and hour 540 is twenty-two days in.
+    cart      -- every item that shopper has added, in order.  "Cart value" is the sum of
+                 its prices, and the answer below adds up the value still held across ALL
+                 shoppers -- 45 when nothing has been lost.
+    inactive  -- a shopper is inactive at hour t if their last addition was before t.  The
+                 gap is t minus that hour.
+    allowance (ttl) -- how long a cart survives inactivity, in hours.  A week is 168.  A gap
+                 of exactly ttl still keeps the cart; one hour more and it is expired.
+    expire    -- what happens when the allowance runs out.  Two different things are being
+                 conflated and the problem turns on separating them: DELETING the cart, so
+                 the items are gone, versus WRITING IT OUT to durable storage, so memory is
+                 freed and the shopper can still have their items back.
+    carts saved -- how many carts memory is NOT holding at the hour you look.  It has to be
+                 measured at a named hour: an expiry is usually followed straight away by
+                 the addition that re-creates the cart, so counting at the end shows nothing.
+
+  Nine additions arrive: a adds a 5 at hour 1 and a 3 at hour 3; b adds a 4 at hour 50 and a
+  7 at hour 90; a adds a 2 at hour 130; b adds a 9 at hour 220; a adds a 6 at hour 245; b
+  adds a 1 at hour 260; and a adds an 8 at hour 540.  The true carts are a = 5+3+2+6+8 = 24
+  and b = 4+7+9+1 = 21, so 45 of value in all.  Shopper 'a' goes quiet from hour 245 to hour
+  540 -- 295 hours, which is over ten days -- and then comes back expecting their cart.
+
+  GIVEN AN ALLOWANCE AND AN HOUR TO LOOK AT, HOW MUCH CART VALUE SURVIVES, AND HOW MANY
+  CARTS HAS MEMORY BEEN SPARED?
+
+  Worked, as (value kept by deleting, carts saved) on the nine additions above -- which
+  between them cover hours 1..540:
+    never expire, at hour 540  -> (45, 0)   nothing is ever dropped, so nothing is lost and
+                                            nothing is saved: the baseline
+    ttl = 295, at hour 540     -> (45, 0)   exactly the length of 'a's silence, so the cart
+                                            is still there when they return
+    ttl = 294, at hour 540     -> (29, 0)   one hour tighter, the other side of that edge:
+                                            'a's first four items are gone, 16 of value lost
+    ttl = 168, at hour 540     -> (8, 1)    the week the product actually chose: 'a' comes
+                                            back to a cart holding only the item they just
+                                            added, and 37 of value has been thrown away
+    ttl = 168, at hour 413     -> (8, 0)    the SAME allowance, looked at 127 hours earlier:
+                                            it has saved NOTHING yet
+    ttl = 168, at hour 429     -> (8, 2)    sixteen hours later, both carts are out of
+                                            memory -- so "how much does the expiry save" has
+                                            no answer without an hour attached to it
+    ttl = 0, at hour 540       -> (8, 1)    one cart at a time, the tightest allowance
+    an EMPTY stream, at hour 0 -> (0, 0)    no additions, so no carts.  0, not an error
+    a single addition, at hour 0 -> (5, 0)  the smallest real stream
+    two additions 10 hours apart, ttl = 10 -> (8, 0)   the gap equals the allowance: kept
+    the same two, ttl = 9                  -> (3, 0)   one hour short: the first item is gone
+  And on 2,000 shoppers who visit once plus one who never leaves:
+    ttl = 100, at hour 2000 -> (301, 1899)   1,899 carts out of memory, and 1,899 shoppers
+                                             who would find their cart empty
+    ttl = 0,   at hour 2000 -> (1, 2000)     everything saved, everything lost
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted twice --
+  against the true cart and against the store -- so these answers cannot drift from what the
+  program returns.  (Looking at an hour outside the stream is defined too and reported by
+  the same function: hour 0 holds 0 carts because nothing has arrived, and hour 10000 holds
+  0 because everything has expired -- neither is an error.)
 
 Here the expiry is the FEATURE, not the compromise -- the chapter's silent restart is the
 specified behaviour -- and that inverts the whole problem, leaving one real contradiction:

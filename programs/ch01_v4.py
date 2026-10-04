@@ -2,8 +2,57 @@
 """Variation 4 — the average that must survive a restart (looks like reliability).
 Standalone and runnable.
 
-  The same rolling average, and the process is restarted mid-stream -- a deploy, an OOM
-  kill, a node reboot.  The running average must CONTINUE, not start again.
+  WHAT THE WORDS MEAN, before any of them is used:
+    input      -- one value arriving.  Inputs are numbered 0, 1, 2, ... in arrival order,
+                  so "input 3" is the 4th value the worker ever read.
+    window     -- the last W inputs, W = 3 here, INCLUSIVE of the one just read.  The first
+                  answer is therefore due at input 2, not input 0: before that there is no
+                  full window to average.
+    answer     -- one average, emitted after each input from input 2 onwards.  Nine inputs
+                  with W = 3 give seven answers.
+    checkpoint -- what the worker writes to disk as it goes, so that a restart can carry on.
+                  Everything NOT in the checkpoint is gone when the process dies.
+    crash at k -- the process is killed just before it reads input k, then restarted from
+                  whatever its last checkpoint holds.  "No crash" means it ran straight
+                  through.
+
+  The same rolling average as the chapter -- values 5, 3, 7, 2, 6, 1, 9, 4, 8 and W = 3 --
+  except that the process is killed mid-stream (a deploy, an OOM kill, a node reboot) and
+  restarted.  The stream of answers must CONTINUE across the restart rather than start
+  again, so it must still be seven answers ending in the same number as an uninterrupted
+  run: (5 + 3 + 7) / 3 = 5.0 first and (9 + 4 + 8) / 3 = 7.0 last.
+
+  GIVEN A CRASH POINT k, HOW MANY ANSWERS COME OUT AND WHAT IS THE LAST ONE?
+
+  Worked, on the nine values above -- which between them define crash points 0..9 only.
+  Each line is (answers emitted, final answer), and the correct pair is always (7, 7.0):
+    crash at 1, keep the window -> (7, 7.0)   the earliest crash that has read anything
+    crash at 2, keep the window -> (7, 7.0)   killed one input BEFORE the first answer is due
+    crash at 3, keep the window -> (7, 7.0)   killed one input AFTER it -- the other side of
+                                              that edge, and both sides must come out alike
+    crash at 8, keep the window -> (7, 7.0)   the last input there is
+    crash at 4, keep the TOTAL  -> (7, 11.0)  the right NUMBER of answers and a wrong final
+                                              one: with the window gone, nothing can be
+                                              subtracted, so the total can only read high
+    crash at 4, position AHEAD  -> (6, 7.0)   one input lost: the final value still looks
+                                              right, and there are six answers, not seven
+    crash at 4, position BEHIND -> (8, 7.0)   one input read twice: eight answers
+    crash at 20                 -> (7, 7.0)   off the end: there is no input 20, so the
+                                              kill never fires and this is just the no-crash
+                                              run.  The honest answer to "what does a crash
+                                              at 20 do" is "nothing", not "the worst case"
+    a 2-value stream, W = 3     -> (0, None)  the window never fills, so NO answer is ever
+                                              emitted and the final answer is undefined --
+                                              not 0.0, and not the average of the two values
+                                              that did arrive
+  And on a generated 4,000-value stream with W = 50, killed at input 2000:
+    keep the window -> (3951, 1.52)   3,951 answers, the last one correct
+    keep the total  -> (3951, 0.02)   the same count, the final answer low by 1.5
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted against
+  the from-scratch reference, so these answers cannot drift from what the program returns.
+  (The crash-at-20 line is the table's no-crash row: the program does the same thing for
+  both, which is the point being made.)
 
 The total is one number and looks trivially checkpointable, and that is the trap: restoring
 the total without the last W values makes the next subtraction impossible, so the state

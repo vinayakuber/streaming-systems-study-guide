@@ -468,9 +468,41 @@ This is **the shortest spike** solved on its own: a complete file, every helper 
 #!/usr/bin/env python3
 """Variation 2 — the shortest spike (looks like load testing). Standalone and runnable.
 
-  A load test records how many requests arrived in each second.  Find the SHORTEST run of
-  consecutive seconds whose total reaches at least K -- the tightest burst in the run.
-  Idle seconds are recorded as zero, so a run may contain seconds that contribute nothing.
+  WHAT THE WORDS MEAN, before any of them is used:
+    second -- one bucket of the load test's log, holding how many requests arrived during
+              it.  Seconds are numbered 0, 1, 2, ... in time order, and a second in which
+              nothing arrived is recorded as 0 rather than left out.
+    run    -- any stretch of CONSECUTIVE seconds, both ends included.  A run of length 3
+              starting at second 0 is seconds 0, 1 and 2.  Its total is the sum of the
+              counts in it.
+    K      -- the threshold you are given.  A run "reaches K" when its total is >= K, so
+              overshooting is allowed and only falling short is not.
+    length -- how many seconds a run spans, which is the quantity being minimised.
+
+  A load test logs nine seconds of traffic: 5, 3, 7, 2, 6, 1, 9, 4, 8 requests -- 45 in
+  all.  You want the tightest burst: the fewest consecutive seconds that between them carry
+  at least K requests.  Idle seconds are logged as 0, so a qualifying run may well contain
+  seconds that contribute nothing to its total.
+
+  GIVEN K, WHAT IS THE LENGTH OF THE SHORTEST RUN WHOSE TOTAL REACHES K?
+
+  Worked, on the nine seconds above -- whose totals run from 0 up to 45 and no further:
+    K = 0   -> 1      the smallest K there is: any single second already reaches 0
+    K = 15  -> 3      seconds 0..2 carry 5 + 3 + 7 = 15 exactly, and no two seconds do
+    K = 21  -> 3      seconds 6..8 carry 9 + 4 + 8 = 21 exactly -- still three
+    K = 22  -> 4      one more request than 21, and no three seconds can supply it, so the
+                      answer has to GROW: this is the boundary the problem is really about
+    K = 45  -> 9      the largest reachable K: the whole log, every second of it
+    K = 46  -> none   one request past the whole log, so nothing reaches it.  The answer is
+                      "no such run", NOT 9 -- returning the longest run would claim a burst
+                      of 46 requests that the load test never recorded
+  And on a generated 20,000-second log:
+    K = 2000        -> 80     eighty consecutive seconds is the tightest way to gather 2,000
+    K = 1000000000  -> none   far beyond the whole log's total, so again no such run
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted against
+  the all-pairs scan as well as the two-pointer, so these answers cannot drift from what the
+  program returns.
 
 The window is no longer a fixed size, so the sliding machinery does not apply directly and
 `expire` disappears entirely: there is no W to expire against.  The move that unlocks it is
@@ -890,8 +922,45 @@ This is **the next warmer day** solved on its own: a complete file, every helper
 #!/usr/bin/env python3
 """Variation 3 — the next warmer day (looks like weather). Standalone and runnable.
 
-  A station records one temperature a day.  For each day, report HOW MANY DAYS UNTIL THE
-  NEXT WARMER ONE, or zero if no warmer day ever comes.
+  WHAT THE WORDS MEAN, before any of them is used:
+    day    -- one recorded temperature.  Days are numbered 0, 1, 2, ... in date order, so
+              "day 4" is the 5th reading in the series.
+    warmer -- STRICTLY warmer.  A day of the same temperature does not count as warmer, so
+              an equal day resolves nothing and the wait continues past it.
+    wait   -- how many days later the next warmer day falls, counted as a difference of day
+              numbers: if day 0 is resolved by day 2, the wait is 2, and a day resolved by
+              the very next day has a wait of 1.
+    0      -- the answer reserved for "no warmer day ever comes".  It is a real answer, not
+              a missing one -- no day can honestly have a wait of 0, so the value is free.
+
+  A station records one temperature a day, nine of them: 5, 3, 7, 2, 6, 1, 9, 4, 8 degrees.
+  For each day you want to know how long its occupant had to wait for a warmer one.
+
+  GIVEN A DAY NUMBER, HOW MANY DAYS UNTIL THE NEXT STRICTLY WARMER DAY?
+
+  Worked, on the nine days above -- which between them define only days 0..8:
+    day 0 -> 2    5 degrees; day 1 is cooler at 3, day 2 is 7, so the wait is 2
+    day 4 -> 2    6 degrees, resolved by day 6 at 9 -- an ordinary day, mid-series
+    day 2 -> 4    7 degrees: the longest wait in these nine, also resolved by day 6
+    day 6 -> 0    9 degrees, the record high.  Nothing warmer ever comes, so 0
+    day 8 -> 0    the last day of all, which can only ever be 0
+    day 9 -> no answer: the series is nine days long, so it defines days 0..8 and 9 is off
+             the end.  "Undefined", NOT 0 -- 0 already means "no warmer day ever came",
+             which would be a claim about weather that was never recorded
+  The two sides of the STRICT comparison cannot be shown on those nine: they are all
+  distinct, so no equal day ever occurs.  On a four-day run [5, 5, 5, 6], which is in the
+  table for exactly this reason:
+    day 0 -> 3    equal days 1 and 2 do NOT resolve it; only day 3 at 6 does
+    day 2 -> 1    the last of the equal days, resolved by the very next day
+  And on a generated 20,000-day series:
+    day 9065  -> 2195   the longest wait in the series: six years of cooler weather
+    day 19999 -> 0      the last day again, and again 0
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted against
+  the forward scan and against the bounded lookahead from both sides, so these answers
+  cannot drift from what the program returns.  (The off-the-end line is the one case the
+  table cannot hold as a row: the answers are a list of nine, so asking for day 9 raises
+  IndexError rather than returning a number.)
 
 There is no window at all here, which is exactly what makes it worth putting beside the
 sliding maximum: `expire` is gone and only the eviction remains.  Keep the days whose answer
@@ -1324,9 +1393,46 @@ This is **the longest steady stretch** solved on its own: a complete file, every
 """Variation 4 — the longest steady stretch (looks like manufacturing). Standalone and
 runnable.
 
-  A sensor on a line logs one measurement a second.  Find the LONGEST run of consecutive
-  seconds in which the highest and lowest measurement differ by at most L -- the longest
-  stretch the process held steady.
+  WHAT THE WORDS MEAN, before any of them is used:
+    second  -- one logged measurement.  Seconds are numbered 0, 1, 2, ... in time order, so
+               "second 3" is the 4th reading the sensor took.
+    stretch -- any run of CONSECUTIVE seconds, both ends included.  A stretch of length 6
+               starting at second 0 covers seconds 0 through 5.
+    spread  -- within a stretch, the highest reading minus the lowest.  A stretch of one
+               second has a spread of 0.
+    L       -- the tolerance you are given.  A stretch counts as steady when its spread is
+               <= L, so exactly L still counts and L + 1 does not.
+    length  -- how many seconds the stretch spans, which is the quantity being maximised.
+               0 is the answer reserved for "there is no stretch at all".
+
+  A sensor on a production line logs nine seconds of measurements: 5, 3, 7, 2, 6, 1, 9, 4,
+  8.  The whole log spans 9 - 1 = 8.  You want the longest stretch over which the process
+  held steady to within L.
+
+  GIVEN A TOLERANCE L, HOW MANY SECONDS IS THE LONGEST STRETCH WHOSE SPREAD IS <= L?
+
+  Worked, on the nine readings above -- whose spreads run from 0 up to 8 and no further:
+    L = 0  -> 1    the tightest tolerance: all nine readings differ, so no two consecutive
+                   seconds are ever equal and every steady stretch is a single second
+    L = 4  -> 3    an ordinary tolerance: seconds 0..2 are 5, 3, 7, spanning 7 - 3 = 4
+    L = 5  -> 5    seconds 0..4 are 5, 3, 7, 2, 6, spanning 7 - 2 = 5
+    L = 6  -> 6    one more degree of tolerance admits second 5 (the 1), making the spread
+                   exactly 7 - 1 = 6 -- the two sides of that boundary are the exercise
+    L = 7  -> 6    the one extra tolerance that buys NOTHING: still six seconds
+    L = 8  -> 9    the full spread of the log, so the whole log is one steady stretch
+    L = 99 -> 9    far above the full spread.  Still 9, and it cannot be more: the honest
+                   answer is bounded by the log, not by L.  There is no "off the end" L
+                   here -- every L >= 8 gives the same 9
+    an empty log, any L -> 0    no seconds, so no stretch.  0 means "there is no steady
+                   stretch at all", NOT 1 -- reporting 1 would claim a second the sensor
+                   never logged
+  And on a generated 20,000-second log:
+    L = 0  -> 3    the longest run of identical readings anywhere in it, starting at 5,971
+    L = 20 -> 8    the longest stretch holding within 20, starting at second 13,079
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted against
+  the brute-force scan -- its length AND its starting second -- so these answers cannot
+  drift from what the program returns.
 
 This is the two-deque version of the sliding spread with the window size turned into the
 ANSWER rather than an input, and that inversion is the exercise.  There is no W to slide:

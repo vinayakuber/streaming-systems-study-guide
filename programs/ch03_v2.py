@@ -1,9 +1,41 @@
 #!/usr/bin/env python3
 """Variation 2 — the shortest spike (looks like load testing). Standalone and runnable.
 
-  A load test records how many requests arrived in each second.  Find the SHORTEST run of
-  consecutive seconds whose total reaches at least K -- the tightest burst in the run.
-  Idle seconds are recorded as zero, so a run may contain seconds that contribute nothing.
+  WHAT THE WORDS MEAN, before any of them is used:
+    second -- one bucket of the load test's log, holding how many requests arrived during
+              it.  Seconds are numbered 0, 1, 2, ... in time order, and a second in which
+              nothing arrived is recorded as 0 rather than left out.
+    run    -- any stretch of CONSECUTIVE seconds, both ends included.  A run of length 3
+              starting at second 0 is seconds 0, 1 and 2.  Its total is the sum of the
+              counts in it.
+    K      -- the threshold you are given.  A run "reaches K" when its total is >= K, so
+              overshooting is allowed and only falling short is not.
+    length -- how many seconds a run spans, which is the quantity being minimised.
+
+  A load test logs nine seconds of traffic: 5, 3, 7, 2, 6, 1, 9, 4, 8 requests -- 45 in
+  all.  You want the tightest burst: the fewest consecutive seconds that between them carry
+  at least K requests.  Idle seconds are logged as 0, so a qualifying run may well contain
+  seconds that contribute nothing to its total.
+
+  GIVEN K, WHAT IS THE LENGTH OF THE SHORTEST RUN WHOSE TOTAL REACHES K?
+
+  Worked, on the nine seconds above -- whose totals run from 0 up to 45 and no further:
+    K = 0   -> 1      the smallest K there is: any single second already reaches 0
+    K = 15  -> 3      seconds 0..2 carry 5 + 3 + 7 = 15 exactly, and no two seconds do
+    K = 21  -> 3      seconds 6..8 carry 9 + 4 + 8 = 21 exactly -- still three
+    K = 22  -> 4      one more request than 21, and no three seconds can supply it, so the
+                      answer has to GROW: this is the boundary the problem is really about
+    K = 45  -> 9      the largest reachable K: the whole log, every second of it
+    K = 46  -> none   one request past the whole log, so nothing reaches it.  The answer is
+                      "no such run", NOT 9 -- returning the longest run would claim a burst
+                      of 46 requests that the load test never recorded
+  And on a generated 20,000-second log:
+    K = 2000        -> 80     eighty consecutive seconds is the tightest way to gather 2,000
+    K = 1000000000  -> none   far beyond the whole log's total, so again no such run
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted against
+  the all-pairs scan as well as the two-pointer, so these answers cannot drift from what the
+  program returns.
 
 The window is no longer a fixed size, so the sliding machinery does not apply directly and
 `expire` disappears entirely: there is no W to expire against.  The move that unlocks it is

@@ -1,11 +1,54 @@
 #!/usr/bin/env python3
 """Variation 2 -- the unique-visitor count (looks like analytics). Standalone and runnable.
 
-  Page views arrive forever, each carrying a visitor id.  Report how many DISTINCT visitors
-  were seen today.  10**9 views a day, tens of millions of visitors.
+  WHAT THE WORDS MEAN, before any of them is used:
+    view     -- one page load, carrying (visitor id, the second it happened).  Seconds count
+                from 0 and a day is 86,400 of them.
+    visitor  -- the id a view carries.  The same visitor may appear in a thousand views; a
+                thousand views from one visitor is still one visitor.
+    distinct -- how many DIFFERENT visitor ids appeared.  Not how many views: that is the
+                question the chapter's running total answers, and it is the wrong one here.
+    expiry (ttl) -- how long an id is remembered before being dropped to save space, in the
+                same seconds.  A gap of exactly ttl between two views by the same visitor
+                still counts as remembered; one second more and the id has been forgotten,
+                so the visitor is counted a second time.
+    sketch   -- an approximate counter that keeps at most K = 256 hash values however many
+                visitors there are, and answers "how many distinct" from them.  Below 256
+                distinct it is exact; above, it estimates.
 
-  The chapter's answer -- one accumulator per key, with an expiry to bound it -- does not
-  survive the word "distinct".
+  A view log carries nine views from two visitors: a@1, a@3, b@50, b@90, a@130, b@220,
+  a@245, b@260, a@540.  The true answer is 2.  Visitor 'a' is silent from second 245 to
+  second 540 -- a gap of 295 -- and that silence is what an expiry gets wrong.  At the scale
+  the question names there are 10**9 views a day and tens of millions of visitors.
+
+  GIVEN A DAY'S VIEWS AND AN EXPIRY, HOW MANY DISTINCT VISITORS WERE SEEN?
+
+  Worked, on the nine views above -- the input here is a log and an expiry, so no input is
+  "off the end"; what the rows pin instead are both degenerate ends and both sides of the
+  expiry boundary:
+    an EMPTY day, no expiry   -> 0    no views, so no visitors.  0, honestly, not an error
+    one view, no expiry       -> 1    the smallest real day
+    the nine views, no expiry -> 2    the true answer: two ids, nine views
+    1,000 views, all 'solo'   -> 1    one visitor, and the tempting answer 1,000 is the
+                                      count of VIEWS, which nobody asked for
+    the nine views, ttl = 295 -> 2    exactly the length of 'a's silence, so 'a' is still
+                                      remembered when it returns: still right
+    the nine views, ttl = 294 -> 3    one second tighter, the other side of that edge: 'a'
+                                      has been forgotten and is counted TWICE, so the answer
+                                      reads 3 for a day that had 2.  Note the direction --
+                                      an expiry OVERSTATES a distinct count
+    the nine views, ttl = 0   -> 9    every view its own visitor, which is the view count
+    the nine views, ttl = a whole day -> 2   right again, and it saved nothing at all: at
+                                      this size the expiry frees 0 slots in every row above
+  And at the sketch's own boundary, and at scale:
+    255 distinct visitors   -> 255     below K = 256, so the sketch is exact
+    256 distinct visitors   -> 257     at K, the estimator takes over and is 1 high
+    4,000 distinct visitors -> 3,721   7% low, in 256 slots instead of 4,000
+    12,000 distinct         -> 11,544  4% low, in the same 256 slots
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted against
+  the exact set AND against the sketch, so these answers cannot drift from what the program
+  returns.
 
 The chapter's bound works because a sum is ONE NUMBER: a key's accumulator is the same size
 after a billion events as after one.  A distinct count is not one number -- to know whether
@@ -17,7 +60,7 @@ OVERSTATES the distinct count.  The way out is to stop being exact: a sketch ans
 many distinct" in a fixed few kilobytes at any cardinality, with a small, measurable error.
 
 WORKED EXAMPLES: the EXAMPLES table below holds 13 input/output pairs -- the chapter's own
-nine views, both sides of the 295-hour silence the expiry turns on, a day-long allowance that
+nine views, both sides of the 295-second silence the expiry turns on, a day-long allowance that
 saves nothing, an empty day, a single view, a thousand views from one visitor, both sides of
 the sketch's k-th slot, and two generated streams at 4,000 and 12,000 distinct visitors.
 Every row is ASSERTED against the exact set AND against the sketch, so the table cannot drift

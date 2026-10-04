@@ -51,9 +51,51 @@ This is **the double-booked room** solved on its own: a complete file, every hel
 #!/usr/bin/env python3
 """Variation 2 -- the double-booked room (looks like facilities). Standalone and runnable.
 
-  One list this time: the bookings for a meeting room, sorted by start.  Report every pair
-  that overlaps, and the busiest moment -- the time at which the most bookings are live at
-  once.  Up to 10**6 bookings.
+  WHAT THE WORDS MEAN, before any of them is used:
+    booking -- one reservation, written (start, end) in minutes.  The span is CLOSED: the
+               booking occupies its start minute AND its end minute, so (0, 10) and (10, 20)
+               both occupy minute 10 and therefore clash.  A booking may be zero-length,
+               (5, 5), which still occupies minute 5.
+    live    -- a booking is live at minute t when start <= t <= end.
+    busiest moment -- the EARLIEST minute at which the most bookings are live at once.  A
+               room with nothing booked has no busiest moment at all.
+    overlapping pair -- two bookings that are live at some common minute.  Four identical
+               bookings make 4 choose 2 = 6 pairs, not 4: the count is of pairs, not of
+               bookings involved.
+    the answer -- always a triple: (how many are live at the busiest moment, which minute
+               that is, how many overlapping pairs there are in the room).
+
+  One list this time: a meeting room's bookings, sorted by start -- (1, 3), (50, 150),
+  (130, 245), (220, 320), (540, 540).  Two of those clash: 130..245 overlaps 50..150 over
+  minutes 130..150, and 220..320 overlaps 130..245 over 220..245.  Up to 10**6 bookings.
+
+  GIVEN A ROOM'S BOOKINGS, HOW MANY CLASH AT ONCE, WHERE, AND HOW MANY PAIRS CLASH?
+
+  Worked, as (live at the busiest moment, which minute, overlapping pairs):
+    []                      -> (0, None, 0)   an empty room: no bookings, so there is NO
+                                              busiest moment.  None, NOT minute 0 -- naming
+                                              a minute would claim somebody was in the room
+    [(5, 5)]                -> (1, 5, 0)      one zero-length booking: it still occupies a
+                                              minute, and one booking cannot clash
+    [(0, 1), (5, 6), (10, 11)] -> (1, 0, 0)   a clean room: one live at a time, no pairs
+    [(0, 10), (11, 20)]     -> (1, 0, 0)      ADJACENT, one minute apart: free side of the
+                                              boundary, nothing clashes
+    [(0, 10), (10, 20)]     -> (2, 10, 1)     TOUCHING at 10: clash side of that same
+                                              boundary, because the spans are closed
+    [(0, 10), (0, 10)]      -> (2, 0, 1)      the same booking made twice
+    [(0, 10)] four times    -> (4, 0, 6)      four bookings, SIX pairs
+    [(0, 100), (10, 20), (30, 40)] -> (2, 10, 2)   nesting: the inner two never meet each
+                                              other, and each clashes with the outer one
+    the five bookings above -> (2, 130, 2)    two live at minute 130, and two clashing pairs
+    the same five plus a workshop 140..230 -> (3, 140, 5)   now three are live at once, which
+                                              is what breaks the pair-wise reasoning
+  And at the scale the problem names:
+    20,000 bookings in a chain, each overlapping only the next -> (2, 5, 19999)
+    2,000 bookings all covering one instant                    -> (2000, 1999, 1999000)
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted against
+  a direct per-instant count -- and, where it is affordable, against every pair -- so these
+  answers cannot drift from what the program returns.
 
 The chapter had two lists and leaned on a promise about each one: within a list, spans never
 overlap.  Here there is one list and it overlaps ITSELF, so "the span that ends first is
@@ -535,9 +577,60 @@ This is **the attributed click** solved on its own: a complete file, every helpe
 #!/usr/bin/env python3
 """Variation 3 -- the attributed click (looks like advertising). Standalone and runnable.
 
-  Impressions and clicks arrive on two streams.  Match each click to the impression that
-  preceded it by at most W seconds, and to the NEAREST such impression if several qualify.  An
-  impression may be credited with at most one click.
+  WHAT THE WORDS MEAN, before any of them is used:
+    impression -- an ad being shown, written (shown_at, arrived_at): the second it was shown
+                  to somebody, and the second the matcher actually received the record.
+                  Those differ, and the difference is the whole problem.
+    click      -- a second at which somebody clicked.  Clicks here are punctual.
+    lateness   -- arrived_at minus shown_at for an impression.  Measured, not assumed: the
+                  largest here is 85 seconds, for the impression shown at 245 that arrives
+                  at 330.
+    W          -- the attribution window, 60 seconds: a click may only be credited to an
+                  impression shown at most W seconds BEFORE it.  Exactly W before is inside;
+                  W + 1 is outside; an impression shown after the click never qualifies.
+    nearest    -- when several impressions qualify, the click goes to the latest of them.
+    one-to-one -- an impression may be credited with at most ONE click, so a second click
+                  competing for the same impression goes uncredited.
+    wait       -- how long the matcher holds a click before answering.  0 means answer
+                  immediately; "offline" means wait until every record is in hand.  This is
+                  NOT W: W is a business rule in seconds, the wait is a lateness allowance
+                  in seconds, and the two numbers are different here (60 against 85).
+    the answer -- how many clicks end up attributed.  A click credited to nobody is
+                  UNATTRIBUTED, which is an answer and not a failure.
+
+  Impressions and clicks arrive on two streams.  The impressions were shown at 1, 3, 130,
+  245 and 540, and the one shown at 245 does not reach the matcher until 330.  The clicks
+  come at 50, 90, 220, 260 and 265 -- and the last two both want the same impression.
+
+  GIVEN W AND A WAIT, HOW MANY CLICKS GET ATTRIBUTED?
+
+  Worked, on one punctual impression shown at second 100, and then on the streams above:
+    click at 100, wait 0 -> 1 attributed    the click's own second counts as "preceded by 0"
+    click at 160, wait 0 -> 1 attributed    exactly W = 60 seconds later: inside the window
+    click at 161, wait 0 -> 0 attributed    one second more, off the end of the window.  The
+                                            click is credited to NOBODY, not to the
+                                            impression 61 seconds back -- crediting the
+                                            nearest one would invoice an advertiser for a
+                                            click their ad did not cause
+    click at 99,  wait 0 -> 0 attributed    the impression was shown AFTER the click
+    two clicks at 120, wait 0 -> 1 attributed   one-to-one: the second click gets nothing
+    no impressions at all, one click -> 0 attributed    nothing to credit it to
+    no clicks at all, one impression -> 0 attributed    an empty answer, not an error
+    the five streams above, wait 0   -> 1 of 2   answering immediately loses an attribution
+    the five streams above, wait 60  -> 1 of 2   waiting W is not enough: W is the wrong
+                                            number to wait, and it looks right
+    the five streams above, wait 85  -> 2 of 2   waiting the MEASURED lateness recovers it
+    the five streams above, offline  -> 2 of 2   and waiting forever adds nothing more
+  And on 300 impressions and 300 clicks:
+    punctual, wait 0        -> 300 attributed   nothing is late, so no wait is needed
+    late by 120, wait 0     -> 0 attributed     every record arrives after its click has
+                                            already been answered
+    late by 120, wait 120   -> 300 attributed   the same data, the same W, one number changed
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted against
+  the offline matcher wherever the wait is long enough to equal it, and against the window
+  and one-to-one rules on every credited impression, so these answers cannot drift from what
+  the program returns.
 
 Both halves of the chapter's problem are here -- two streams, and a bound on what may be
 forgotten -- and a third thing is added: the match is asymmetric and one-to-one, so "nearest"
@@ -1023,8 +1116,57 @@ This is **the unavailable hours** solved on its own: a complete file, every help
 #!/usr/bin/env python3
 """Variation 4 -- the unavailable hours (looks like scheduling). Standalone and runnable.
 
-  Given one person's busy spans, report their FREE spans between a start and an end.  A year of
-  minutes is 525,600 of them, so the range may not be walked.
+  WHAT THE WORDS MEAN, before any of them is used:
+    minute     -- the unit everything is counted in, numbered from 0.
+    busy span  -- one meeting, written (start, end), CLOSED at both ends: busy from 130 to
+                  245 means minute 245 is busy and minute 246 is not.  A meeting may be
+                  zero-length, (5, 5), which still occupies minute 5.
+    window     -- the range you are asked about, also closed at both ends.  The window 0..10
+                  is therefore ELEVEN minutes, not ten.
+    free span  -- a maximal run of minutes inside the window that no meeting covers.  Two
+                  meetings that touch, (0, 3) and (4, 7), leave NO gap between them, because
+                  minutes 3 and 4 are consecutive; one minute apart, (0, 3) and (5, 7), they
+                  leave the one-minute gap (4, 4).
+    the answer -- a pair: (how many free spans there are, how many free minutes in total).
+                  The count catches a lost span and the minutes catch an off-by-one, so the
+                  pair pins the answer from both directions.
+
+  One person's calendar holds three meetings -- 1..3, 130..245 and 540..540 -- and you are
+  asked for their free time in the window 0..600.  A year of minutes is 525,600 of them, so
+  whatever you do may not walk the range minute by minute.
+
+  GIVEN THE BUSY SPANS AND A WINDOW, WHAT ARE THE FREE SPANS?
+
+  Worked, as (free spans, free minutes):
+    no meetings, window 0..10      -> (1, 11)   the whole window is one free span, and it is
+                                                eleven minutes because both ends count
+    busy 0..10, window 0..10       -> (0, 0)    busy throughout: there is NO free span, and
+                                                the answer says so rather than inventing one
+    busy 0..5, window 0..10        -> (1, 5)    free 6..10, so the span starts the minute
+                                                after the meeting ends
+    busy 0..3 and 4..7, window 0..10  -> (1, 3) ADJACENT meetings: no gap between them at
+                                                all, only 8..10 after them
+    busy 0..3 and 5..7, window 0..10  -> (2, 4) one minute apart: the other side of that
+                                                boundary, and the gap (4, 4) is one minute
+    busy 5..5, window 0..10        -> (2, 10)   a zero-length meeting still splits the window
+    busy 0..10, window 5..5        -> (0, 0)    a one-minute window, busy
+    busy 0..1,  window 5..5        -> (1, 1)    the same one-minute window, free
+    busy -5..20, window 0..10      -> (0, 0)    a meeting that covers the window from outside
+    busy 20..30, window 0..10      -> (1, 11)   a meeting entirely after the window
+    the three meetings, window 0..600 -> (4, 481)   free 0..0, 4..129, 246..539 and 541..600
+    window 10..5 (start after end) -> (0, 0)    off the end: the window is empty, so there is
+                                                nothing free in it.  The answer is "no free
+                                                spans", NOT the window read backwards and NOT
+                                                an error
+  And on a year of 525,600 minutes:
+    2,000 meetings every 250 minutes  -> (2001, 403601)   a free span before, between and
+                                                after every meeting
+    2,000 booked back to back         -> (1, 403601)      the same free minutes in ONE span
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted three
+  ways -- against its expected answer, against free plus busy summing to the whole window,
+  and wherever the range is small enough against a per-minute walk -- so these answers
+  cannot drift from what the program returns.
 
 The complement rather than the intersection, and it is almost all boundary conditions: before
 the first busy span, between consecutive ones, after the last, and the empty cases where

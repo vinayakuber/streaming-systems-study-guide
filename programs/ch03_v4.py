@@ -2,9 +2,46 @@
 """Variation 4 — the longest steady stretch (looks like manufacturing). Standalone and
 runnable.
 
-  A sensor on a line logs one measurement a second.  Find the LONGEST run of consecutive
-  seconds in which the highest and lowest measurement differ by at most L -- the longest
-  stretch the process held steady.
+  WHAT THE WORDS MEAN, before any of them is used:
+    second  -- one logged measurement.  Seconds are numbered 0, 1, 2, ... in time order, so
+               "second 3" is the 4th reading the sensor took.
+    stretch -- any run of CONSECUTIVE seconds, both ends included.  A stretch of length 6
+               starting at second 0 covers seconds 0 through 5.
+    spread  -- within a stretch, the highest reading minus the lowest.  A stretch of one
+               second has a spread of 0.
+    L       -- the tolerance you are given.  A stretch counts as steady when its spread is
+               <= L, so exactly L still counts and L + 1 does not.
+    length  -- how many seconds the stretch spans, which is the quantity being maximised.
+               0 is the answer reserved for "there is no stretch at all".
+
+  A sensor on a production line logs nine seconds of measurements: 5, 3, 7, 2, 6, 1, 9, 4,
+  8.  The whole log spans 9 - 1 = 8.  You want the longest stretch over which the process
+  held steady to within L.
+
+  GIVEN A TOLERANCE L, HOW MANY SECONDS IS THE LONGEST STRETCH WHOSE SPREAD IS <= L?
+
+  Worked, on the nine readings above -- whose spreads run from 0 up to 8 and no further:
+    L = 0  -> 1    the tightest tolerance: all nine readings differ, so no two consecutive
+                   seconds are ever equal and every steady stretch is a single second
+    L = 4  -> 3    an ordinary tolerance: seconds 0..2 are 5, 3, 7, spanning 7 - 3 = 4
+    L = 5  -> 5    seconds 0..4 are 5, 3, 7, 2, 6, spanning 7 - 2 = 5
+    L = 6  -> 6    one more degree of tolerance admits second 5 (the 1), making the spread
+                   exactly 7 - 1 = 6 -- the two sides of that boundary are the exercise
+    L = 7  -> 6    the one extra tolerance that buys NOTHING: still six seconds
+    L = 8  -> 9    the full spread of the log, so the whole log is one steady stretch
+    L = 99 -> 9    far above the full spread.  Still 9, and it cannot be more: the honest
+                   answer is bounded by the log, not by L.  There is no "off the end" L
+                   here -- every L >= 8 gives the same 9
+    an empty log, any L -> 0    no seconds, so no stretch.  0 means "there is no steady
+                   stretch at all", NOT 1 -- reporting 1 would claim a second the sensor
+                   never logged
+  And on a generated 20,000-second log:
+    L = 0  -> 3    the longest run of identical readings anywhere in it, starting at 5,971
+    L = 20 -> 8    the longest stretch holding within 20, starting at second 13,079
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted against
+  the brute-force scan -- its length AND its starting second -- so these answers cannot
+  drift from what the program returns.
 
 This is the two-deque version of the sliding spread with the window size turned into the
 ANSWER rather than an input, and that inversion is the exercise.  There is no W to slide:

@@ -1,9 +1,62 @@
 #!/usr/bin/env python3
 """Variation 4 -- the fraud score over a lifetime (looks like risk). Standalone and runnable.
 
-  Every account carries a risk score: the sum of the points its events have ever earned.
-  Score each account on its ENTIRE history.  Accounts lie dormant for years and must come
-  back with the score they left with.
+  WHAT THE WORDS MEAN, before any of them is used:
+    signal   -- one risk event: (account, points, the day it happened).  Days count from 0.
+    score    -- an account's LIFETIME total: the sum of the points of every signal it has
+                ever had, with no window and no decay.  The answer below adds the surviving
+                points across all accounts -- 45 when nothing has been forgotten.
+    dormant  -- an account with no signal for a while.  Account 'a' here is dormant for 295
+                days, from day 245 to day 540.
+    allowance (ttl) -- how long the streaming layer keeps an account's running score before
+                dropping it.  A gap of exactly ttl keeps the score; one day more drops it.
+    restart  -- what a dropped score costs: the account comes back and starts from zero, so
+                its history is gone.  Count of restarts is part of the answer.
+    store    -- a database keyed by account, read and written per signal.  It holds the score
+                outside the stream, so nothing is ever dropped.
+    cache    -- a bounded number of slots in front of the store.  Its bound looks like the
+                expiry's and is NOT the same thing: a cache miss RE-READS the score, while
+                an expiry RESTARTS it.  Capacity 0 means every signal goes to the store.
+
+  Nine signals arrive: a earns 5 on day 1 and 3 on day 3; b earns 4 on day 50 and 7 on day
+  90; a earns 2 on day 130; b earns 9 on day 220; a earns 6 on day 245; b earns 1 on day
+  260; and a earns 8 on day 540.  The true lifetime scores are a = 24 and b = 21, so 45 in
+  all.  Accounts lie dormant for months and must come back with the score they left with.
+
+  GIVEN AN ALLOWANCE AND A CACHE SIZE, HOW MANY POINTS SURVIVE, AND HOW MANY RESTARTS?
+
+  Worked, as (points the expiry still has, restarts) on the nine signals above -- which
+  between them cover days 1..540.  The store and every cache size return the true 45 on
+  every one of these rows; only the expiry moves:
+    never expire, cache 1   -> (45, 0)   the baseline: nothing dropped, nothing restarted
+    ttl = 295, cache 1      -> (45, 0)   exactly 'a's dormancy, so its score survives
+    ttl = 294, cache 1      -> (29, 1)   one day tighter, the other side of that edge: 'a'
+                                         restarts and 16 points of history vanish
+    ttl = 100, cache 2      -> (8, 4)    four restarts, and 37 of the 45 points gone
+    ttl = 0, cache 0        -> (8, 7)    the last signal per account only
+    an EMPTY stream         -> (0, 0)    no signals, so no score.  0, not an error
+    a single signal         -> (7, 0)    the smallest real stream
+    cache of 0 slots        -> (45, 0)   write-through: 9 store reads instead of 2, and the
+                                         score is still exact -- a cache bound costs TIME
+    cache bigger than the data -> (45, 0)   2 store reads, and the same exact score
+    account 'zz'            -> no score at all.  'zz' has never been seen, so there is
+                                         nothing to report.  The answer is "absent", NOT 0 --
+                                         0 is the score of a clean account, which is a claim
+    a two-signal mule, 20 points then 4 points 295 days later:
+      ttl = 295             -> (24, 0)   the pair is kept together
+      ttl = 294             -> (4, 1)    one day tighter and the 20 is WASHED: the same
+                                         bound that merely costs time in the cache is a
+                                         published laundering schedule here
+  And on 2,000 accounts seen once plus one that never stops:
+    ttl = 100, cache 64     -> (301, 0)      1,899 accounts out of memory and 1,899 histories
+                                             thrown away; at the nine-signal size above, the
+                                             same expiry saves 0 accounts
+    ttl = 0, cache 0        -> (1, 199)      everything saved, everything lost
+
+  Every line above is a row in the EXAMPLES table below, and every row is asserted three
+  ways -- against the true score, the store and the cache -- so these answers cannot drift
+  from what the program returns.  (The 'zz' line is read off the store those rows build: it
+  holds 'a' and 'b' and nothing else.)
 
 The requirement forbids every bound, which makes this the one variation where the chapter's
 answer is simply unavailable -- and the useful response is to stop treating the score as
