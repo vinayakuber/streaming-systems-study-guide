@@ -13,11 +13,25 @@
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)"
 fail=0
+# The non-PASS lines of a gate's output. A failing gate that checks 1,600 frames
+# ends in PASS lines, so its tail shows twelve passes and hides the failure (R74).
+# Only when every line is a PASS does the tail say anything, so fall back to it then.
+failing_lines() { # failing_lines <logfile>
+  local hits; hits=$(grep -v '^ *PASS ' "$1" | grep -v '^ *$')
+  [ -n "$hits" ] || hits=$(tail -n 12 "$1")
+  echo "$hits" | head -n 40 | sed 's/^/          /'
+}
+
+# Output goes to a FILE, never a $(...) pipe. Playwright's child flips the shared pipe
+# to non-blocking, and verify_diagram.py then died with BlockingIOError printing its own
+# PASS lines: 1607/1607 frames passed run directly and FAILED inside this suite. On a
+# regular file O_NONBLOCK has no effect, so the gate's verdict is the only verdict.
 run() { # run <label> <cmd...>
   local label="$1"; shift
-  local out; out="$("$@" 2>&1)"; local rc=$?
-  if [ $rc -eq 0 ]; then printf '  \033[32mPASS\033[0m  %-26s %s\n' "$label" "$(echo "$out" | tail -1)"
-  else fail=1; printf '  \033[31mFAIL\033[0m  %-26s\n' "$label"; echo "$out" | sed 's/^/          /' | tail -12; fi
+  local log; log=$(mktemp); "$@" >"$log" 2>&1; local rc=$?
+  if [ $rc -eq 0 ]; then printf '  \033[32mPASS\033[0m  %-26s %s\n' "$label" "$(tail -n 1 "$log")"
+  else fail=1; printf '  \033[31mFAIL\033[0m  %-26s\n' "$label"; failing_lines "$log"; fi
+  rm -f "$log"
 }
 
 echo "regenerating every artifact from the one seed..."
@@ -38,9 +52,13 @@ run "prose names"          node tools/prose_name_gate.js
 run "stack complete"       node tools/stack_gate.js
 
 echo; echo "THE WALKTHROUGHS"
-CAPS=$(mktemp)
-for d in diagrams/anim/*/frames; do node tools/extract_captions.js "$d" >> "$CAPS"; done
-run "captions checkable"   node tools/teaching_gate.js --only=T8 "$CAPS"
+# ONE captions file PER WALKTHROUGH, never one concatenated file. Concatenated, the
+# gate reported "1/1 files pass" for a repo with hundreds of walkthroughs, and an
+# extraction that came back empty for one of them vanished into the others (R53/R74).
+# Per walkthrough, the count matches the repo and an empty one fails on its own.
+ALLCAPS=(); for d in diagrams/anim/*/; do CC=$(mktemp); node tools/extract_captions.js "$d"frames > "$CC"; ALLCAPS+=("$CC"); done
+run "captions checkable"   node tools/teaching_gate.js --only=T8 "${ALLCAPS[@]}"
+rm -f "${ALLCAPS[@]}"
 
 echo; echo "THE GEOMETRY"
 # ONE Chrome session for every frame in the repo, not one per walkthrough: at 20
@@ -71,7 +89,6 @@ run "diagrams"             node tools/validate_diagrams.js
 # from the thing it documents.
 run "programs run"         node tools/check_programs.js
 
-rm -f "$CAPS"
 echo
 [ $fail -eq 0 ] && echo "ALL GATES PASS" || echo "SOME GATES FAILED"
 exit $fail
