@@ -273,7 +273,8 @@ const r = buildInterviewSection({
   title: 'A total per key, with bounded memory — stack and heap at every step',
   subtitle: `${N} events, ${KEYS.length} keys · allowance ${SAFE_TTL} correct, ${TIGHT_TTL} gets ${WRONG.length} of ${KEYS.length} wrong · longest gap ${WORST_GAP}`,
   problem: {
-    surface: 'turnstiles',
+    surface: 'counters',
+    trap: `to bound the state with an expiry — drop whatever has gone quiet for longer than some allowance — and keep calling the answer exact, when a key that is dropped and then seen again is indistinguishable from one never seen, so the answer goes wrong with no error raised`,
     statement: [`**Events carry a key and a value, forever.** Report a **running total per key**.`, '',
       `Keys never stop arriving, so **the state cannot grow without bound — bound it.**`, '',
       `**What does the bound cost, and how do you choose it?**`],

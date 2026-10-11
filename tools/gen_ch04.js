@@ -40,6 +40,21 @@ const sessionsIgnoringKey = (gap) => {
 };
 const UNKEYED = sessionsIgnoringKey(GAP);
 const KEYED_TOTAL = KEYS.reduce((n, k) => n + sessionsOf(k, GAP).length, 0);
+// what sets a session's bounds: its lengths and starts, read off the data, with any
+// coincidence (two equal lengths, a start on a whole minute) named rather than denied
+const ALL_SESS = KEYS.flatMap(k => sessionsOf(k, GAP));
+const SESS_LENS = ALL_SESS.map(s => s.end - s.start);
+const DUP_LEN = SESS_LENS.find((l, i) => SESS_LENS.indexOf(l) !== i);
+const ROUND_STARTS = ALL_SESS.map(s => s.start).filter(st => st % 60 === 0);
+const COINCIDENCES = [].concat(DUP_LEN === undefined ? [] : [`${SESS_LENS.filter(l => l === DUP_LEN).length === 2 ? 'two' : SESS_LENS.filter(l => l === DUP_LEN).length} are ${DUP_LEN}s long`],
+  ROUND_STARTS.length ? [`${ROUND_STARTS.map(hhmmss).join(', ')} falls on a whole minute`] : []);
+const BOUNDS_FACT = `Their lengths are ${SESS_LENS.map(l => `${l}s`).join(', ')} and they start at ${ALL_SESS.map(s => hhmmss(s.start)).join(', ')} — wherever activity began and stopped, not where a clock ticks.`
+  + (COINCIDENCES.length ? ` That ${COINCIDENCES.join(' and that ')} ${COINCIDENCES.length > 1 ? 'are coincidences of the data, not boundaries' : 'is a coincidence of the data, not a boundary'} the clock imposed.` : '');
+// the BRIDGE case: one arrival joining two sessions. Counted per key in processing order
+// (a bridge is the only arrival that LOWERS a key's session count), at both of this
+// chapter's gaps; the interview section is where the same event times do bridge.
+const IV = require('./gen_ch04_interview.js');
+const bridgesAt = (gap) => EVENTS.filter((e, i) => i > 0 && sessionsOf(e.key, gap, i).length < sessionsOf(e.key, gap, i - 1).length);
 // the cross-key near miss: an event of ONE key sitting inside another key's gap
 const B_SESS = sessionsOf('b', GAP);
 const CROSS = EVENTS.find(e => e.key === 'a' && e.et > B_SESS[0].end && e.et < B_SESS[1].start
@@ -73,6 +88,10 @@ const RETR_SMALL = retractionAt(SMALL_GAP);
 const R = RETR_SMALL[0];
 const MARGIN = collectedAt(sessionsOf(L.key, GAP).find(s => s.ids.includes(L.id)), GAP) - LI;
 const fail = (m) => { throw new Error(`gen_ch04: ${m}`); };
+const secsOf = (n) => `${n}s`;
+const BRIDGE_ELSEWHERE = `The Google Interview Question section shows it on the same event times with the keys dropped and G = ${secsOf(IV.G)}: arrival ${IV.MERGE.t} withdraws ${IV.MERGE.gone.map(g => `${g.start}..${g.end}`).join(' and ')} and replaces them with ${IV.MERGED_RUN.start}..${IV.MERGED_RUN.end}.`;
+if (bridgesAt(GAP).length || bridgesAt(GAPS[0]).length) fail('an arrival bridges two sessions in the keyed stream, so "no event here does it" is false');
+if (IV.MERGE.gone.length < 2) fail('the interview\'s bridging arrival does not withdraw two runs');
 if (new Set(GAP_SWEEP.map(g => g.counts.a)).size < 3) fail(`the gap sweep gives only ${new Set(GAP_SWEEP.map(g => g.counts.a)).size} distinct session counts for key a — "the gap is the answer" would not be visible`);
 if (UNKEYED.length >= KEYED_TOTAL) fail(`ignoring the key gives ${UNKEYED.length} sessions against ${KEYED_TOTAL} keyed — the keying lesson needs a drop`);
 if (!CROSS) fail('no event of one key sits inside another key\'s session gap — the cross-key near miss cannot be shown');
@@ -120,7 +139,7 @@ const C1 = [
           sessionsOf(k, GAP).map((s, j) => [`key "${k}" session ${j + 1}`, sTxt(s)])),
         { w: 1040, rh: 32, label: `key a gets ${sessionsOf('a', GAP).length} sessions, key b gets ${sessionsOf('b', GAP).length} — from the same stream` })
       + c.note('e1', c.P.main.x + 24, c.P.main.y + 66 + KEYED_TOTAL * 32, 1040, [
-        `No session has the same length as any other, and none starts on a round boundary. Both facts follow from the boundaries being set by the DATA.`,
+        BOUNDS_FACT,
         `Key a gets ${sessionsOf('a', GAP).length} and key b gets ${sessionsOf('b', GAP).length} over the same ${secs(Math.max(...EVENTS.map(e => e.et)))} of event time, because they were active at different moments.`,
       ], c.C.blue, c.C.blueFill),
     cap: `Sessions model behaviour rather than counting. Every boundary here was chosen by a silence of more than ${secs(GAP)}: key a's first session ends at ${hhmmss(sessionsOf('a', GAP)[0].end)} because its next activity is ${secs(sessionsOf('a', GAP)[1].start - sessionsOf('a', GAP)[0].end)} later. That is why two users over one time span get ${sessionsOf('a', GAP).length} and ${sessionsOf('b', GAP).length} sessions, not the same number.` },
@@ -298,9 +317,9 @@ const C4 = [
       c.panel('SCOPE', 'p')
       + c.note('x1', c.P.main.x + 24, c.P.main.y + 46, 1040, [`Session state is data-dependent: ${KEYED_TOTAL} entries for ${EVENTS.length} events here, and nothing in this design bounds it for a burstier stream or more keys.`], c.C.warn, c.C.warnFill)
       + c.note('x2', c.P.main.x + 24, c.P.main.y + 112, 1040, [`One session is never collected, because the watermark never reaches ${hhmmss(sessionsOf(KEYS[0], GAP).concat(sessionsOf(KEYS[1], GAP)).filter(x => collectedAt(x, GAP) === null).map(x => x.end + GAP)[0])}. Its memory is held for the life of the job regardless of allowed lateness.`], c.C.hot, c.C.hotFill)
-      + c.note('x3', c.P.main.x + 24, c.P.main.y + 178, 1040, [`This stream's late event EXTENDS a session. A late event that BRIDGES two already-emitted sessions would require retracting two panes and emitting one — the same mechanism, twice the bookkeeping, and no event here does it.`], c.C.blue, c.C.blueFill)
-      + c.note('x4', c.P.main.x + 24, c.P.main.y + 244, 1040, [`And the gap ${secs(GAP)} is a definition nobody can verify. Every session count in this chapter is correct for that definition and for no other.`], c.C.hot, c.C.hotFill),
-    cap: `The third note is worth stating plainly rather than implying: this dataset's straggler extends one session, so the bridge case — one event merging two already-published sessions — is not demonstrated here. It is the same retraction mechanism applied twice, and a design that handles the extension handles it, but no number in this chapter proves that.` },
+      + c.note('x3', c.P.main.x + 24, c.P.main.y + 178, 1040, [`This stream's late event EXTENDS a session. A late event that BRIDGES two already-emitted sessions would require retracting two panes and emitting one — the same mechanism, twice the bookkeeping, and no event in this keyed stream does it. The Google Interview Question section shows one: arrival ${IV.MERGE.t} at G = ${secsOf(IV.G)}.`], c.C.blue, c.C.blueFill)
+      + c.note('x4', c.P.main.x + 24, c.P.main.y + 266, 1040, [`And the gap ${secs(GAP)} is a definition nobody can verify. Every session count stated at that gap is correct for it and for no other — the same stream gives ${GAP_SWEEP.map(g => g.counts.a).join(', ')} sessions for key a at ${GAPS.map(secs).join(', ')}.`], c.C.hot, c.C.hotFill),
+    cap: `The third note is worth stating plainly rather than implying: this dataset's straggler extends one session, so the bridge case — one event merging two already-published sessions — is not demonstrated in this keyed stream. It is the same retraction mechanism applied twice. ${BRIDGE_ELSEWHERE}` },
 ];
 
 // =============================== EMIT DIAGRAMS ==============================
@@ -312,7 +331,7 @@ const DIAGRAMS = [
     why: [
       `**Fixed (tumbling) windows** partition event time into equal, contiguous, non-overlapping spans. Every event belongs to exactly one, so the ${WIN_STARTS.length} window sums here (${WIN_STARTS.map(w => SUM(WINDOWS[w])).join(', ')}) add up to ${WIN_STARTS.reduce((n, w) => n + SUM(WINDOWS[w]), 0)} — the whole dataset. They answer "how many per ${secs(WIN)}", and they are the shape that reconciles against a batch job.`, '',
       `**Sliding (hopping) windows** are fixed-length but overlapping, defined by a size and a slide — here ${secs(WIN)} wide starting every ${secs(PERIOD)}. ${EVENTS.filter(e => slidingStarts(e.et).length > 1).length} of the ${EVENTS.length} events land in ${Math.max(...EVENTS.map(e => slidingStarts(e.et).length))} windows at once, so the results total **${EVENTS.reduce((n, e) => n + e.v * slidingStarts(e.et).length, 0)}** against a dataset of ${EVENTS.reduce((n, e) => n + e.v, 0)}. Output volume scales as size / slide = ${WIN / PERIOD}×. They answer "what is the rolling ${secs(WIN)} figure, refreshed every ${secs(PERIOD)}".`, '',
-      `**Session windows** are data-driven: a session is a burst of activity separated from the next by a gap of inactivity — here ${secs(GAP)}. At that gap key \`a\` gets ${sessionsOf('a', GAP).length} sessions and key \`b\` gets ${sessionsOf('b', GAP).length}, over the same span of event time, because they were active at different moments. No session has the same length as another and none starts on a round boundary; both facts follow from the boundaries being set by the data.`, '',
+      `**Session windows** are data-driven: a session is a burst of activity separated from the next by a gap of inactivity — here ${secs(GAP)}. At that gap key \`a\` gets ${sessionsOf('a', GAP).length} sessions and key \`b\` gets ${sessionsOf('b', GAP).length}, over the same span of event time, because they were active at different moments. ${BOUNDS_FACT}`, '',
       `**And here is the part that is easy to miss.** Sweep the gap over the same stream and key \`a\`'s session count goes **${GAP_SWEEP.map(g => g.counts.a).join(' → ')}** at gaps of ${GAPS.map(g => secs(g)).join(', ')}. The events never change. Only the definition of "a visit" does.`, '',
       `So "how many sessions did this user have?" has **no answer in the data** until someone states the gap. It is a product definition that happens to live in a config file — which is why the window shape is part of the answer rather than an implementation detail.`],
     whenHeading: 'When to reach for each shape, and what each one costs',
@@ -360,7 +379,7 @@ const DIAGRAMS = [
       `**Retraction is unavoidable the moment a session can be collected before its last member arrives,** and that is a function of the gap, not of your data. A smaller gap means earlier collection, so tightening the gap to get cleaner "visits" silently turns on a requirement that the downstream store accept deletions.`, '',
       `**So check the store first.** A session retraction **deletes one row and inserts another**, because the bounds are the identity — a store keyed by (key, session start) cannot express it as an update. An append-only analytics store is incompatible with session windows, and that is cheaper to learn here than in production.`, '',
       `**Match the shape to the question:** fixed for periodic aggregates (${WIN_STARTS.length} answers totalling ${WIN_STARTS.reduce((n, w) => n + SUM(WINDOWS[w]), 0)}), sliding for moving averages (${WIN / PERIOD}× output), sessions for behaviour. And note the question "how many visits did this user have?" has ${new Set(GAP_SWEEP.map(g => g.counts.a)).size} different correct answers here (${GAP_SWEEP.map(g => g.counts.a).join(', ')}) — it is not answerable until the gap is fixed.`, '',
-      `**What this does not settle:** this stream's late event **extends** a session. A late event that **bridges** two already-emitted sessions would retract two panes and emit one — the same mechanism with twice the bookkeeping — and no event here does it, so nothing in this chapter demonstrates that case.`],
+      `**What this does not settle:** this stream's late event **extends** a session. A late event that **bridges** two already-emitted sessions would retract two panes and emit one — the same mechanism with twice the bookkeeping — and no event in this keyed stream does it at gap ${secs(GAP)} or ${secs(SMALL_GAP)}. ${BRIDGE_ELSEWHERE}`],
     diagramHeading: 'Visual walkthrough — the retraction, the collection, and the near miss',
     sub: `The retraction at gap ${secs(SMALL_GAP)}, the never-collected session and the keyed-vs-unkeyed counts are computed from the seed and asserted.` },
   { name: 'ch04-system', steps: C4,
@@ -382,8 +401,8 @@ const DIAGRAMS = [
       `**What this design does NOT settle — four gaps:**`, '',
       `1. **Session state is data-dependent.** ${KEYED_TOTAL} entries for ${EVENTS.length} events here, and nothing bounds it for a burstier stream or a larger key space. Fixed windows can be sized in advance; this cannot.`,
       `2. **One session is never collected**, because the watermark never reaches ${hhmmss(sessionsOf(KEYS[0], GAP).concat(sessionsOf(KEYS[1], GAP)).filter(x => collectedAt(x, GAP) === null).map(x => x.end + GAP)[0])}. Its state is held for the life of the job regardless of allowed lateness — a low-traffic key is a permanent allocation.`,
-      `3. **The bridge case is not demonstrated.** This stream's late event extends a session; one that merged two already-published sessions would retract two panes and emit one. Same mechanism, twice the bookkeeping, and no number here proves it works.`,
-      `4. **The gap is unverifiable.** Every session count in this chapter is correct for ${secs(GAP)} and for no other definition, and nothing in the data can tell you whether ${secs(GAP)} is the right definition of a visit.`],
+      `3. **The bridge case is not demonstrated in this keyed stream.** This stream's late event extends a session; one that merged two already-published sessions would retract two panes and emit one. Same mechanism, twice the bookkeeping, and no event in this keyed stream does it at gap ${secs(GAP)} or ${secs(SMALL_GAP)}. ${BRIDGE_ELSEWHERE}`,
+      `4. **The gap is unverifiable.** Every session count stated for the book's gap is correct for ${secs(GAP)} and for no other definition — the same stream gives ${GAP_SWEEP.map(g => g.counts.a).join(', ')} sessions for key a at ${GAPS.map(secs).join(', ')} — and nothing in the data can tell you whether ${secs(GAP)} is the right definition of a visit.`],
     diagramHeading: 'Visual walkthrough — six stages, one retraction, two coupled settings',
     sub: `The retraction sequence, the ${KEYED_TOTAL} state entries and the never-collected session are computed from the seed and asserted.` },
 ];
@@ -601,15 +620,28 @@ PROGRAMS.push({
       `afterFirst = ${o.afterFirst || '...'}`, `afterAll = ${o.afterAll || '...'}`,
       `didMerge = ${o.didMerge !== undefined ? o.didMerge : '...'}`, `mustRetract = ${o.mustRetract !== undefined ? o.mustRetract : '...'}`] });
     const M0 = MERGE_EVENTS[0];
+    // walk sessionsUpto(MERGE_KEY, GAP, M0.i) exactly as the pseudo-code does, and find the
+    // event that actually takes the merge branch, with the session it extends
+    const BR = (() => { const es = EVENTS.filter((e, i) => i <= M0.i && e.key === MERGE_KEY).sort((a, b) => a.et - b.et); const out = [];
+      for (const e of es) { const last = out[out.length - 1];
+        if (last && e.et - last.end <= GAP) return { e, last: { ...last } };
+        out.push({ start: e.et, end: e.et }); }
+      return null; })();
+    if (!BR) fail(`no event takes the merge branch at index ${M0.i}`);
+    if (BR.e.id === M0.e.id) fail('the arriving event itself takes the merge branch — the step-1 caption assumes it sorts in front');
+    const M0_NOW = M0.sess.find(x => x.ids.includes(M0.e.id));
+    const M0_WAS = sessionsOf(MERGE_KEY, GAP, M0.i - 1).find(x => x.ids.includes(BR.e.id));
+    if (!(M0_NOW.start === M0.e.et && M0_NOW.start < M0_WAS.start)) fail('the arriving event did not pull the session start backwards');
+    const startsOf = (ss) => ss.map(x => x.start).join(' and ');
     return [
       { t: 'ASSIGN and MERGE are the same line, read twice', line: at('fun sessionsUpto(key, gap, i)', 'if (last != NONE && e.et - last.end <= gap) { last.end = e.et · last.ids = append(last.ids, e.id) }'),
-        stack: [MAIN(), { name: 'sessionsUpto', locals: [`key = "${MERGE_KEY}"`, `gap = ${GAP}`, `i = ${M0.i}`, 'out = @0x100', `e = EVENTS[${M0.e.id}]`, `last = Session(${M0.sess.find(s => s.ids.includes(M0.e.id)).start}, ...)`] }],
+        stack: [MAIN(), { name: 'sessionsUpto', locals: [`key = "${MERGE_KEY}"`, `gap = ${GAP}`, `i = ${M0.i}`, 'out = @0x100', `e = EVENTS[${BR.e.id}]`, `last = Session(${BR.last.start}, ${BR.last.end}, ...)`] }],
         heap: [{ key: 'afterFirst', hot: true }],
-        cap: `This one line does both jobs: if the arriving event is within \`gap\` of \`last.end\`, it is ASSIGNED to that session and the session is simultaneously MERGED — \`last.end\` moves. For id ${M0.e.id} (et ${M0.e.et}) the session's bound changes, which is a window boundary moving after the window existed.` },
+        cap: `This one line does both jobs: if an event is within \`gap\` of \`last.end\`, it is ASSIGNED to that session and the session is simultaneously MERGED — \`last.end\` moves. Walking at i = ${M0.i}, it is true for id ${BR.e.id} (et ${BR.e.et}): \`last\` is [${BR.last.start}-${BR.last.end}] and ${BR.e.et} − ${BR.last.end} = ${BR.e.et - BR.last.end} ≤ ${GAP}, so the end moves to ${BR.e.et}. The event that just arrived, id ${M0.e.id} (et ${M0.e.et}), never takes this branch: it sorts in front of id ${BR.e.id} and opens the session, so a session that was [${M0_WAS.start}-${M0_WAS.end}] now starts at ${M0_NOW.start}. The START moved backwards through the re-sort, which this line alone cannot do — a window boundary moving after the window existed.` },
       { t: `so ${MERGE_EVENTS.length} out-of-order arrivals each absorb a session`, line: at('fun merged(key, gap, i)', 'if (contains(s.ids, EVENTS[i].id) && len(s.ids) > 1) { return true }'),
         stack: [MAIN({ afterFirst: '@0x100', afterAll: '@0x200', didMerge: true }), { name: 'merged', locals: [`key = "${MERGE_KEY}"`, `gap = ${GAP}`, `i = ${M0.i}`, `s = Session(${M0.sess.find(s => s.ids.includes(M0.e.id)).start}, ...)`] }],
         heap: [{ key: 'afterFirst' }, { key: 'afterAll', hot: true }],
-        cap: `\`merged\` returns true when the arriving event ended up in a session with more than one member. Compare the two heap rows: \`afterFirst\` has ${MERGES[1].sess.length} session(s) and \`afterAll\` has ${MERGES[MERGES.length - 1].sess.length}, with starts pulled BACKWARDS by ids ${MERGE_EVENTS.map(m => m.e.id).join(' and ')}.` },
+        cap: `\`merged\` returns true when the arriving event ended up in a session with more than one member. Compare the two heap rows: \`afterFirst\` starts at ${startsOf(MERGES[1].sess)} and \`afterAll\` at ${startsOf(MERGES[MERGES.length - 1].sess)} — the same ${MERGES[1].sess.length === 1 ? 'session' : `${MERGES[1].sess.length} sessions`}, with ${MERGE_EVENTS.length === 2 ? 'both' : 'their'} starts pulled BACKWARDS by ids ${MERGE_EVENTS.map(m => m.e.id).join(' and ')}.` },
       { t: 'collection is a watermark comparison, not an idle timer', line: at('fun collectedAt(s, gap)', 'if (watermarkAfter(i) >= s.end + gap) { return i }'),
         stack: [MAIN({ afterFirst: '@0x100', afterAll: '@0x200', didMerge: true }), { name: 'collectedAt', locals: [`s = Session(${sessionsOf(L.key, GAP).find(s => s.ids.includes(L.id)).start}, ${sessionsOf(L.key, GAP).find(s => s.ids.includes(L.id)).end}, ...)`, `gap = ${GAP}`, `i = ${collectedAt(sessionsOf(L.key, GAP).find(s => s.ids.includes(L.id)), GAP)}`] }],
         heap: [{ key: 'afterAll' }],
@@ -623,7 +655,7 @@ PROGRAMS.push({
   },
   intro: [
     `**What is being answered.** The four lifecycle steps, as four functions over the same key's arrivals.`, '',
-    `The line to look at first is inside \`sessionsUpto\`: \`if (last != NONE && e.et - last.end <= gap)\`. It performs **assign and merge at once** — the event joins the session and the session's bound moves in the same statement. That is why sessions have a merge step and the other shapes do not.`, '',
+    `The line to look at first is inside \`sessionsUpto\`: \`if (last != NONE && e.et - last.end <= gap)\`. It performs **assign and merge at once** — the event joins the session and the session's END moves in the same statement. A START moves only because the walk is re-sorted on every call: a late event that sorts in front opens the session earlier. That is why sessions have a merge step and the other shapes do not.`, '',
     `\`needsRetraction(key, gap)\` then reduces the whole retraction question to one comparison: was the session collected at an index below the arrival index of one of its own members? At gap ${GAP} that is ${collectedAt(sessionsOf(L.key, GAP).find(s => s.ids.includes(L.id)), GAP)} < ${LI} — false. At gap ${SMALL_GAP} it is ${R.emitIdx} < ${R.lastArrival} — true.`],
   sub: `The merge trace, the collection index and both retraction verdicts are computed from the seed and asserted.` });
 

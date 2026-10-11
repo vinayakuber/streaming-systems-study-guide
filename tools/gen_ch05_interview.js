@@ -226,6 +226,7 @@ const r = buildInterviewSection({
       `**Make it so that no item is ever processed twice and none is ever skipped.**`],
     example: [`\`${iStr()}\` → total ${CORRECT}. Crash during item ${ITEMS[C].n} and the obvious implementation gives **${DUP_AT.sum}**; swap two lines and it gives **${LOSS_AT.sum}**.`],
     constraints: [`The effect is not idempotent — it moves a balance. The queue will redeliver anything not recorded as read.`],
+    trap: `to get the order of the two writes right — do the work, then record that it was done — when every ordering of two separate writes leaves an instant a crash can land in`,
   },
   model: [
     `There are **two writes** — the effect, and the position — and the entire problem is the instant between them.`, '',
@@ -244,7 +245,7 @@ const r = buildInterviewSection({
     { name: 'the counter in two places', superseded: false, surface: 'analytics',
       statement: [`Each event increments a counter in a fast store and appends a row to a warehouse. **Both must agree.**`],
       whyHard: `Two outputs rather than one output and a position, so there is no single store the bookkeeping can live in and the transaction is genuinely unavailable. The honest answer is that it cannot be made exact, and the useful answer is to pick one store as the source of truth and **derive** the other from it — the fast counter becomes a cache rebuilt from the warehouse rather than a second authority, so disagreement becomes staleness instead of inconsistency. The skill is noticing that "both must agree" is a request to have two sources of truth, and declining it.`,
-      maps: `No change to the program; the point is that \`together\` has no store to be together IN, which is the condition the model's last paragraph names.` },
+      maps: `\`together\` has no store to be together IN, so the worker is replaced by one durable write (the warehouse row) and a counter rebuilt from it — \`derived\` in the variation program.` },
 
     { name: 'the retry that must not re-send', surface: 'notifications',
       statement: [`A worker sends a push notification per item. **A crash must not send it twice**, and the push service has no transaction and no idempotency key.`],

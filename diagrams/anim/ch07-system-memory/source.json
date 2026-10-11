@@ -46,7 +46,7 @@
     "//   commit(store, CHK, false) may land the state WITHOUT the offset",
     "fun commit(store, offset, atomic) {",
     "    var cp = Checkpoint(copyOf(store.entries), offset)",
-    "    if (atomic == false) { cp.offset = 0 }            // crashed between the two writes",
+    "    if (atomic == false) { cp.offset = -1 }            // crashed between the two writes",
     "    return cp",
     "}",
     "// primitive: countOf(m) — how many keys the map has.  countOf(the full state) = 7",

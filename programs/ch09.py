@@ -88,7 +88,7 @@ def droppable(left, bound):
 # The three variations.
 
 def the_double_booked_room(bookings):
-    """Variation 1, surface: facilities.  One list; find overlapping pairs and the
+    """Variation 2, surface: facilities.  One list; find overlapping pairs and the
     busiest moment.
 
     Non-obvious point: self-overlap removes the guarantee the sweep rested on, so
@@ -117,7 +117,7 @@ def the_double_booked_room(bookings):
     return best, at, pairs
 
 def the_attributed_click(impressions, clicks, w, wait_for_late):
-    """Variation 2, surface: advertising.  Match each click to the NEAREST impression
+    """Variation 3, surface: advertising.  Match each click to the NEAREST impression
     that preceded it by at most w, one-to-one.
 
     Non-obvious point: the match is asymmetric and one-to-one, so an impression already
@@ -148,7 +148,7 @@ def the_attributed_click(impressions, clicks, w, wait_for_late):
     return out
 
 def the_unavailable_hours(busy, start, end):
-    """Variation 3, surface: scheduling.  Report the FREE spans between start and end.
+    """Variation 4, surface: scheduling.  Report the FREE spans between start and end.
 
     Non-obvious point: the complement rather than the intersection, and it is almost
     all boundary conditions -- before the first busy span, between consecutive ones,

@@ -49,7 +49,7 @@
           "locals": [
             "mode = \"bounded\"",
             "w = (a map)",
-            "fin = (4 values)",
+            "fin = (3 values)",
             "b = 480"
           ]
         },

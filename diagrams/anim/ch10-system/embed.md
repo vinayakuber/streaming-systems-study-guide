@@ -8,7 +8,7 @@
 
 The pipeline appears twice and is the same code both times. That is the design: **there is no second implementation to keep in agreement.** And the log is the only box that cannot be rebuilt from another box, which makes its retention policy the system's real correctness boundary.
 
-**The incident, with values.** A bug halves key "a": the pipeline produces "a" = 11, "b" = 21, total 32, where the truth is "a" = 24, "b" = 21, total 45. One edit, replay 9 events, and the corrected result lands.
+**The incident, with values.** A bug halves each of key "a"'s values, rounding down (5→2, 3→1, 2→1, 6→3, 8→4): the pipeline produces "a" = 11, "b" = 21, total 32, where the truth is "a" = 24, "b" = 21, total 45. One edit, replay 9 events, and the corrected result lands.
 
 **The verification is the part worth copying:** key "b" reads 21 before *and* after. An unaffected invariant is what distinguishes "the replay reproduced history" from "the replay computed something else".
 

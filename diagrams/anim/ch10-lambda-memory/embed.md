@@ -33,7 +33,7 @@ The default is `"pt"` and only the batch layer overrides it — which is the rea
 
 <img src="../diagrams/anim/ch10-lambda-memory/frames/step-03.svg" alt="Step 3: the same fix lands in two places, or in one" width="980">
 
-`lam` is Fix(2, 2) and `kap` is Fix(1, 1). Kappa does not make the fix cheaper to write — it makes applying it inconsistently impossible, because `sites` is 1. That is a different kind of guarantee from "we will remember to update both".
+This call returns Fix(2, 2) into `lam`, and the next one, with `"kappa"`, returns Fix(1, 1) into `kap`. Kappa does not make the fix cheaper to write — it makes applying it inconsistently impossible, because `sites` is 1. That is a different kind of guarantee from "we will remember to update both".
 
 </details>
 <details>
@@ -41,7 +41,7 @@ The default is `"pt"` and only the batch layer overrides it — which is the rea
 
 <img src="../diagrams/anim/ch10-lambda-memory/frames/step-04.svg" alt="Step 4: and the replay restores the correct total from the log" width="980">
 
-`before` = 32, `after` = 45, from re-reading the same 9 events through corrected code. Nothing was migrated and no second implementation was touched — which is the operational content of "the log is the source of truth".
+`before` = 32, and this call's `total` has reached 45, which it returns into `after` — from re-reading the same 9 events through corrected code. Nothing was migrated and no second implementation was touched — which is the operational content of "the log is the source of truth".
 
 </details>
 

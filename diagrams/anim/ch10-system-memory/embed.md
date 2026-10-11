@@ -6,7 +6,7 @@
 
 `replayThrough` is the architecture's only recovery mechanism, and it works: 45 from 9 retained events through the fixed pipeline.
 
-`verify` then names what that result depends on. Step 2: 6 retained events give 30 — a confident wrong answer with no error. Step 3: a non-deterministic pipeline gives 45, the **right** total with `trustworthy` false. The totals alone cannot tell you which replay to believe.
+`verify` then names what that result depends on. Step 2: 6 retained events give 30 — a confident wrong answer with no error. Step 3: a pipeline flagged non-deterministic gives 45, the **right** total with `trustworthy` false — the same additions as the healthy replay, since the program models determinism only as a flag, so only `verify`'s check can tell them apart. The totals alone cannot tell you which replay to believe.
 
 The animation steps through the code, holding each line long enough to read the STACK (call frames and their locals) and the HEAP (allocated arrays and objects) as they are AT THAT MOMENT. Expand any step to study it on its own.
 
@@ -33,7 +33,7 @@ With 6 of 9 events retained the replay returns 30 — a complete, confident, wro
 
 <img src="../diagrams/anim/ch10-system-memory/frames/step-03.svg" alt="Step 3: and a non-deterministic pipeline gives the right total for the wrong reason" width="980">
 
-`loose` has `total` = 45 and `trustworthy` false — the number is right and the guarantee is not. A pipeline that reads the wall clock happens to agree on this replay and will not on the next, and no amount of log completeness fixes it: the pipeline has stopped being a function of its input.
+`loose` has `total` = 45 and `trustworthy` false — the number is right and the guarantee is not. This program models determinism only as a flag: `replayThrough` never calls `nondeterministic`, so `loose` makes exactly the additions `healthy` made and its 45 is equal by construction. The point is what `verify` can certify — a real pipeline that reads the wall clock may agree on one replay and not the next, and no amount of log completeness fixes that.
 
 </details>
 <details>

@@ -47,7 +47,7 @@ REQUESTS (minutes from 09:00, half-open):
     merged/keep -> busy [(1, 31), (50, 80), (90, 160), (245, 275), (540, 570)]
     drop loses [(130, 160)] from the busy view -- a meeting that was never cancelled is
     now bookable, so two parties are sent to one room.
-    keep never offers [(80, 130)] -- the freed 50 minutes are unbookable forever.
+    keep never offers [(80, 130)] as one gap -- the freed 40 minutes are unbookable forever.
     booking 95..125 afterwards: members ACCEPT, merged/keep REJECTS,
     merged/drop accepts -- and accepts it on top of the meeting it lost.
   before the cancellation all three states agree exactly, so it is the cancel --

@@ -10,9 +10,9 @@ So SQL requires a **time bound**, and with a 60s bound there are exactly **5 tru
 
 **The join must buffer.** A row cannot be matched and discarded — it waits for a counterpart that may never come. The buffer peaks at **5 rows** on this 9-row stream, and the sizing formula is (arrival rate × join window) per side.
 
-**The watermark ends the wait, and it is the minimum over both inputs** — ch03's rule, now structural because a join always has two. Trace each click's emission point and **2 of the 5 never emits at all**, because the minimum watermark never passes its bound. Those rows hold **2 of the 5 true matches**: computed, sitting in state, never published.
+**The watermark ends the wait, and it is the minimum over both inputs** — ch03's rule, now structural because a join always has two. Trace each click's emission point and **2 of the 5 never emit at all**, because the minimum watermark never passes its bound. Those rows hold **2 of the 5 true matches**: computed, sitting in state, never published.
 
-**And the input type picks the join type.** Stream ⋈ stream is bounded by *time*; stream ⋈ table is bounded by the *table*, one lookup per row. On this data the windowed join publishes 1 of 5 matches on time, while a temporal join enriches all 5 clicks immediately. Mistaking the second for the first is the common streaming-join bug.
+**And the input type picks the join type.** Stream ⋈ stream is bounded by *time*; stream ⋈ table is bounded by the *table*, one lookup per row. On this data the windowed join publishes 1 of 5 matches on time, while a temporal join answers all 5 clicks on arrival — 2 of them short, because an impression stream is not a settled table. Mistaking one for the other, in either direction, is the common streaming-join bug.
 
 #### When a windowed join is the right tool, and how to size it
 
@@ -61,7 +61,7 @@ This is where a stream-stream join stops resembling a batch join. 3 of the 5 cli
 
 <img src="../diagrams/anim/ch09-hard/frames/step-04.svg" alt="Step 4: so the input type picks the join type" width="1040">
 
-The decision is about what is being joined, not how the data got there. Two streams need a time bound and inherit all of the above — 1 of 5 matches on time here. A stream against a table is a lookup, bounded per key, and all 5 rows are enriched at once. The bug is windowing the second case.
+The decision is about what is being joined, not how the data got there. Two streams need a time bound and inherit all of the above — 1 of 5 matches on time here. A stream against a table is a lookup, bounded per key, and all 5 rows are looked up on arrival — which is right only when the table is settled for that time. These impressions are not: impressions 6 and 7 arrive after clicks they precede, so 2 of the lookups come up short. The bug is windowing a genuine table; the mirror-image bug is treating a late stream as one.
 
 </details>
 

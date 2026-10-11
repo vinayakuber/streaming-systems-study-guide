@@ -22,7 +22,7 @@ The reframe uses both: one cursor into each list, and **advance whichever span e
 
 Two things to get right. The rule is **symmetric** — advancing by start, or always advancing the left, skips overlaps. And a single span can produce **several** overlaps, so the loop must not assume one each.
 
-The second half is a different question wearing the same clothes. The sweep assumed both lists were finished. As streams they are not: a span the cursor has passed cannot be released, because something overlapping it may not have arrived. So "finished with" becomes a claim about the future, and it needs a **declared bound on how late a stream may be** — below which nothing new can start. With that bound, 1 of these 3 spans are safe to forget; without it, **nothing is**, and state grows for as long as the system runs.
+The second half is a different question wearing the same clothes. The sweep assumed both lists were finished. As streams they are not: a span the cursor has passed cannot be released, because something overlapping it may not have arrived. So "finished with" becomes a claim about the future, and it needs a **declared bound on how late a stream may be** — below which nothing new can start. With that bound, 1 of these 3 spans is safe to forget; without it, **nothing is**, and state grows for as long as the system runs.
 
 And the bound must be the **minimum over both sides**, because one silent stream means nothing can be released from either. That makes memory a function of the declared lateness rather than of the data, and makes a stalled stream stall the join rather than corrupt it. Naming the bound is the answer; the sweep is the easy half.
 
@@ -30,7 +30,7 @@ And the bound must be the **minimum over both sides**, because one silent stream
 
 Each of these is the program below with different nouns. The reason to read them is not the
 answer — it is the *recognition*. 4 surfaces (shift rosters, facilities, advertising, scheduling), one shape, and in every
-case the appealing first answer is to materialise a sequence you cannot afford.
+case the appealing first answer is to treat a span the cursor has passed as finished with — true only under promises the input must make (sorted, never overlapping itself, nothing still in flight) — so the two-pointer rule misses a clash in a room whose bookings overlap each other, a click answered on arrival or after only W loses the impression still in flight, a one-pass gap finder reports busy time as free on a calendar that is unsorted or overlaps itself, and a stream that releases passed spans with no lateness bound drops one a late arrival still overlaps.
 
 <details>
 <summary><b>Variation 2</b> — the double-booked room <i>(looks like facilities)</i></summary>
@@ -100,8 +100,8 @@ This is **the double-booked room** solved on its own: a complete file, every hel
 The chapter had two lists and leaned on a promise about each one: within a list, spans never
 overlap.  Here there is one list and it overlaps ITSELF, so "the span that ends first is
 finished" is simply false and the two-pointer rule does not apply at all -- the version that
-pairs the list with itself is written out below and gets the wrong answer, which is more
-convincing than being told.  The move is to stop thinking in spans and think in EVENTS: every
+pairs the list with itself is written out below; it survives the chapter's five bookings by
+luck and misses a pair once a third booking overlaps, which is more convincing than being told.  The move is to stop thinking in spans and think in EVENTS: every
 booking becomes a start and an end, all of them sorted together, and a running count rises
 and falls.  The busiest moment is that count's maximum and an overlap exists wherever it
 exceeds one.  The span-pair framing was the obstacle, not the solution -- and the event sweep
@@ -199,8 +199,9 @@ def two_pointer_against_itself(bookings):
 
     It is here to be run rather than dismissed.  The rule was licensed by a promise -- the
     other list does not overlap itself, so everything remaining in it starts later than the
-    span just compared -- and that promise is now false by construction.  What comes out is
-    every span matched with itself and the real double-bookings missed.
+    span just compared -- and that promise is now false by construction.  On the chapter's own
+    data it still gets the right answer, because each booking overlaps only its neighbour; with
+    three bookings live at once it skips a real double-booking, and it never reports a false one.
     """
     out, i, j = [], 0, 0
     while i < len(bookings) and j < len(bookings):
@@ -693,8 +694,8 @@ FOREVER       = float("inf")                        # the offline wait: every im
 
 # ------------------------------------------------------------------- WORKED EXAMPLES
 # (what it exercises, impressions, clicks, W, wait, attributed, the most any rule could get).
-# The last column is None where max_matching() is too expensive to run -- it is O(clicks x
-# impressions) with backtracking and takes half a minute at 300 streams, which is itself a fact
+# The last column is None where max_matching() is too expensive to run -- it tries every
+# impression for every click, with backtracking, and takes half a minute at 300 streams, which is itself a fact
 # about the yardstick.  Every row is asserted by show_examples(), which is why the table is data
 # and not a comment: a comment can go stale silently, and this cannot.
 EXAMPLES = [
@@ -1186,8 +1187,8 @@ gap, spans one minute apart leave a one-minute gap), a zero-length meeting, a on
 both busy and free, spans that start before or end after the window, a nested meeting, a window
 whose start is after its end, the chapter's own calendar, and two generated years of 525,600
 minutes.  Each row prints the spans the one pass reads beside the minutes the per-minute walk
-would examine, and on a crowded ten-minute window the walk is the cheaper of the two.  Every row
-is ASSERTED -- against the answer below, against free plus busy summing to the whole window,
+would examine, and on a crowded eleven-minute window (0..10) the walk is the cheaper of the
+two.  Every row is ASSERTED -- against the answer below, against free plus busy summing to the whole window,
 and wherever the range is small enough against free_by_walking() minute by minute -- so the
 table cannot drift from the code.
 
@@ -1306,9 +1307,9 @@ def free_spans_unsorted(busy, start, end):
 def free_by_walking(busy, start, end):
     """The reference: ask of every single minute whether it is busy, and group the runs.
 
-    Correct, trivially, and O(end - start) -- at a year of minutes that is 525,600 questions to
-    report a handful of spans, which is why it is the thing the one pass replaces and not the
-    thing that ships.  It is also the only implementation here that cannot have an off-by-one,
+    Correct, trivially, and it asks one question per minute in the window -- at a year of minutes
+    that is 525,600 questions to report a handful of spans, which is why it is the thing the one
+    pass replaces and not the thing that ships.  It is also the only implementation here that cannot have an off-by-one,
     which is exactly what makes it the right reference.
     """
     out, run = [], None
@@ -1346,8 +1347,9 @@ def show_examples():
     whole window, which is the one check that catches an off-by-one at either end.  On every row
     whose range is short enough to walk, the spans themselves are compared minute by minute with
     free_by_walking(), the reference that cannot have an off-by-one.  The two cost columns say
-    why the pass exists and also where it does not pay: on a crowded ten-minute window the walk
-    examines fewer minutes than the pass reads spans, and on a one-minute window they tie.
+    why the pass exists and also where it does not pay: on a crowded eleven-minute window (0..10)
+    the walk examines fewer minutes than the pass reads spans, and on a one-minute window they
+    tie.
     """
     print(f"{'what it exercises':33s} {'spans':>6} {'window':>10} {'free':>5} {'free min':>9} "
           f"{'walk min':>9}  gaps")
@@ -1702,7 +1704,7 @@ def droppable(left, bound):
 # The three variations.
 
 def the_double_booked_room(bookings):
-    """Variation 1, surface: facilities.  One list; find overlapping pairs and the
+    """Variation 2, surface: facilities.  One list; find overlapping pairs and the
     busiest moment.
 
     Non-obvious point: self-overlap removes the guarantee the sweep rested on, so
@@ -1731,7 +1733,7 @@ def the_double_booked_room(bookings):
     return best, at, pairs
 
 def the_attributed_click(impressions, clicks, w, wait_for_late):
-    """Variation 2, surface: advertising.  Match each click to the NEAREST impression
+    """Variation 3, surface: advertising.  Match each click to the NEAREST impression
     that preceded it by at most w, one-to-one.
 
     Non-obvious point: the match is asymmetric and one-to-one, so an impression already
@@ -1762,7 +1764,7 @@ def the_attributed_click(impressions, clicks, w, wait_for_late):
     return out
 
 def the_unavailable_hours(busy, start, end):
-    """Variation 3, surface: scheduling.  Report the FREE spans between start and end.
+    """Variation 4, surface: scheduling.  Report the FREE spans between start and end.
 
     Non-obvious point: the complement rather than the intersection, and it is almost
     all boundary conditions -- before the first busy span, between consecutive ones,
@@ -1930,7 +1932,7 @@ all assertions passed
 
 The reframe above is six paragraphs; this is both answers running and then the streaming question measured, with the two things a whiteboard cannot show — **what is allocated, and when**.
 
-Measured on 1..3  130..245  540..540 against 50..150  220..320: trying every pair costs **6 comparisons**, the sweep costs **4**, and both return the same 2 overlaps — [130..150, 220..245] — asserted span for span. Both directions of the advance rule are exercised and so is a pair that does not overlap at all. Given a bound of 220 on how late the right-hand stream may be, **1 of the 3 left spans become droppable** and 2 must be kept.
+Measured on 1..3  130..245  540..540 against 50..150  220..320: trying every pair costs **6 comparisons**, the sweep costs **4**, and both return the same 2 overlaps — [130..150, 220..245] — asserted span for span. Both directions of the advance rule are exercised and so is a pair that does not overlap at all. Given a bound of 220 on how late the right-hand stream may be, **1 of the 3 left spans becomes droppable** and 2 must be kept.
 
 The animation steps through the code, holding each line long enough to read the STACK (call frames and their locals) and the HEAP (allocated arrays and objects) as they are AT THAT MOMENT. Expand any step to study it on its own.
 
@@ -2005,7 +2007,7 @@ The rule is symmetric and must be, which is the part to get right: advancing the
 
 <img src="../diagrams/anim/ch09-interview-memory/frames/step-09.svg" alt="Step 9: 4 comparisons against 6" width="980">
 
-4 against 6 here — small lists, small margin. The shape is what matters: each comparison advances exactly one cursor, so the total is at most 3 + 2, and at 10⁶ spans each that is 2 × 10⁶ comparisons instead of 10¹². O(m+n) rather than O(mn), and no sorting needed because both inputs arrived sorted.
+4 against 6 here — small lists, small margin. The shape is what matters: each comparison advances exactly one cursor, so the total is at most 3 + 2 rather than 3 × 2, and at 10⁶ spans each that is 2 × 10⁶ comparisons instead of 10¹² — with no sorting needed, because both inputs arrived sorted.
 
 </details>
 <details>
@@ -2033,6 +2035,6 @@ Where does 220 come from? Not from the algorithm — from a declared limit on ho
 
 </details>
 
-<sub>Locals live in the frame and vanish when it is popped; the two cursors are the whole state, which is why the sweep is O(m+n) in time and O(1) in space — and why the streaming half is hard, because a stream cannot drop what it has passed. Every figure is derived from `tools/stream_seed.js` and asserted — including that neither list overlaps itself (the guarantee the advance rule rests on), that the sweep and the pair check agree exactly, that the sweep advances each side at least once, that at least one compared pair does NOT overlap, that the sweep makes fewer comparisons, and that something is droppable while something else is not. Generated by `node tools/gen_ch09_interview.js` on `tools/interviewkit.js`.</sub>
+<sub>Locals live in the frame and vanish when it is popped; the two cursors are the whole state, which is why the sweep makes at most m + n comparisons and needs no other memory — and why the streaming half is hard, because a stream cannot drop what it has passed. Every figure is derived from `tools/stream_seed.js` and asserted — including that neither list overlaps itself (the guarantee the advance rule rests on), that the sweep and the pair check agree exactly, that the sweep advances each side at least once, that at least one compared pair does NOT overlap, that the sweep makes fewer comparisons, and that something is droppable while something else is not. Generated by `node tools/gen_ch09_interview.js` on `tools/interviewkit.js`.</sub>
 
 <!-- ch09-interview-memory:end -->

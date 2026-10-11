@@ -6,7 +6,7 @@
  *
  * SCOPE, deliberately narrow: the section may discuss only what the traced program
  * solves — the overlap of two intervals, the rule that decides which side to advance, the
- * O(m+n) sweep against the O(mn) pair check, and the bound below which an interval can be
+ * sweep of at most m + n comparisons against the m × n pair check, and the bound below which an interval can be
  * discarded. No join semantics beyond overlap, no retractions, no chapter vocabulary.
  */
 const path = require('path');
@@ -211,7 +211,7 @@ const steps = (at) => [
   { t: `${SW.cmp} comparisons against ${CROSS_CMP}`, line: at('fun sweep(left, right)::return out'),
     stack: [MAIN({ slow: oStr(), fast: oStr() })],
     heap: [{ key: 'out' }],
-    cap: `${SW.cmp} against ${CROSS_CMP} here — small lists, small margin. The shape is what matters: each comparison advances exactly one cursor, so the total is at most ${M} + ${NB}, and at 10⁶ spans each that is 2 × 10⁶ comparisons instead of 10¹². O(m+n) rather than O(mn), and no sorting needed because both inputs arrived sorted.` },
+    cap: `${SW.cmp} against ${CROSS_CMP} here — small lists, small margin. The shape is what matters: each comparison advances exactly one cursor, so the total is at most ${M} + ${NB} rather than ${M} × ${NB}, and at 10⁶ spans each that is 2 × 10⁶ comparisons instead of 10¹² — with no sorting needed, because both inputs arrived sorted.` },
 
   { t: `now the second half: both lists are streams`, line: at('val gone = droppable(LEFT, '),
     stack: [MAIN({ slow: oStr(), fast: oStr() }), DR({ gone: '[]', x: iv(A[0]) })],
@@ -237,6 +237,7 @@ const r = buildInterviewSection({
   subtitle: `${M} vs ${NB} spans → ${SW.out.length} overlaps · ${CROSS_CMP} comparisons vs ${SW.cmp} · ${DROPPABLE.length} of ${M} droppable`,
   problem: {
     surface: 'shift rosters',
+    trap: 'to treat a span the cursor has passed as finished with — true only under promises the input must make (sorted, never overlapping itself, nothing still in flight) — so the two-pointer rule misses a clash in a room whose bookings overlap each other, a click answered on arrival or after only W loses the impression still in flight, a one-pass gap finder reports busy time as free on a calendar that is unsorted or overlaps itself, and a stream that releases passed spans with no lateness bound drops one a late arrival still overlaps',
     statement: [`**Two sorted lists of time spans.** Within a list, spans never overlap each other.`, '',
       `**Report every overlap between a span in the first list and a span in the second.**`, '',
       `10⁶ spans in each. Then: **both lists are streams that keep arriving — what may you throw away?**`],
@@ -248,7 +249,7 @@ const r = buildInterviewSection({
     `Then the cost. Trying all pairs is ${CROSS_CMP} comparisons here and 10¹² at the stated size — not slow, impossible — and it uses neither of the two facts the question handed you.`, '',
     `The reframe uses both: one cursor into each list, and **advance whichever span ends first.** That span cannot overlap anything further along the other list, because the other list is sorted *and its spans do not overlap each other*, so everything remaining there starts later than the one just compared. Each comparison retires exactly one span, so the total is at most m + n.`, '',
     `Two things to get right. The rule is **symmetric** — advancing by start, or always advancing the left, skips overlaps. And a single span can produce **several** overlaps, so the loop must not assume one each.`, '',
-    `The second half is a different question wearing the same clothes. The sweep assumed both lists were finished. As streams they are not: a span the cursor has passed cannot be released, because something overlapping it may not have arrived. So "finished with" becomes a claim about the future, and it needs a **declared bound on how late a stream may be** — below which nothing new can start. With that bound, ${DROPPABLE.length} of these ${M} spans are safe to forget; without it, **nothing is**, and state grows for as long as the system runs.`, '',
+    `The second half is a different question wearing the same clothes. The sweep assumed both lists were finished. As streams they are not: a span the cursor has passed cannot be released, because something overlapping it may not have arrived. So "finished with" becomes a claim about the future, and it needs a **declared bound on how late a stream may be** — below which nothing new can start. With that bound, ${DROPPABLE.length} of these ${M} spans ${DROPPABLE.length === 1 ? 'is' : 'are'} safe to forget; without it, **nothing is**, and state grows for as long as the system runs.`, '',
     `And the bound must be the **minimum over both sides**, because one silent stream means nothing can be released from either. That makes memory a function of the declared lateness rather than of the data, and makes a stalled stream stall the join rather than corrupt it. Naming the bound is the answer; the sweep is the easy half.`,
   ],
   variations: [
@@ -272,8 +273,8 @@ const r = buildInterviewSection({
     heading: 'The solution as a running program — stack and heap at every step',
     intro: [
       `The reframe above is six paragraphs; this is both answers running and then the streaming question measured, with the two things a whiteboard cannot show — **what is allocated, and when**.`, '',
-      `Measured on ${lStr()} against ${rStr()}: trying every pair costs **${CROSS_CMP} comparisons**, the sweep costs **${SW.cmp}**, and both return the same ${SW.out.length} overlaps — ${oStr()} — asserted span for span. Both directions of the advance rule are exercised and so is a pair that does not overlap at all. Given a bound of ${bound} on how late the right-hand stream may be, **${DROPPABLE.length} of the ${M} left spans become droppable** and ${KEPT.length} must be kept.`],
-    sub: `Locals live in the frame and vanish when it is popped; the two cursors are the whole state, which is why the sweep is O(m+n) in time and O(1) in space — and why the streaming half is hard, because a stream cannot drop what it has passed. Every figure is derived from \`tools/stream_seed.js\` and asserted — including that neither list overlaps itself (the guarantee the advance rule rests on), that the sweep and the pair check agree exactly, that the sweep advances each side at least once, that at least one compared pair does NOT overlap, that the sweep makes fewer comparisons, and that something is droppable while something else is not. Generated by \`node tools/gen_ch09_interview.js\` on \`tools/interviewkit.js\`.`,
+      `Measured on ${lStr()} against ${rStr()}: trying every pair costs **${CROSS_CMP} comparisons**, the sweep costs **${SW.cmp}**, and both return the same ${SW.out.length} overlaps — ${oStr()} — asserted span for span. Both directions of the advance rule are exercised and so is a pair that does not overlap at all. Given a bound of ${bound} on how late the right-hand stream may be, **${DROPPABLE.length} of the ${M} left spans ${DROPPABLE.length === 1 ? 'becomes' : 'become'} droppable** and ${KEPT.length} must be kept.`],
+    sub: `Locals live in the frame and vanish when it is popped; the two cursors are the whole state, which is why the sweep makes at most m + n comparisons and needs no other memory — and why the streaming half is hard, because a stream cannot drop what it has passed. Every figure is derived from \`tools/stream_seed.js\` and asserted — including that neither list overlaps itself (the guarantee the advance rule rests on), that the sweep and the pair check agree exactly, that the sweep advances each side at least once, that at least one compared pair does NOT overlap, that the sweep makes fewer comparisons, and that something is droppable while something else is not. Generated by \`node tools/gen_ch09_interview.js\` on \`tools/interviewkit.js\`.`,
   },
 });
 console.log(`OK  ${r.steps} steps, canvas ${r.W}x${r.H} (${r.total}s loop) -> diagrams/anim/ch09-interview-memory`);

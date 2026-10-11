@@ -41,13 +41,36 @@ const CORRECT_ROWS = TABLE.filter(r => r.label === 'CORRECT');
 const REDUNDANT = CORRECT_ROWS.some(r => r.dedup && !r.idem) && CORRECT_ROWS.some(r => !r.dedup && r.idem);
 // the SIDE EFFECT case: three crash windows, and which guard covers each
 const ORDER = EVENTS.find(e => e.id === 4);                   // the charge this chapter follows
-const CRASH_WINDOWS = [
-  { at: 'before the shuffle', dedupCovers: true,  keyCovers: true,  what: 'the record is re-sent and the shuffle recognises its id' },
-  { at: 'after the shuffle, before the charge', dedupCovers: false, keyCovers: true, what: 'the id is already past the dedup set; the replay sends a NEW copy that dedup has not seen' },
-  { at: 'after the charge, before the offset commit', dedupCovers: false, keyCovers: true, what: 'the charge happened; only the external system can know that' },
+// Each window is a failure AFTER the first charge landed, followed by a second attempt.
+// `viaShuffle`: the second copy passes the dedup shuffle again. `seenSurvives`: the
+// shuffle's in-memory seen-set is still there when it does. Coverage is then COMPUTED by
+// running the charge, not declared.
+const FAILURES = [
+  { at: 'upstream crash, shuffle alive', viaShuffle: true, seenSurvives: true,
+    brief: 'upstream re-sends; the live shuffle still holds the id and drops the copy',
+    what: 'the upstream stage dies after sending and re-sends on restart; the shuffle never crashed, still holds the id, and drops the copy' },
+  { at: 'charge timeout, retried by the sink', viaShuffle: false, seenSurvives: true,
+    brief: 'reply lost, so the sink re-calls from after the dedup point',
+    what: 'the call succeeded but its reply was lost, so the sink retries it from AFTER the dedup point and the copy never passes the shuffle' },
+  { at: 'crash after the charge, before the offset commit', viaShuffle: true, seenSurvives: false,
+    brief: 'the seen-set died with the process; the replayed record looks new',
+    what: 'the seen-set dies with the process, the replay re-reads the record and it looks new; only the external system knows the charge happened' },
 ];
+const attemptCharge = (f, useDedup, useKey) => {
+  const keys = new Set(); let charged = 0, sends = 0, seen = new Set();
+  const charge = () => { const k = useKey ? `order-${ORDER.id}` : `send-${++sends}`; if (keys.has(k)) return; keys.add(k); charged += ORDER.v; };
+  seen.add(ORDER.id); charge();                                   // the first pass lands
+  if (!f.seenSurvives) seen = new Set();
+  if (!(f.viaShuffle && useDedup && seen.has(ORDER.id))) charge(); // the second attempt
+  return charged;
+};
+const CRASH_WINDOWS = FAILURES.map(f => ({ ...f,
+  unguarded: attemptCharge(f, false, false),
+  dedupCovers: attemptCharge(f, true, false) === ORDER.v,
+  keyCovers: attemptCharge(f, false, true) === ORDER.v }));
 const DEDUP_COVERS = CRASH_WINDOWS.filter(c => c.dedupCovers).length;
 const KEY_COVERS = CRASH_WINDOWS.filter(c => c.keyCovers).length;
+const DEDUP_IDX = CRASH_WINDOWS.findIndex(c => c.dedupCovers);
 // isolating the effect: a 4-stage pipeline, effect at stage k, exposed to crashes
 // in stages k..4
 const STAGES = ['source', 'shuffle', 'aggregate', 'sink'];
@@ -58,6 +81,8 @@ if (WORST_DUP.pct < 50) fail(`the worst single duplicate only inflates its windo
 if (!REPLAYED.length) fail('the checkpoint is at the end of the stream; there is nothing to replay');
 if (new Set(TABLE.map(r => r.total)).size !== 3) fail(`the 2x2x2 table produces ${new Set(TABLE.map(r => r.total)).size} distinct totals, expected 3 (lost / correct / double)`);
 if (!REDUNDANT) fail('dedup and an idempotent sink are not redundant for the aggregation — the chapter\'s refinement does not hold');
+if (CRASH_WINDOWS.some(c => c.unguarded !== ORDER.v * 2)) fail('a failure window does not double-charge with no guard at all, so it is not a danger to cover');
+if (DEDUP_COVERS !== 1 || DEDUP_IDX !== 0) fail(`the prose names the FIRST window as the only one dedup covers; it covers ${DEDUP_COVERS}`);
 if (DEDUP_COVERS >= KEY_COVERS) fail(`dedup covers ${DEDUP_COVERS} of ${CRASH_WINDOWS.length} crash windows and the key covers ${KEY_COVERS} — the side-effect contrast needs the key to cover strictly more`);
 if (EXPOSE_LATE >= EXPOSE_EARLY) fail('moving the effect later does not reduce its exposure');
 if (TOTAL + REPLAY_V === TOTAL) fail('replaying changes nothing');
@@ -208,21 +233,21 @@ const C3 = [
         `And this works only because the processor offers it. If the external system has no idempotency key, no amount of pipeline engineering supplies one.`,
       ], c.C.good, c.C.goodFill),
     cap: `An idempotency key does not make the effect idempotent — it moves the deduplication to the only place that can see both attempts. Two requirements follow, both in the note: the key must come from the data (a send-time key is useless), and the external system has to support it. The second is a dependency you cannot work around from inside.` },
-  { t: 'so dedup covers 1 of 3 crash windows, the key covers 3', draw: (c) => {
+  { t: `so dedup covers ${DEDUP_COVERS} of ${CRASH_WINDOWS.length} crash windows, the key covers ${KEY_COVERS}`, draw: (c) => {
       let s = c.panel(`WHERE THE PIPELINE CAN CRASH WHILE CHARGING ORDER ${ORDER.id}`, 'a');
       CRASH_WINDOWS.forEach((cw, i) => {
         const y = c.P.main.y + 58 + i * 48;
         s += c.cv.rect('cw' + i, c.P.main.x + 24, y, 1040, 44, { fill: cw.dedupCovers ? c.C.goodFill : c.C.hotFill, stroke: cw.dedupCovers ? c.C.good : c.C.hot, rx: 3, sw: 2 });
-        s += c.cv.text(c.P.main.x + 40, y + 19, `crash ${cw.at}`, { size: 11, weight: 700, band: 'cwk' + i });
-        s += c.cv.text(c.P.main.x + 40, y + 36, cw.what, { size: 10, mono: false, fill: c.C.line, band: 'cww' + i });
+        s += c.cv.text(c.P.main.x + 40, y + 19, cw.at, { size: 11, weight: 700, band: 'cwk' + i });
+        s += c.cv.text(c.P.main.x + 40, y + 36, cw.brief, { size: 10, mono: false, fill: c.C.line, band: 'cww' + i });
         s += c.cv.text(c.P.main.x + 790, y + 27, `dedup: ${cw.dedupCovers ? 'covers' : 'MISSES'}`, { size: 10, weight: 700, fill: cw.dedupCovers ? c.C.good : c.C.hot, band: 'cwd' + i });
-        s += c.cv.text(c.P.main.x + 1050, y + 27, `key: covers`, { size: 10, anchor: 'end', weight: 700, fill: c.C.good, band: 'cwi' + i });
+        s += c.cv.text(c.P.main.x + 1050, y + 27, `key: ${cw.keyCovers ? 'covers' : 'MISSES'}`, { size: 10, anchor: 'end', weight: 700, fill: cw.keyCovers ? c.C.good : c.C.hot, band: 'cwi' + i });
       });
       return s + c.note('c1', c.P.main.x + 24, c.P.main.y + 72 + CRASH_WINDOWS.length * 48, 1040, [
         `A deduplicating shuffle covers ${DEDUP_COVERS} of the ${CRASH_WINDOWS.length} windows; an idempotency key covers ${KEY_COVERS} of ${CRASH_WINDOWS.length}.`,
         `This is where the redundancy from the previous concept disappears: for an AGGREGATION either guard sufficed, and for a SIDE EFFECT only the external one does.`,
       ], c.C.hot, c.C.hotFill); },
-    cap: `This is the concept's whole argument in one table. For a pure aggregation, dedup and an idempotent sink were interchangeable. For a side effect they are not: dedup covers only the crash BEFORE the dedup point, and the two crash windows after it — record in flight, and charge completed — are reachable only by the external system's own key. ${DEDUP_COVERS} of ${CRASH_WINDOWS.length} against ${KEY_COVERS} of ${CRASH_WINDOWS.length}.` },
+    cap: `This is the concept's whole argument in one table. For a pure aggregation, dedup and an idempotent sink were interchangeable. For a side effect they are not: dedup covers only a copy that comes back THROUGH a shuffle that still remembers the id. A retry issued after the dedup point, and a replay after the seen-set died with the process, are reachable only by the external system's own key. ${DEDUP_COVERS} of ${CRASH_WINDOWS.length} against ${KEY_COVERS} of ${CRASH_WINDOWS.length}.` },
   { t: 'and isolating the effect at the boundary shrinks its exposure', draw: (c) =>
       c.panel('WHERE TO PUT THE SIDE EFFECT IN A FOUR-STAGE PIPELINE', 'p')
       + c.mapRows('is', c.P.main.x + 24, c.P.main.y + 52, STAGES.map((st, i) =>
@@ -336,8 +361,8 @@ const DIAGRAMS = [
       `Worse, the pipeline **cannot tell**: a charge that timed out after succeeding looks exactly like one that failed. So it has only two options, and they are the same option — make the effect safe to repeat, or ask the external system whether it already happened.`, '',
       `**An idempotency key is how you ask.** First attempt: \`charge("order-${ORDER.id}", ${ORDER.v})\`, the processor records the key and charges ${ORDER.v}. The pipeline crashes before committing. The retry sends the same call, the processor **recognises the key**, and the total charged is ${ORDER.v}.`, '',
       `Note what the key does *not* do: it does not make the effect idempotent. It moves the deduplication to the only place that can see both attempts. Two requirements follow — the key must be derived from the **data** (a key generated at send time is a second charge with extra steps), and the external system has to offer the feature at all.`, '',
-      `**And here is where the previous concept's redundancy disappears.** There are three windows in which the pipeline can crash while charging order ${ORDER.id}:`, '',
-      ...CRASH_WINDOWS.map(cw => `- **crash ${cw.at}** — ${cw.what}. Dedup: ${cw.dedupCovers ? 'covers' : '**misses**'}. Key: covers.`),
+      `**And here is where the previous concept's redundancy disappears.** There are ${CRASH_WINDOWS.length} ways a failure after the first charge can send order ${ORDER.id} again, and with no guard each one charges ${ORDER.v * 2}:`, '',
+      ...CRASH_WINDOWS.map(cw => `- **${cw.at}** — ${cw.what}. Dedup: ${cw.dedupCovers ? 'covers' : '**misses**'}. Key: ${cw.keyCovers ? 'covers' : '**misses**'}.`),
       '',
       `A deduplicating shuffle covers **${DEDUP_COVERS} of ${CRASH_WINDOWS.length}**; an idempotency key covers **${KEY_COVERS} of ${CRASH_WINDOWS.length}**. For a pure aggregation the two guards were interchangeable. For a side effect only the external one reaches the crash windows that matter.`, '',
       `**Placement helps too, and it is free.** In a ${STAGES.length}-stage pipeline (${STAGES.join(' → ')}), an effect at stage 2 can be re-run by a crash in ${EXPOSE_EARLY} stages; at the last stage, only ${EXPOSE_LATE}. That is a ${EXPOSE_EARLY / EXPOSE_LATE}× reduction in exposure from placement alone, and it keeps everything upstream pure and freely retryable.`],
@@ -354,7 +379,7 @@ const DIAGRAMS = [
     subtitle: `order ${ORDER.id}, amount ${ORDER.v}: crash after the charge, replay, charged ${ORDER.v} not ${ORDER.v * 2}`,
     heading: 'Why the decisive fact lives outside the pipeline',
     why: [
-      `**The question.** A payment pipeline that charges a card exactly once. It can crash and retry after a timeout, so the sink must be idempotent on an idempotency key and the shuffle must dedup — otherwise a retry double-charges.`, '',
+      `**The question.** A payment pipeline that charges a card exactly once. It can crash and retry after a timeout, and a retry must not double-charge order ${ORDER.id}.`, '',
       `**The pipeline:** replayable source (offset) → dedup shuffle → idempotent sink (idempotency key) → external system.`, '',
       `The design's whole difficulty is that **the decisive fact lives in the fourth stage**. Whether order ${ORDER.id} has already been charged is known only by the processor; every mechanism in the first three stages is an attempt not to have to know it, and only the idempotency key actually asks.`, '',
       `**Trace the crash and retry:**`, '',
@@ -369,7 +394,7 @@ const DIAGRAMS = [
     whenHeading: 'When this design works, and the four things it does not settle',
     when: [
       `**It works when the processor supports an idempotency key and the key can be derived from the order.** Both halves are required, and both are checked before anything else in the design.`, '',
-      `**Keep the dedup shuffle anyway.** It is cheap, it covers the crash window before the dedup point, and it reduces load on the processor. Treat it as an optimisation rather than as a guarantee.`, '',
+      `**Keep the dedup shuffle anyway.** It is cheap, it covers a re-send that arrives while the shuffle is still up (${CRASH_WINDOWS[DEDUP_IDX].at}), and it reduces load on the processor. Treat it as an optimisation rather than as a guarantee.`, '',
       `**Prefer this to 2PC whenever the choice exists**, for the reason above: 2PC's in-doubt state has no safe resolution.`, '',
       `**What this design does NOT settle — four gaps:**`, '',
       `1. **The key requires the processor to support it.** If it does not, this design does not degrade gracefully — it is simply unavailable, and 2PC is the fallback with all of its cost.`,
@@ -651,20 +676,20 @@ PROGRAMS.push({
     '    return "send-" + nextCounter()',
     '}',
     '',
-    '// function: attempt(proc, crashAt, useDedup, useKey) — one run that crashes at a',
-    '//   given point, then retries. Returns what was charged.',
-    `//   attempt(proc, "${CRASH_WINDOWS[0].at}", true, false).charged = ${ORDER.v}`,
-    `//   attempt(proc, "${CRASH_WINDOWS[2].at}", true, false).charged = ${ORDER.v * 2}`,
-    `//   attempt(proc, "${CRASH_WINDOWS[2].at}", false, true).charged = ${ORDER.v}`,
+    '// function: attempt(proc, crashAt, useDedup, useKey) — the first pass crosses the',
+    '//   shuffle and charges, the failure crashAt follows, then the second attempt.',
+    `//   attempt(proc, "${CRASH_WINDOWS[0].at}", true, false).charged = ${attemptCharge(CRASH_WINDOWS[0], true, false)}`,
+    `//   attempt(proc, "${CRASH_WINDOWS[2].at}", true, false).charged = ${attemptCharge(CRASH_WINDOWS[2], true, false)}`,
+    `//   attempt(proc, "${CRASH_WINDOWS[2].at}", false, true).charged = ${attemptCharge(CRASH_WINDOWS[2], false, true)}`,
     'fun attempt(proc, crashAt, useDedup, useKey) {',
-    '    var seen = []',
-    '    for (pass in 1 .. 2) {',
-    '        if (useDedup && contains(seen, ORDER.id)) { continue }',
-    `        if (crashAt == "${CRASH_WINDOWS[0].at}") { seen = append(seen, ORDER.id) }`,
-    '        if (useKey)          { proc = charge(proc, keyFor(ORDER, true), ORDER.v) }',
-    '        if (useKey == false) { proc = charge(proc, keyFor(ORDER, false), ORDER.v) }',
-    '        seen = append(seen, ORDER.id)',
+    '    var seen = append([], ORDER.id)',
+    '    proc = charge(proc, keyFor(ORDER, useKey), ORDER.v)',
+    `    if (crashAt == "${CRASH_WINDOWS[2].at}") { seen = [] }`,
+    `    val viaShuffle = crashAt != "${CRASH_WINDOWS[1].at}"`,
+    '    if (viaShuffle && useDedup && contains(seen, ORDER.id)) {',
+    '        return Outcome(proc.totalCharged, proc.totalCharged == ORDER.v)',
     '    }',
+    '    proc = charge(proc, keyFor(ORDER, useKey), ORDER.v)',
     '    return Outcome(proc.totalCharged, proc.totalCharged == ORDER.v)',
     '}',
     '',
@@ -697,25 +722,25 @@ PROGRAMS.push({
     return [
       { t: 'the processor is the only component that can recognise a repeat', line: at('fun charge(proc, key, amount)', 'if (contains(proc.chargedKeys, key)) { return proc }        // already done'),
         stack: [MAIN(), { name: 'coverage', locals: ['useDedup = false', 'useKey = true', 'n = 0', `p = "${CRASH_WINDOWS[2].at}"`, 'o = ...'] },
-                { name: 'attempt', locals: [`proc = @0x100`, `crashAt = "${CRASH_WINDOWS[2].at}"`, 'useDedup = false', 'useKey = true', 'seen = []', 'pass = 2'] },
+                { name: 'attempt', locals: [`proc = @0x100`, `crashAt = "${CRASH_WINDOWS[2].at}"`, 'useDedup = false', 'useKey = true', 'seen = []', 'viaShuffle = true'] },
                 { name: 'charge', locals: ['proc = @0x100', `key = "order-${ORDER.id}"`, `amount = ${ORDER.v}`] }],
         heap: [{ key: 'proc', hot: true }],
         cap: `On the second pass \`proc.chargedKeys\` already contains "order-${ORDER.id}", so the function returns before touching \`totalCharged\`. It stays ${ORDER.v}. Note where that decision is made: inside the processor's state, which is the only state that survived the pipeline's crash.` },
       { t: 'a key generated at SEND TIME defeats the whole mechanism', line: at('fun keyFor(e, fromData)', 'return "send-" + nextCounter()'),
-        stack: [MAIN(), { name: 'attempt', locals: [`proc = @0x200`, `crashAt = "${CRASH_WINDOWS[2].at}"`, 'useDedup = false', 'useKey = false', 'seen = []', 'pass = 2'] },
+        stack: [MAIN(), { name: 'attempt', locals: [`proc = @0x200`, `crashAt = "${CRASH_WINDOWS[2].at}"`, 'useDedup = false', 'useKey = false', 'seen = []', 'viaShuffle = true'] },
                 { name: 'keyFor', locals: [`e = EVENTS[${ORDER.id}]`, 'fromData = false'] }],
         heap: [{ key: 'proc' }, { key: 'double', hot: true }],
         cap: `\`nextCounter()\` returns 2 on the retry, so the key is "send-2" — which the processor has never seen. It charges again and \`totalCharged\` reaches ${ORDER.v * 2}. The pipeline is using an idempotency key correctly in every respect except where the key came from, and nothing detects the difference.` },
-      { t: `dedup covers ${DEDUP_COVERS} crash point, and misses the other ${CRASH_WINDOWS.length - DEDUP_COVERS}`, line: at(`if (crashAt == "${CRASH_WINDOWS[0].at}") { seen = append(seen, ORDER.id) }`),
+      { t: `dedup covers ${DEDUP_COVERS} crash point, and misses the other ${CRASH_WINDOWS.length - DEDUP_COVERS}`, line: at('fun attempt(proc, crashAt, useDedup, useKey)::if (viaShuffle && useDedup && contains(seen, ORDER.id)) {'),
         stack: [MAIN({ byDedup: DEDUP_COVERS }), { name: 'coverage', locals: ['useDedup = true', 'useKey = false', `n = ${DEDUP_COVERS}`, `p = "${CRASH_WINDOWS[1].at}"`, 'o = ...'] },
-                { name: 'attempt', locals: [`proc = @0x200`, `crashAt = "${CRASH_WINDOWS[1].at}"`, 'useDedup = true', 'useKey = false', 'seen = []', 'pass = 1'] }],
+                { name: 'attempt', locals: [`proc = @0x200`, `crashAt = "${CRASH_WINDOWS[1].at}"`, 'useDedup = true', 'useKey = false', `seen = [${ORDER.id}]`, 'viaShuffle = false'] }],
         heap: [{ key: 'double' }],
-        cap: `\`seen\` only gains the id when the crash happens BEFORE the shuffle. For the other ${CRASH_WINDOWS.length - DEDUP_COVERS} crash points the record is already past the dedup set — or the set died with the process — so \`contains(seen, ORDER.id)\` is false on the retry and the charge runs again.` },
+        cap: `\`seen\` still holds the id only when the shuffle's own process survived, and the test only helps when the copy comes back THROUGH it — both true only for "${CRASH_WINDOWS[DEDUP_IDX].at}". Here \`seen\` is [${ORDER.id}] but \`viaShuffle\` is false: the sink retried from after the dedup point. After "${CRASH_WINDOWS[2].at}" \`seen\` is [] instead. Either way the charge runs again.` },
       { t: 'so the two guards are NOT interchangeable here', line: at('fun coverage(useDedup, useKey)', 'if (o.covered) { n = n + 1 }'),
         stack: [MAIN({ byDedup: DEDUP_COVERS, byKey: KEY_COVERS, worst: `charged ${ORDER.v * 2}` }),
                 { name: 'coverage', locals: ['useDedup = false', 'useKey = true', `n = ${KEY_COVERS}`, `p = "${CRASH_WINDOWS[2].at}"`, 'o = ...'] }],
         heap: [{ key: 'proc' }, { key: 'double' }],
-        cap: `\`byDedup\` = ${DEDUP_COVERS} and \`byKey\` = ${KEY_COVERS}. In the previous concept these two guards were redundant for an aggregation; here they are not, and the reason is structural: dedup is inside the pipeline, and ${CRASH_WINDOWS.length - DEDUP_COVERS} of the ${CRASH_WINDOWS.length} crash points are after the point where the pipeline stops knowing anything.` },
+        cap: `\`byDedup\` = ${DEDUP_COVERS} and \`byKey\` = ${KEY_COVERS}. In the previous concept these two guards were redundant for an aggregation; here they are not, and the reason is structural: dedup is inside the pipeline, and in ${CRASH_WINDOWS.length - DEDUP_COVERS} of the ${CRASH_WINDOWS.length} crash points the second copy either never passes the shuffle or arrives after its memory died.` },
     ];
   },
   intro: [

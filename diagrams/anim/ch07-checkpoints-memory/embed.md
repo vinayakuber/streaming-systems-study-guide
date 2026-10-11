@@ -4,7 +4,7 @@
 
 **What is being answered.** Why a checkpoint is a pair, and what the two checkpointing modes actually upload.
 
-`take(upto)` returns a `Checkpoint(ent, upto)` — the state and the offset in one value. `restore(cp, useOffset)` then shows why they must match: the replay loop starts at `useOffset + 1`, so that one expression is the whole correctness of the recovery. Called with 4 it gives 45; called with 0 it gives 68.
+`take(upto)` returns a `Checkpoint(ent, upto)` — the state and the offset in one value. `restore(cp, useOffset)` then shows why they must match: the replay loop starts at `useOffset + 1`, so that one expression is the whole correctness of the recovery. Called with 4 it gives 45; called with -1 it gives 68.
 
 `uploadVolume` prices the modes by their arguments: `countEntries(0, c)` grows with every checkpoint, `countEntries(prev + 1, c)` depends only on the gap. 14 against 8.
 
@@ -33,7 +33,7 @@ The loop starts at `useOffset + 1` = 5, so it adds the 4 events after the checkp
 
 <img src="../diagrams/anim/ch07-checkpoints-memory/frames/step-03.svg" alt="Step 3: and with a stale offset the prefix is counted twice" width="980">
 
-`restore(cp, 0)` replays from index 1, re-adding events already in `cp.entries`: 68 instead of 45, over by exactly the 23 the checkpoint had already accumulated. Same state, same stream, one wrong argument.
+`restore(cp, -1)` replays from index 0, all 9 events, re-adding events already in `cp.entries`: 68 instead of 45, over by exactly the 23 the checkpoint had already accumulated. Same state, same stream, one wrong argument.
 
 </details>
 <details>

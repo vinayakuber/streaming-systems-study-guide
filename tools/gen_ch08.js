@@ -31,11 +31,12 @@ const APPEND_ROWS = EVENTS.filter(e => e.v > FILTER_V).map(e => e.id);
 const W0 = WIN_STARTS[0], W0_END = W0 + WIN, W0_TRUE = SUM(WINDOWS[W0]);
 const ONTIME_I = closedAt(W0);
 const ONTIME = SUM(EVENTS.filter((e, i) => i <= ONTIME_I && winOf(e.et) === W0).map(e => e.id));
-const UPDATED_ROWS = ET_KEYS.filter(k => SUM(EVENTS.filter((e, i) => i <= closedAt(k) && winOf(e.et) === k).map(e => e.id)) !== SUM(TUMBLE_ET[k]));
+const UPDATED_ROWS = ET_KEYS.filter(k => closedAt(k) !== null && SUM(EVENTS.filter((e, i) => i <= closedAt(k) && winOf(e.et) === k).map(e => e.id)) !== SUM(TUMBLE_ET[k]));
 // the SQL text the chapter is about, and the per-key result of it
 const perKeyWindow = {};
 for (const e of EVENTS) { const k = `${e.key}|${winOf(e.et)}`; perKeyWindow[k] = (perKeyWindow[k] || 0) + e.v; }
 const RESULT_ROWS = Object.keys(perKeyWindow).sort();
+const pl = (n, one, many) => (n === 1 ? one : many);
 const fail = (m) => { throw new Error(`gen_ch08: ${m}`); };
 if (CLOCK_DIFFER.length < 2) fail(`only ${CLOCK_DIFFER.length} TUMBLE window differs between the clocks — the time-attribute point needs more`);
 if (HOP_TOTAL <= TOTAL) fail('HOP does not over-count relative to the data; the overlap point is invisible');
@@ -46,6 +47,7 @@ if (SESSIONS.a.length === SESSIONS.b.length) fail('both keys have the same sessi
 
 const W = 1140;
 const SQL_TUMBLE = `SELECT key, SUM(v) FROM clicks GROUP BY key, TUMBLE(et, INTERVAL '${WIN}' SECOND)`;
+const SQL_TOTAL = `SELECT SUM(v) FROM clicks GROUP BY TUMBLE(et, INTERVAL '${WIN}' SECOND)`;
 
 // ================= CONCEPT 1 — SQL AS A STREAM LANGUAGE =====================
 const C1 = [
@@ -77,7 +79,7 @@ const C1 = [
     cap: `Three of these four rows are plain SQL doing plain SQL things. The fourth is the whole addition: \`TUMBLE(et, ...)\` requires a time column, and the number of result groups jumps from ${KEYS.length} to ${RESULT_ROWS.length} because the grouping key now includes a window. Streaming SQL is relational SQL plus a column that is a clock.` },
   { t: 'and the time attribute is a CHOICE with different answers', draw: (c) => {
       let s = c.panel('TUMBLE ON et VERSUS TUMBLE ON pt', 'a');
-      s += c.line(c.P.main.x + 24, c.P.main.y + 46, `${SQL_TUMBLE.replace('key, SUM(v)', 'SUM(v)').replace(' GROUP BY key,', ' GROUP BY')} — and the same query with pt`, { size: 10, weight: 700, fill: c.C.line });
+      s += c.line(c.P.main.x + 24, c.P.main.y + 46, `${SQL_TOTAL} — and the same query with pt`, { size: 10, weight: 700, fill: c.C.line });
       ET_KEYS.forEach((k, i) => {
         const y = c.P.main.y + 66 + i * 34, bad = CLOCK_DIFFER.includes(k);
         s += c.cv.rect('tc' + i, c.P.main.x + 24, y, 1040, 30, { fill: bad ? c.C.hotFill : c.C.paper, stroke: bad ? c.C.hot : c.C.faint, rx: 3, sw: bad ? 2 : 1 });
@@ -95,7 +97,7 @@ const C1 = [
       c.panel('TWO QUERIES, TWO KINDS OF RESULT STREAM', 'p')
       + c.mapRows('au', c.P.main.x + 24, c.P.main.y + 52, [
         [`SELECT * FROM clicks WHERE v > ${FILTER_V}`, `APPEND-ONLY — ${APPEND_ROWS.length} rows (ids ${APPEND_ROWS.join(', ')}), none ever revised`],
-        [`${SQL_TUMBLE.slice(0, 44)}…`, `UPDATING — ${UPDATED_ROWS.length} of ${ET_KEYS.length} window rows get revised`],
+        [`${SQL_TOTAL.slice(0, 44)}…`, `UPDATING — ${UPDATED_ROWS.length} of ${ET_KEYS.length} window rows ${pl(UPDATED_ROWS.length, 'gets', 'get')} revised`],
         [`window [${mm(W0)}, ${mm(W0_END)}) specifically`, `first ${ONTIME}, then ${W0_TRUE} when id ${L.id} arrives`],
         [`what the sink must support`, `append-only: INSERT · updating: UPSERT, or a retraction`],
       ], { w: 1040, rh: 36, hot: 2, label: 'the update mode is a property of the QUERY, not of the engine' })
@@ -103,7 +105,7 @@ const C1 = [
         `A filter can never revise a row — a row either matched or it did not. An aggregate over an open window can always be revised.`,
         `So you can read the update mode off the query text, and it tells you what the sink has to be capable of before you write any code.`,
       ], c.C.good, c.C.goodFill),
-    cap: `The update mode is readable from the query, which makes it a design input rather than a surprise. A \`WHERE\` produces ${APPEND_ROWS.length} facts that never change; a windowed \`GROUP BY\` produces ${ET_KEYS.length} rows of which ${UPDATED_ROWS.length} get revised — window [${mm(W0)}, ${mm(W0_END)}) goes ${ONTIME} then ${W0_TRUE}. An INSERT-only sink is compatible with the first and not the second.` },
+    cap: `The update mode is readable from the query, which makes it a design input rather than a surprise. A \`WHERE\` produces ${APPEND_ROWS.length} facts that never change; a windowed \`GROUP BY\` produces ${ET_KEYS.length} rows of which ${UPDATED_ROWS.length} ${pl(UPDATED_ROWS.length, 'gets', 'get')} revised — window [${mm(W0)}, ${mm(W0_END)}) goes ${ONTIME} then ${W0_TRUE}. An INSERT-only sink is compatible with the first and not the second.` },
 ];
 
 // ===================== CONCEPT 2 — WINDOWS IN SQL ===========================
@@ -218,16 +220,16 @@ const C4 = [
       c.panel('A CONTINUOUS CLICK-COUNT QUERY — FIVE STAGES', 'a')
       + c.mapRows('pp', c.P.main.x + 24, c.P.main.y + 52, [
         [`streams (clicks, impressions)`, `${EVENTS.length} rows, with et and pt on every one`],
-        [`SQL engine (continuous query)`, SQL_TUMBLE.slice(0, 58) + '…'],
+        [`SQL engine (continuous query)`, SQL_TOTAL.slice(0, 58) + '…'],
         [`watermark + window`, `TUMBLE buckets by et; the watermark decides when each bucket emits`],
-        [`updating result`, `${RESULT_ROWS.length} rows, of which ${UPDATED_ROWS.length} window row gets revised`],
+        [`updating result`, `${ET_KEYS.length} rows, of which ${UPDATED_ROWS.length} window ${pl(UPDATED_ROWS.length, 'row gets', 'rows get')} revised`],
         [`sink`, `must UPSERT — an INSERT-only sink cannot express the revision`],
       ], { w: 1040, rh: 34, hot: 4, label: 'the sink requirement is readable from the query text' })
       + c.note('p1', c.P.main.x + 24, c.P.main.y + 236, 1040, [
         `The last row is the design decision this query forces: a windowed GROUP BY produces an updating stream, so the sink needs UPSERT or retractions.`,
         `That is known before any code is written, from the shape of the query — which is the practical value of the append-only/updating distinction.`,
       ], c.C.blue, c.C.blueFill),
-    cap: `The useful property of a SQL-first design is that the sink requirement falls out of the query text. A windowed \`GROUP BY\` is an updating stream — ${UPDATED_ROWS.length} of ${ET_KEYS.length} window rows is revised here — so the sink must UPSERT. Had the query been a \`WHERE\`, an append-only sink would have been fine, and that is decidable before anything is built.` },
+    cap: `The useful property of a SQL-first design is that the sink requirement falls out of the query text. A windowed \`GROUP BY\` is an updating stream — ${UPDATED_ROWS.length} of ${ET_KEYS.length} window rows ${pl(UPDATED_ROWS.length, 'is', 'are')} revised here — so the sink must UPSERT. Had the query been a \`WHERE\`, an append-only sink would have been fine, and that is decidable before anything is built.` },
   { t: 'the result row, as it actually changes', draw: (c) =>
       c.panel(`WINDOW [${mm(W0)}, ${mm(W0_END)}) — WHAT THE SINK RECEIVES`, 'a')
       + c.mapRows('rr', c.P.main.x + 24, c.P.main.y + 52, [
@@ -274,7 +276,7 @@ const DIAGRAMS = [
       `**The relational operations map straight across.** \`SELECT\` is a transform, \`WHERE v > ${FILTER_V}\` is a filter (${APPEND_ROWS.length} of ${EVENTS.length} rows: ids ${APPEND_ROWS.join(', ')}), \`GROUP BY key\` is a keyed aggregation (${KEYS.length} groups). Nothing new so far.`, '',
       `The one row with no batch equivalent is \`GROUP BY key, TUMBLE(et, INTERVAL '${WIN}' SECOND)\`, which needs a **time column** — and batch SQL has no notion of event time. Adding the window takes the group count from ${KEYS.length} to ${RESULT_ROWS.length}. **Streaming SQL is relational SQL plus a column whose values are a clock.**`, '',
       `**And which clock is a one-token choice with different answers.** \`TUMBLE(et, …)\` and \`TUMBLE(pt, …)\` differ by three characters, and over this dataset they disagree on **${CLOCK_DIFFER.length} of the ${ET_KEYS.length} windows** — window [${mm(CLOCK_DIFFER[0])}, ${mm(CLOCK_DIFFER[0] + WIN)}) reads ${SUM(TUMBLE_ET[CLOCK_DIFFER[0]])} by event time and ${SUM(TUMBLE_PT[CLOCK_DIFFER[0]] || [])} by processing time. Both are valid SQL producing valid results, and no engine can flag the wrong one.`, '',
-      `**So some results append and others update.** \`SELECT * FROM clicks WHERE v > ${FILTER_V}\` is **append-only**: ${APPEND_ROWS.length} rows, each a fact that can never be revised, because a row either matched or it did not. The windowed aggregate is **updating**: ${UPDATED_ROWS.length} of its ${ET_KEYS.length} window rows gets revised — window [${mm(W0)}, ${mm(W0_END)}) emits ${ONTIME} and later becomes ${W0_TRUE}.`, '',
+      `**So some results append and others update.** \`SELECT * FROM clicks WHERE v > ${FILTER_V}\` is **append-only**: ${APPEND_ROWS.length} rows, each a fact that can never be revised, because a row either matched or it did not. The windowed total \`${SQL_TOTAL}\` is **updating**: ${UPDATED_ROWS.length} of its ${ET_KEYS.length} window rows ${pl(UPDATED_ROWS.length, 'gets', 'get')} revised — window [${mm(W0)}, ${mm(W0_END)}) emits ${ONTIME} and later becomes ${W0_TRUE}.`, '',
       `That distinction is readable from the query text, and it tells you what the sink must be capable of before any code exists.`],
     whenHeading: 'When to reach for streaming SQL, and what it does not do for you',
     when: [
@@ -329,16 +331,16 @@ const DIAGRAMS = [
     subtitle: `one window row goes ${ONTIME} → ${W0_TRUE}; none of ${ONTIME}, ${W0_TRUE} or ${hhmmss(EVENTS[ONTIME_I].pt)} appears in the SQL`,
     heading: 'Why the sink requirement is readable from the query, and the timing is not',
     why: [
-      `**The question.** A continuous SQL query that keeps a campaign click count current: it buckets clicks into a TUMBLE window and updates the result when the watermark closes the window, so the count stays correct as late clicks arrive.`, '',
+      `**The question.** A continuous SQL query that keeps a click total current: it buckets clicks into a TUMBLE window and updates the result when the watermark closes the window, so the count stays correct as late clicks arrive.`, '',
       `**The pipeline:** streams → SQL engine (continuous query) → watermark + window → updating result → sink.`, '',
-      `**The query:** \`${SQL_TUMBLE}\``, '',
-      `**One thing is decidable from that text alone:** a windowed \`GROUP BY\` produces an **updating** stream, so the sink must UPSERT or accept retractions. ${UPDATED_ROWS.length} of the ${ET_KEYS.length} window rows is revised here. Had the query been a \`WHERE\`, an append-only sink would have been fine — and knowing which before building anything is the practical value of the distinction.`, '',
+      `**The query:** \`${SQL_TOTAL}\` — one total per window, so each window is one result row`, '',
+      `**One thing is decidable from that text alone:** a windowed \`GROUP BY\` produces an **updating** stream, so the sink must UPSERT or accept retractions. ${UPDATED_ROWS.length} of the ${ET_KEYS.length} window rows ${pl(UPDATED_ROWS.length, 'is', 'are')} revised here. Had the query been a \`WHERE\`, an append-only sink would have been fine — and knowing which before building anything is the practical value of the distinction.`, '',
       `**And one thing is not.** Follow window [${mm(W0)}, ${mm(W0_END)})\\: it finally holds ${W0_TRUE} from ids ${WINDOWS[W0].join(', ')}. The watermark passes ${mm(W0_END)} after event ${ONTIME_I}, at ${hhmmss(EVENTS[ONTIME_I].pt)}, and the engine emits **${ONTIME}**. Then id ${L.id} arrives at ${hhmmss(L.pt)} and the row is updated to **${W0_TRUE}**.`, '',
       `None of ${ONTIME}, ${W0_TRUE} or ${hhmmss(EVENTS[ONTIME_I].pt)} appears anywhere in the SQL. All three come from the watermark the engine maintains. **The query got shorter; the semantics did not get simpler.**`, '',
       `**Two choices remain yours, and they are a few characters each:** \`TUMBLE(et, ${WIN}s)\` gives ${ET_KEYS.length} rows (${ET_KEYS.map(k => SUM(TUMBLE_ET[k])).join(', ')}); \`TUMBLE(pt, ${WIN}s)\` gives ${PT_KEYS.length} rows differing on ${CLOCK_DIFFER.length} of them; \`HOP\` gives ${HOP_WINDOWS.length} rows totalling ${HOP_TOTAL}; \`SESSION\` gives ${SESSIONS.a.length + SESSIONS.b.length} rows with an unpredictable count.`],
     whenHeading: 'When this design is right, and the four things it does not settle',
     when: [
-      `**It is right when the sink can UPSERT by (key, window).** That is the one hard requirement, and it is known from the query shape rather than discovered in testing.`, '',
+      `**It is right when the sink can UPSERT by window.** That is the one hard requirement, and it is known from the query shape rather than discovered in testing.`, '',
       `**Use the SQL form rather than a hand-written pipeline for this kind of query.** Four window shapes, two clocks and the whole trigger/accumulation apparatus are available in a statement you can review in one screen — which is a real advantage, as long as the review reads the window and the clock first.`, '',
       `**Find out the engine's allowed-lateness setting before trusting the "stays correct" claim.** Whether id ${L.id} is admitted at all is configuration the SQL does not mention.`, '',
       `**What this query does NOT settle — four gaps:**`, '',
@@ -389,7 +391,7 @@ const PROGRAMS = [];
 PROGRAMS.push({
   name: 'ch08-sql-memory',
   title: 'One query, two clocks — and append-only versus updating',
-  subtitle: `TUMBLE(et) vs TUMBLE(pt) differ on ${CLOCK_DIFFER.length} of ${ET_KEYS.length} windows · ${APPEND_ROWS.length} rows never revised, ${UPDATED_ROWS.length} window revised`,
+  subtitle: `TUMBLE(et) vs TUMBLE(pt) differ on ${CLOCK_DIFFER.length} of ${ET_KEYS.length} windows · ${APPEND_ROWS.length} rows never revised, ${UPDATED_ROWS.length} ${pl(UPDATED_ROWS.length, 'window', 'windows')} revised`,
   src: COMMON.concat([
     '',
     'type Result { rows, mode }',

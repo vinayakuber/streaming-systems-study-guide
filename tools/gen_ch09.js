@@ -48,7 +48,15 @@ const bufferAt = (i) => EVENTS.filter((e, j) => j <= i && EVENTS.slice(j).some((
 const MAX_BUFFER = Math.max(...EVENTS.map((_, i) => bufferAt(i)));
 // the TEMPORAL join: each left row probes the right side's state AS OF its own et
 const temporalAt = (et) => rights.filter(r => r.et <= et).reduce((s, r) => s + r.v, 0);
-const TEMPORAL = lefts.map(l => ({ l, value: rights.some(r => r.et <= l.et) ? temporalAt(l.et) : null }));
+const arrivedBy = (l) => rights.filter(r => idx(r) < idx(l) && r.et <= l.et);
+const TEMPORAL = lefts.map(l => ({ l, value: rights.some(r => r.et <= l.et) ? temporalAt(l.et) : null,
+  onArrival: arrivedBy(l).length ? arrivedBy(l).reduce((s, r) => s + r.v, 0) : null }));
+// the as-of answer is only available on arrival when the table is already complete for that time
+const STALE = TEMPORAL.filter(t => t.onArrival !== t.value);
+const LATE_IMPS = [...new Set(STALE.flatMap(t => rights.filter(r => idx(r) > idx(t.l) && r.et <= t.l.et).map(r => r.id)))].sort((a, b) => a - b);
+const pl = (n, one, many) => (n === 1 ? one : many);
+const STALE_TXT = STALE.map(t => `click ${t.l.id} reads ${t.onArrival === null ? 'NULL' : t.onArrival} instead of ${t.value}`).join(' and ');
+const IMPS_TXT = `impression${pl(LATE_IMPS.length, '', 's')} ${LATE_IMPS.join(' and ')}`;
 const TEMPORAL_NULL = TEMPORAL.filter(t => t.value === null).length;
 const fail = (m) => { throw new Error(`gen_ch09: ${m}`); };
 if (MATCHES.length < 3) fail(`only ${MATCHES.length} pairs match within ${J}s — the join has too little to show`);
@@ -58,6 +66,8 @@ if (!CLEAN.length) fail('no result is emitted correctly on time; the contrast ne
 if (EMITTED_ONTIME + EMITTED_LATE + NEVER_MATCHES !== MATCHES.length) fail('the match accounting does not add up');
 if (TEMPORAL.length !== lefts.length) fail('the temporal join did not probe every left row');
 if (!TEMPORAL_NULL) fail('no left row probes an empty table; the temporal-join NULL case is missing');
+if (!STALE.length) fail('every temporal lookup on arrival already equals its as-of answer; the settled-table caveat has no worked case');
+if (STALE.some(t => t.value === null)) fail('a lookup on arrival found a version the as-of answer lacks; the arrival filter is wrong');
 if (MAX_BUFFER < 2) fail('the join never buffers more than one row');
 
 const W = 1140;
@@ -96,23 +106,23 @@ const C1 = [
             : `after event ${p.emitIdx}, when the minimum watermark passes ${hhmmss(p.l.et + J)}`]),
         { w: 1040, rh: 32, hot: PLAN.findIndex(p => p.emitIdx === null), label: `the join claims min(left, right) — ch03's rule, with two inputs by construction` })
       + c.note('w1', c.P.main.x + 24, c.P.main.y + 66 + PLAN.length * 32, 1040, [
-        `${NEVER.length} of the ${PLAN.length} clicks never emits at all, because the MINIMUM watermark never reaches its join bound.`,
+        `${NEVER.length} of the ${PLAN.length} clicks never ${pl(NEVER.length, 'emits', 'emit')} at all, because the MINIMUM watermark never reaches its join bound.`,
         `Those ${NEVER.length} rows hold ${NEVER_MATCHES} of the ${MATCHES.length} true matches. They are in the state, matched, and never published.`,
       ], c.C.hot, c.C.hotFill),
-    cap: `This is where a stream-stream join stops resembling a batch join. ${CLEAN.length + NEEDS_RETRACTION.length} of the ${PLAN.length} clicks reach an emission point; ${NEVER.length} never do, because the join's watermark is the minimum over both inputs and it stalls below their bound. ${NEVER_MATCHES} of the ${MATCHES.length} true matches are computed, held in state, and never published.` },
+    cap: `This is where a stream-stream join stops resembling a batch join. ${CLEAN.length + NEEDS_RETRACTION.length} of the ${PLAN.length} clicks reach an emission point; ${NEVER.length} never ${pl(NEVER.length, 'does', 'do')}, because the join's watermark is the minimum over both inputs and it stalls below their bound. ${NEVER_MATCHES} of the ${MATCHES.length} true matches are computed, held in state, and never published.` },
   { t: 'so the input type picks the join type', draw: (c) =>
       c.panel('TWO JOINS, TWO BOUNDING MECHANISMS', 'p')
       + c.mapRows('jt', c.P.main.x + 24, c.P.main.y + 52, [
         [`stream JOIN stream`, `bounded by TIME — a window, plus both watermarks`],
         [`stream JOIN table`, `bounded by the TABLE — one lookup per row, finite per key`],
         [`here, as a windowed join`, `${MATCHES.length} matches exist · ${EMITTED_ONTIME} emitted on time · ${NEVER_MATCHES} never emitted`],
-        [`here, as a temporal join`, `${TEMPORAL.length} rows enriched immediately, ${TEMPORAL_NULL} with no table version yet`],
+        [`here, as a temporal join`, `${TEMPORAL.length} rows looked up on arrival, ${TEMPORAL_NULL} NULL · ${STALE.length} short of their as-of value`],
       ], { w: 1040, rh: 36, hot: 3, label: 'the same data, two join kinds, very different behaviour' })
       + c.note('t1', c.P.main.x + 24, c.P.main.y + 212, 1040, [
         `Mistaking one for the other is the common streaming-join bug: windowing a lookup adds a wait that the data never needed.`,
         `Read the right-hand input: if it is a slowly-changing dimension, it is a table and wants a temporal join, however it arrived.`,
       ], c.C.good, c.C.goodFill),
-    cap: `The decision is about what is being joined, not how the data got there. Two streams need a time bound and inherit all of the above — ${EMITTED_ONTIME} of ${MATCHES.length} matches on time here. A stream against a table is a lookup, bounded per key, and all ${TEMPORAL.length} rows are enriched at once. The bug is windowing the second case.` },
+    cap: `The decision is about what is being joined, not how the data got there. Two streams need a time bound and inherit all of the above — ${EMITTED_ONTIME} of ${MATCHES.length} matches on time here. A stream against a table is a lookup, bounded per key, and all ${TEMPORAL.length} rows are looked up on arrival — which is right only when the table is settled for that time. These impressions are not: ${IMPS_TXT} arrive after clicks they precede, so ${STALE.length} of the lookups come up short. The bug is windowing a genuine table; the mirror-image bug is treating a late stream as one.` },
 ];
 
 // ============== CONCEPT 2 — WINDOWED AND TEMPORAL JOINS =====================
@@ -144,23 +154,23 @@ const C2 = [
             : `impression total ${t.value}, from ${rights.filter(r => r.et <= t.l.et).map(r => r.id).join(',')}`]),
         { w: 1040, rh: 32, hot: TEMPORAL.findIndex(t => t.value === null), label: 'one lookup per row, against the table as it stood at that event time' })
       + c.note('j1', c.P.main.x + 24, c.P.main.y + 66 + TEMPORAL.length * 32, 1040, [
-        `No window, no buffer, no wait — each row is enriched from the table immediately. ${TEMPORAL_NULL} row${TEMPORAL_NULL === 1 ? '' : 's'} gets NULL because the table had no version yet at that event time.`,
-        `What it DOES need is a VERSIONED table: the lookup is "as of ${hhmmss(TEMPORAL[2].l.et)}", not "now".`,
+        `No window, no buffer, no wait on the other side's watermark. ${TEMPORAL_NULL} row${TEMPORAL_NULL === 1 ? ' gets' : 's get'} NULL because the table had no version yet at that event time.`,
+        `What it DOES need is a VERSIONED table, complete for that time: the lookup is "as of ${hhmmss(TEMPORAL[2].l.et)}", not "now".`,
       ], c.C.good, c.C.goodFill),
-    cap: `A temporal join is a lookup, and it behaves completely differently: all ${TEMPORAL.length} clicks are enriched immediately, with no buffer and no wait. The price is in the note — it needs the table's **history**, because "as of ${hhmmss(TEMPORAL[2].l.et)}" is not the same question as "now", and a table that only holds current values cannot answer it.` },
+    cap: `A temporal join is a lookup, and it behaves completely differently: no buffer, and no wait on a second watermark. The price is in the note — it needs the table's **history**, because "as of ${hhmmss(TEMPORAL[2].l.et)}" is not the same question as "now", and it needs that history to be **complete**. The values above are the as-of answers; looked up the moment each click arrives, ${STALE_TXT}, because ${IMPS_TXT} ${pl(LATE_IMPS.length, 'has', 'have')} not arrived yet.` },
   { t: 'so the two joins are bounded by entirely different things', draw: (c) =>
       c.panel('SIDE BY SIDE, ON THE SAME DATA', 'a')
       + c.mapRows('sb', c.P.main.x + 24, c.P.main.y + 52, [
         [`what bounds it`, `windowed: the ${secs(J)} window · temporal: the table, finite per key`],
         [`what it buffers`, `windowed: up to ${MAX_BUFFER} rows · temporal: nothing`],
-        [`when it emits`, `windowed: when both watermarks pass · temporal: immediately`],
+        [`when it emits`, `windowed: when both watermarks pass · temporal: on arrival, trusting the table`],
         [`what it needs`, `windowed: watermarks on both sides · temporal: a VERSIONED table`],
       ], { w: 1040, rh: 36, hot: 2, label: 'not two implementations of one idea — two different operations' })
       + c.note('s1', c.P.main.x + 24, c.P.main.y + 212, 1040, [
-        `The windowed join waits because a match may still arrive. The temporal join does not, because the table's version at that event time is already determined.`,
-        `That is why ${NEVER.length} click${NEVER.length === 1 ? '' : 's'} never emits under the windowed join and all ${TEMPORAL.length} emit under the temporal one.`,
+        `The windowed join waits because a match may still arrive. The temporal join does not: it trusts the table's version at that event time to be settled.`,
+        `That is why ${NEVER.length} click${pl(NEVER.length, ' never emits', 's never emit')} under the windowed join and all ${TEMPORAL.length} are answered under the temporal one — ${STALE.length} of them short.`,
       ], c.C.blue, c.C.blueFill),
-    cap: `The row that matters is the third. A windowed join waits because a counterpart may still arrive; a temporal join does not, because the table's state at that event time is already settled. On this data that is the difference between ${NEVER.length} click never emitting and all ${TEMPORAL.length} emitting at once.` },
+    cap: `The row that matters is the third. A windowed join waits because a counterpart may still arrive; a temporal join does not, because it trusts the table's state at that event time to be settled. On this data that is the difference between ${NEVER.length} ${pl(NEVER.length, 'click', 'clicks')} never emitting and all ${TEMPORAL.length} answered on arrival — and the trust is misplaced for ${STALE.length} of them, because ${IMPS_TXT} arrive after the clicks they precede. A temporal join is for a side that is already settled.` },
   { t: 'and mistaking one for the other is the common bug', draw: (c) =>
       c.panel('WINDOWING A LOOKUP', 'p')
       + c.mapRows('mb', c.P.main.x + 24, c.P.main.y + 52, [
@@ -199,7 +209,7 @@ const C3 = [
         ]).concat([[`so the join must`, `retract the earlier result and emit the corrected match`]]),
         { w: 1040, rh: 34, hot: 4, label: 'the emitted result was correct when emitted, and is now wrong' })
       + c.note('c1', c.P.main.x + 24, c.P.main.y + 66 + 5 * 34, 1040, [
-        `${NEEDS_RETRACTION.length} of the ${PLAN.length} clicks is in this state: emitted, then contradicted by a row arriving ${idx(EVENTS.find(e => e.id === NEEDS_RETRACTION[0].lateArrivals[0])) - NEEDS_RETRACTION[0].emitIdx} events later.`,
+        `${NEEDS_RETRACTION.length} of the ${PLAN.length} clicks ${pl(NEEDS_RETRACTION.length, 'is', 'are')} in this state: emitted, then contradicted by a row arriving ${idx(EVENTS.find(e => e.id === NEEDS_RETRACTION[0].lateArrivals[0])) - NEEDS_RETRACTION[0].emitIdx} events later.`,
         `A NO-MATCH result is the dangerous one, because downstream it looks like a fact rather than a provisional answer.`,
       ], c.C.hot, c.C.hotFill),
     cap: `The worst version of this is visible in the first row: the join emits **no match** for click ${NEEDS_RETRACTION[0].l.id}, which downstream reads as "this click was never attributed". Then impression ${NEEDS_RETRACTION[0].lateArrivals.join(', ')} arrives ${idx(EVENTS.find(e => e.id === NEEDS_RETRACTION[0].lateArrivals[0])) - NEEDS_RETRACTION[0].emitIdx} events later and does match. A negative result is still a result, and it still has to be retracted.` },
@@ -217,10 +227,10 @@ const C3 = [
         s += c.cv.text(c.P.main.x + 1050, y + 23, r[1], { size: 11, anchor: 'end', weight: 700, fill: r[2], band: 'acv' + i });
       });
       return s + c.note('a1', c.P.main.x + 24, c.P.main.y + 72 + rows.length * 40, 1040, [
-        `${EMITTED_ONTIME} + ${EMITTED_LATE} + ${NEVER_MATCHES} = ${MATCHES.length}. Only ${EMITTED_ONTIME} of the ${MATCHES.length} true matches is published correctly the first time.`,
+        `${EMITTED_ONTIME} + ${EMITTED_LATE} + ${NEVER_MATCHES} = ${MATCHES.length}. Only ${EMITTED_ONTIME} of the ${MATCHES.length} true matches ${pl(EMITTED_ONTIME, 'is', 'are')} published correctly the first time.`,
         `This is the honest picture of a stream-stream join on out-of-order data, and it is why ad attribution is hard rather than fiddly.`,
       ], c.C.hot, c.C.hotFill); },
-    cap: `The accounting is the chapter's central result and it is not comfortable: of ${MATCHES.length} true matches, **${EMITTED_ONTIME}** is published correctly on the first attempt, **${EMITTED_LATE}** requires a retraction, and **${NEVER_MATCHES}** are computed, held in state and never published at all. Nothing is broken — this is what a correct windowed join does on this data.` },
+    cap: `The accounting is the chapter's central result and it is not comfortable: of ${MATCHES.length} true matches, **${EMITTED_ONTIME}** ${pl(EMITTED_ONTIME, 'is', 'are')} published correctly on the first attempt, **${EMITTED_LATE}** ${pl(EMITTED_LATE, 'requires', 'require')} a retraction, and **${NEVER_MATCHES}** ${pl(NEVER_MATCHES, 'is', 'are')} computed, held in state and never published at all. Nothing is broken — this is what a correct windowed join does on this data.` },
   { t: 'and the state must be collected, or the join grows forever', draw: (c) =>
       c.panel('GARBAGE COLLECTING THE JOIN BUFFER', 'p')
       + c.mapRows('gc', c.P.main.x + 24, c.P.main.y + 52, [
@@ -231,9 +241,9 @@ const C3 = [
       ], { w: 1040, rh: 36, hot: 3, label: 'the same watermark decides emission and collection' })
       + c.note('g1', c.P.main.x + 24, c.P.main.y + 212, 1040, [
         `One watermark drives both: it decides when a match may be emitted and when its inputs may be dropped. A stalled watermark stops both at once.`,
-        `So the ${NEVER.length} click${NEVER.length === 1 ? '' : 's'} that never emits is also ${NEVER.length} buffered row${NEVER.length === 1 ? '' : 's'} that is never freed — the failure is silent in both directions.`,
+        `So the ${NEVER.length} click${NEVER.length === 1 ? '' : 's'} that never ${pl(NEVER.length, 'emits', 'emit')} ${pl(NEVER.length, 'is', 'are')} also ${NEVER.length} buffered row${NEVER.length === 1 ? ' that is' : 's that are'} never freed — the failure is silent in both directions.`,
       ], c.C.hot, c.C.hotFill),
-    cap: `The coupling is worth stating explicitly: the same watermark decides emission and collection, so a stalled input is simultaneously a liveness problem and a memory leak. The ${NEVER.length} click${NEVER.length === 1 ? '' : 's'} here that never emits is also never collected, and neither symptom raises an error.` },
+    cap: `The coupling is worth stating explicitly: the same watermark decides emission and collection, so a stalled input is simultaneously a liveness problem and a memory leak. The ${NEVER.length} click${NEVER.length === 1 ? '' : 's'} here that never ${pl(NEVER.length, 'emits is', 'emit are')} also never collected, and neither symptom raises an error.` },
 ];
 
 // ============ CONCEPT 4 — AD ATTRIBUTION (systemDesign) =====================
@@ -243,11 +253,11 @@ const C4 = [
       + c.mapRows('pp', c.P.main.x + 24, c.P.main.y + 52, [
         [`click stream + impression stream`, `${lefts.length} clicks, ${rights.length} impressions, out of order`],
         [`windowed join (buffer + watermark)`, `${secs(J)} window · peak buffer ${MAX_BUFFER} rows · claims min(both watermarks)`],
-        [`retraction emitter`, `because ${NEEDS_RETRACTION.length} emitted result${NEEDS_RETRACTION.length === 1 ? '' : 's'} gets contradicted`],
+        [`retraction emitter`, `because ${NEEDS_RETRACTION.length} emitted result${NEEDS_RETRACTION.length === 1 ? ' gets' : 's get'} contradicted`],
         [`attribution store`, `must accept a retraction, including of a NO-MATCH`],
       ], { w: 1040, rh: 36, hot: 2, label: 'four stages, and the third exists only because results can be contradicted' })
       + c.note('p1', c.P.main.x + 24, c.P.main.y + 212, 1040, [
-        `The retraction emitter is not optional here: ${NEEDS_RETRACTION.length} of the ${PLAN.length} clicks emits a result that a later row contradicts.`,
+        `The retraction emitter is not optional here: ${NEEDS_RETRACTION.length} of the ${PLAN.length} clicks ${pl(NEEDS_RETRACTION.length, 'emits a result', 'emit a result')} that a later row contradicts.`,
         `And it must be able to retract a NEGATIVE result — "click ${NEEDS_RETRACTION[0].l.id} was not attributed" is a published claim that turns out to be false.`,
       ], c.C.hot, c.C.hotFill),
     cap: `The hard requirement in this design is retracting a **negative**. "Click ${NEEDS_RETRACTION[0].l.id} matched no impression" is published as a fact and later becomes false, so the attribution store needs to express "forget what I said about this click" — which is harder than updating a number, and worth discovering at design time.` },
@@ -297,8 +307,8 @@ const DIAGRAMS = [
       `**A batch join completes; a stream-stream join does not.** Over these inputs a batch join tests ${lefts.length} × ${rights.length} = ${lefts.length * rights.length} candidate pairs and finishes. The streaming version never finishes on its own: either side may still produce a match.`, '',
       `So SQL requires a **time bound**, and with a ${secs(J)} bound there are exactly **${MATCHES.length} true matches** here: ${MATCHES.map(p => `${p[0]}-${p[1]}`).join(', ')}. Without the bound the join would retain every row of both sides forever, so the bound makes the state finite *and* the semantics defined.`, '',
       `**The join must buffer.** A row cannot be matched and discarded — it waits for a counterpart that may never come. The buffer peaks at **${MAX_BUFFER} rows** on this ${EVENTS.length}-row stream, and the sizing formula is (arrival rate × join window) per side.`, '',
-      `**The watermark ends the wait, and it is the minimum over both inputs** — ch03's rule, now structural because a join always has two. Trace each click's emission point and **${NEVER.length} of the ${PLAN.length} never emits at all**, because the minimum watermark never passes its bound. Those rows hold **${NEVER_MATCHES} of the ${MATCHES.length} true matches**: computed, sitting in state, never published.`, '',
-      `**And the input type picks the join type.** Stream ⋈ stream is bounded by *time*; stream ⋈ table is bounded by the *table*, one lookup per row. On this data the windowed join publishes ${EMITTED_ONTIME} of ${MATCHES.length} matches on time, while a temporal join enriches all ${TEMPORAL.length} clicks immediately. Mistaking the second for the first is the common streaming-join bug.`],
+      `**The watermark ends the wait, and it is the minimum over both inputs** — ch03's rule, now structural because a join always has two. Trace each click's emission point and **${NEVER.length} of the ${PLAN.length} never ${pl(NEVER.length, 'emits', 'emit')} at all**, because the minimum watermark never passes its bound. Those rows hold **${NEVER_MATCHES} of the ${MATCHES.length} true matches**: computed, sitting in state, never published.`, '',
+      `**And the input type picks the join type.** Stream ⋈ stream is bounded by *time*; stream ⋈ table is bounded by the *table*, one lookup per row. On this data the windowed join publishes ${EMITTED_ONTIME} of ${MATCHES.length} matches on time, while a temporal join answers all ${TEMPORAL.length} clicks on arrival — ${STALE.length} of them short, because an impression stream is not a settled table. Mistaking one for the other, in either direction, is the common streaming-join bug.`],
     whenHeading: 'When a windowed join is the right tool, and how to size it',
     when: [
       `**Use a windowed join when both sides are genuinely streams** and a match means "these happened close together". The window width is a domain statement — how close counts as together — not a tuning parameter.`, '',
@@ -310,19 +320,19 @@ const DIAGRAMS = [
     sub: `Every match, the buffer peak and the full on-time/late/never accounting are computed from the seed and asserted to sum to ${MATCHES.length}.` },
   { name: 'ch09-kinds', steps: C2,
     title: 'Windowed and temporal joins — two operations, not two settings',
-    subtitle: `windowed: ${MATCHES.length} matches, up to ${MAX_BUFFER} buffered, ${NEVER.length} click never emits · temporal: ${TEMPORAL.length} enriched at once, ${TEMPORAL_NULL} NULL`,
+    subtitle: `windowed: ${MATCHES.length} matches, up to ${MAX_BUFFER} buffered, ${NEVER.length} ${pl(NEVER.length, 'click never emits', 'clicks never emit')} · temporal: ${TEMPORAL.length} answered on arrival, ${TEMPORAL_NULL} NULL, ${STALE.length} short`,
     heading: 'Why these are bounded by different things, and why confusing them is costly',
     why: [
       `**The windowed (interval) join** matches rows whose event times are within a window of each other. One subtraction per candidate pair: ${MATCHES.length} of the ${lefts.length * rights.length} pairs are within ${secs(J)}.`, '',
       `Worth noticing early: **one click matches ${Math.max(...PLAN.map(p => p.all.length))} impressions**, so a windowed join is not one-to-one and its output can exceed either input. That is a capacity surprise people usually meet after shipping.`, '',
       `**The temporal (stream-table) join** enriches each row with the version of a table that was current *at that row's event time*. Here each click probes the impression side as of its own \`et\`: ${TEMPORAL.filter(t => t.value !== null).slice(0, 2).map(t => `click ${t.l.id} → ${t.value}`).join(', ')}, and ${TEMPORAL_NULL} click${TEMPORAL_NULL === 1 ? ' gets' : 's get'} NULL because no impression existed yet at that time.`, '',
-      `No window, no buffer, no wait — all ${TEMPORAL.length} rows are enriched immediately. The price is that it needs a **versioned** table: "as of ${hhmmss(TEMPORAL[2].l.et)}" is not the same question as "now", and a table holding only current values cannot answer it.`, '',
+      `No window, no buffer, no wait on the other side's watermark — each of the ${TEMPORAL.length} rows is looked up as it arrives. The price is that it needs a **versioned** table that is **complete** for that time: "as of ${hhmmss(TEMPORAL[2].l.et)}" is not the same question as "now", and a table holding only current values cannot answer it. These impressions are not complete in time: looked up on arrival, ${STALE_TXT}, because ${IMPS_TXT} arrive after the clicks they precede.`, '',
       `**So the two are bounded by entirely different things:**`, '',
       `- what bounds it — windowed: the ${secs(J)} window · temporal: the table, finite per key`,
       `- what it buffers — windowed: up to ${MAX_BUFFER} rows · temporal: nothing`,
-      `- when it emits — windowed: when both watermarks pass · temporal: immediately`,
+      `- when it emits — windowed: when both watermarks pass · temporal: on arrival, trusting the table to be settled`,
       `- what it needs — windowed: watermarks on both sides · temporal: a versioned table`, '',
-      `The third row is the substantive difference: a windowed join waits because a counterpart may still arrive, and a temporal join does not because the table's state at that event time is already settled. On this data that is ${NEVER.length} click never emitting versus all ${TEMPORAL.length} emitting at once.`, '',
+      `The third row is the substantive difference: a windowed join waits because a counterpart may still arrive, and a temporal join does not because it trusts the table's state at that event time to be settled. On this data that is ${NEVER.length} ${pl(NEVER.length, 'click', 'clicks')} never emitting versus all ${TEMPORAL.length} answered on arrival, ${STALE.length} of them short — the trust holds for a dimension table, not for a stream of impressions.`, '',
       `**And mistaking one for the other is the common bug.** The symptom is results arriving late or not at all; the cause is a windowed join against what is really a slowly-changing table; the cost here would be ${NEVER.length} of ${lefts.length} rows never emitting and ${NEVER_MATCHES} matches withheld.`],
     whenHeading: 'When to use each, and why the obvious fixes make it worse',
     when: [
@@ -346,7 +356,7 @@ const DIAGRAMS = [
       `- **${EMITTED_LATE}** emitted late, after a retraction`,
       `- **${NEVER_MATCHES}** never emitted at all — the minimum watermark never passed the bound`, '',
       `${EMITTED_ONTIME} + ${EMITTED_LATE} + ${NEVER_MATCHES} = ${MATCHES.length}. Only ${Math.round(100 * EMITTED_ONTIME / MATCHES.length)}% of the true matches are published correctly the first time, and ${Math.round(100 * NEVER_MATCHES / MATCHES.length)}% are never published. **Nothing is broken** — this is what a correct windowed join does on out-of-order data.`, '',
-      `**And the state must be collected, or the join grows without bound.** The same watermark drives both: it decides when a match may be emitted and when its inputs may be dropped. So the ${NEVER.length} click${NEVER.length === 1 ? '' : 's'} that never emits is also ${NEVER.length} buffered row${NEVER.length === 1 ? '' : 's'} that is never freed — a stalled input is a liveness problem *and* a memory leak, silently.`],
+      `**And the state must be collected, or the join grows without bound.** The same watermark drives both: it decides when a match may be emitted and when its inputs may be dropped. So the ${NEVER.length} click${NEVER.length === 1 ? '' : 's'} that never ${pl(NEVER.length, 'emits', 'emit')} ${pl(NEVER.length, 'is', 'are')} also ${NEVER.length} buffered row${NEVER.length === 1 ? ' that is' : 's that are'} never freed — a stalled input is a liveness problem *and* a memory leak, silently.`],
     whenHeading: 'When to accept this, and what to do about the undelivered matches',
     when: [
       `**Accept the accounting when late attributions are tolerable** and the consumer can handle a retraction, including of a negative. A dashboard can; a billing run that has already paid out cannot.`, '',
@@ -421,7 +431,7 @@ const LATE_R = EVENTS.find(e => e.id === R0.lateArrivals[0]);
 PROGRAMS.push({
   name: 'ch09-hard-memory',
   title: 'A join with no completion — the buffer and the minimum watermark',
-  subtitle: `${MATCHES.length} true matches · peak buffer ${MAX_BUFFER} · ${NEVER.length} click never reaches its emission point`,
+  subtitle: `${MATCHES.length} true matches · peak buffer ${MAX_BUFFER} · ${NEVER.length} ${pl(NEVER.length, 'click never reaches its', 'clicks never reach their')} emission point`,
   src: COMMON.concat([
     '',
     'type Plan { emitIdx, matches }',
@@ -509,8 +519,8 @@ PROGRAMS.push({
       { t: 'one click reaches its emission point', line: at('fun planFor(l)', 'if (when == NONE && w != NONE && w > l.et + J) { when = i }'),
         stack: [MAIN({ all: '@0x100', clean: '@0x200' }), { name: 'planFor', locals: [`l = (id ${CLEAN[0].l.id}, et ${CLEAN[0].l.et})`, `when = ${CLEAN[0].emitIdx}`, 'ms = (a list)', `i = ${EVENTS.length - 1}`, `w = ${minWm(EVENTS.length - 1)}`, 'p = (a pair)'] }],
         heap: [{ key: 'all' }, { key: 'clean', hot: true }],
-        cap: `Click ${CLEAN[0].l.id} needs the join watermark above ${CLEAN[0].l.et} + ${J} = ${CLEAN[0].l.et + J}, which first happens at row ${CLEAN[0].emitIdx}. By then impression ${CLEAN[0].onTime.join(', ')} has arrived, so it is published correctly and never revised — ${CLEAN.length} of the ${PLAN.length} clicks is in this state.` },
-      { t: `and ${NEVER.length} click never reaches it, holding ${NEVER_MATCHES} matches`, line: at('    return Plan(when, ms)'),
+        cap: `Click ${CLEAN[0].l.id} needs the join watermark above ${CLEAN[0].l.et} + ${J} = ${CLEAN[0].l.et + J}, which first happens at row ${CLEAN[0].emitIdx}. By then impression ${CLEAN[0].onTime.join(', ')} has arrived, so it is published correctly and never revised — ${CLEAN.length} of the ${PLAN.length} clicks ${pl(CLEAN.length, 'is', 'are')} in this state.` },
+      { t: `and ${NEVER.length} ${pl(NEVER.length, 'click never reaches', 'clicks never reach')} it, holding ${NEVER_MATCHES} matches`, line: at('    return Plan(when, ms)'),
         stack: [MAIN({ all: '@0x100', clean: '@0x200', lost: '@0x300', claim: minWm(EVENTS.length - 1) }),
                 { name: 'planFor', locals: [`l = (id ${NEVER[0].l.id}, et ${NEVER[0].l.et})`, 'when = NONE', `ms = [${NEVER[0].all.join(', ')}]`, `i = ${EVENTS.length - 1}`, `w = ${minWm(EVENTS.length - 1)}`, 'p = (a pair)'] }],
         heap: [{ key: 'clean' }, { key: 'lost', hot: true }],
@@ -527,7 +537,7 @@ PROGRAMS.push({
 PROGRAMS.push({
   name: 'ch09-kinds-memory',
   title: 'Windowed against temporal — two joins, two bounding mechanisms',
-  subtitle: `windowed buffers up to ${MAX_BUFFER} and waits · temporal enriches all ${TEMPORAL.length} at once, ${TEMPORAL_NULL} NULL`,
+  subtitle: `windowed buffers up to ${MAX_BUFFER} and waits · temporal looks up all ${TEMPORAL.length} with no buffer, ${TEMPORAL_NULL} NULL`,
   src: COMMON.concat([
     '',
     'type Enriched { id, value }',
@@ -604,7 +614,7 @@ PROGRAMS.push({
         stack: [MAIN({ pairs: '@0x100' }), { name: 'temporalJoin', locals: ['out = @0x200', `l = (id ${FIRSTV.l.id}, et ${FIRSTV.l.et})`] },
                 { name: 'tableAsOf', locals: [`et = ${FIRSTV.l.et}`, `total = ${FIRSTV.value}`, 'any = true', `r = (id ${rights[rights.length - 1].id}, et ${rights[rights.length - 1].et})`] }],
         heap: [{ key: 'pairs' }, { key: 'enriched', hot: true }],
-        cap: `The \`continue\` skips table versions later than the row's own \`et\` — that is the "as of" semantics, and it is why the lookup needs the table's HISTORY rather than its current value. For click ${FIRSTV.l.id} the answer is ${FIRSTV.value}, determined the moment the click arrives.` },
+        cap: `The \`continue\` skips table versions later than the row's own \`et\` — that is the "as of" semantics, and it is why the lookup needs the table's HISTORY rather than its current value. For click ${FIRSTV.l.id} the as-of answer is ${FIRSTV.value} — but only once the history up to ${hhmmss(FIRSTV.l.et)} is complete. ${STALE.includes(FIRSTV) ? `In this seed it is not: looked up the moment the click arrives, the table yields ${FIRSTV.onArrival}, because ${rights.filter(r => idx(r) > idx(FIRSTV.l) && r.et <= FIRSTV.l.et).map(r => `impression ${r.id}`).join(' and ')} has not arrived yet.` : 'In this seed it is, so the lookup on arrival agrees.'}` },
       { t: 'so a row before the table existed gets NONE, not a wait', line: at('if (any == false) { return NONE }'),
         stack: [MAIN({ pairs: '@0x100', enriched: '@0x200' }), { name: 'tableAsOf', locals: [`et = ${lefts[0].et}`, 'total = 0', 'any = false', `r = (id ${rights[rights.length - 1].id}, et ${rights[rights.length - 1].et})`] }],
         heap: [{ key: 'enriched', hot: true }],
@@ -612,7 +622,7 @@ PROGRAMS.push({
       { t: 'and that is the whole difference: one waits, one does not', line: at('fun waitsFor(kind)', 'if (kind == "windowed") { return "both watermarks" }'),
         stack: [MAIN({ pairs: '@0x100', enriched: '@0x200', w: '"both watermarks"', t: '"nothing"' }), { name: 'waitsFor', locals: ['kind = "windowed"'] }],
         heap: [{ key: 'pairs' }, { key: 'enriched' }],
-        cap: `\`wWaits\` is "both watermarks" and \`tWaits\` is "nothing". Read the heap rows: \`pairs\` holds ${MATCHES.length} matches of which ${NEVER_MATCHES} are never published, while \`enriched\` holds all ${TEMPORAL.length} rows, complete. Windowing a lookup imports the first column's problems for no benefit.` },
+        cap: `\`wWaits\` is "both watermarks" and \`tWaits\` is "nothing". Read the heap rows: \`pairs\` holds ${MATCHES.length} matches of which ${NEVER_MATCHES} are never published, while \`enriched\` holds all ${TEMPORAL.length} rows with no buffer — ${STALE.length} of them as-of values that a lookup on arrival could not yet have read. Windowing a genuine lookup imports the first column's problems for no benefit; using a lookup on a late stream imports a different one.` },
     ];
   },
   intro: [
@@ -723,7 +733,7 @@ PROGRAMS.push({
         stack: [MAIN({ emitted: '@0x100', wrong: '@0x200', counts: '@0x300', total: MATCHES.length }),
                 { name: 'tally', locals: [`on = ${EMITTED_ONTIME}`, `la = ${EMITTED_LATE}`, `nv = ${NEVER_MATCHES}`, `l = (id ${NEVER[NEVER.length - 1].l.id}, et ${NEVER[NEVER.length - 1].l.et})`, 'e = (an Emission)'] }],
         heap: [{ key: 'counts', hot: true }],
-        cap: `${EMITTED_ONTIME} + ${EMITTED_LATE} + ${NEVER_MATCHES} = ${MATCHES.length} = \`total\`. Only ${EMITTED_ONTIME} of the ${MATCHES.length} true matches is right the first time and ${NEVER_MATCHES} are never delivered — from a correct implementation, on this data. The accounting is the deliverable, not the match list.` },
+        cap: `${EMITTED_ONTIME} + ${EMITTED_LATE} + ${NEVER_MATCHES} = ${MATCHES.length} = \`total\`. Only ${EMITTED_ONTIME} of the ${MATCHES.length} true matches ${pl(EMITTED_ONTIME, 'is', 'are')} right the first time and ${NEVER_MATCHES} are never delivered — from a correct implementation, on this data. The accounting is the deliverable, not the match list.` },
     ];
   },
   intro: [
@@ -781,8 +791,8 @@ PROGRAMS.push({
     '}',
     '',
     '// function: run(canTombstone) — the whole attribution pipeline over this stream.',
-    `//   run(true).rows has ${CLEAN.length + NEEDS_RETRACTION.length} attributed clicks and ${NEEDS_RETRACTION.length} tombstone`,
-    `//   run(false) leaves the same rows and no record that ${NEEDS_RETRACTION.length} claim was withdrawn`,
+    `//   run(true).rows has ${CLEAN.length + NEEDS_RETRACTION.length} attributed clicks and ${NEEDS_RETRACTION.length} tombstone${pl(NEEDS_RETRACTION.length, '', 's')}`,
+    `//   run(false) leaves the same rows and no record that ${NEEDS_RETRACTION.length} ${pl(NEEDS_RETRACTION.length, 'claim was', 'claims were')} withdrawn`,
     'fun run(canTombstone) {',
     '    var store = Store({}, [])',
     '    for (l in rowsOf(LEFT)) {',
@@ -831,13 +841,13 @@ PROGRAMS.push({
       { t: 'and without it the two stores look identical', line: at('    val withoutT = run(false)'),
         stack: [MAIN({ a: '@0x100', b: '@0x200' })],
         heap: [{ key: 'withT' }, { key: 'withoutT', hot: true }],
-        cap: `Both stores end with the same ${CLEAN.length + NEEDS_RETRACTION.length} attributed clicks; only \`tombstones\` differs. So the damage from omitting retractions is invisible in the store's final state — and note neither store mentions the ${NEVER.length} click that never emitted at all, holding ${NEVER_MATCHES} of the ${MATCHES.length} true matches.` },
+        cap: `Both stores end with the same ${CLEAN.length + NEEDS_RETRACTION.length} attributed clicks; only \`tombstones\` differs. So the damage from omitting retractions is invisible in the store's final state — and note neither store mentions the ${NEVER.length} ${pl(NEVER.length, 'click that never emitted', 'clicks that never emitted')} at all, holding ${NEVER_MATCHES} of the ${MATCHES.length} true matches.` },
     ];
   },
   intro: [
     `**What is being answered.** What an attribution store has to be able to do, and what it still never learns.`, '',
     `The unusual requirement is retracting a **negative**. \`markUnattributed\` publishes \`"NONE MATCHED"\` for click ${R0.l.id} — correct from everything that had arrived — and impression ${R0.lateArrivals.join(', ')} later proves it false.`, '',
-    `Step 3 is why an updating sink is not enough: overwriting the row fixes the store, but a consumer that already read "NONE MATCHED" never learns otherwise. And step 4 is the quieter problem — both stores end identical, and neither mentions the ${NEVER.length} click that never emitted at all, holding ${NEVER_MATCHES} of the ${MATCHES.length} true matches.`],
+    `Step 3 is why an updating sink is not enough: overwriting the row fixes the store, but a consumer that already read "NONE MATCHED" never learns otherwise. And step 4 is the quieter problem — both stores end identical, and neither mentions the ${NEVER.length} ${pl(NEVER.length, 'click that never emitted', 'clicks that never emitted')} at all, holding ${NEVER_MATCHES} of the ${MATCHES.length} true matches.`],
   sub: `Both store outcomes and the full match accounting are computed from the seed and asserted.` });
 
 for (const g of PROGRAMS) {

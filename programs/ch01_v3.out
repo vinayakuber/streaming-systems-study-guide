@@ -2,9 +2,9 @@ what it exercises                         now    span      n    average  count  
 before anything arrives -> None             0      60      9       None      0       9       1
 the first sample's own instant              1      60      9      5.000      1       9       2
 ordinary arrival, two in window             3      60      9      4.000      2       9       4
-three samples in the window                50      60      9      5.000      3       9      51
-the arrival that retires TWO               90      60      9      4.500      2       9      91
-quiet stream, one survivor                180      60      9      6.000      1       9     181
+three samples in the window                50      60      9      4.000      3       9      51
+the arrival that retires TWO               90      60      9      5.500      2       9      91
+quiet stream, one survivor                180      60      9      2.000      1       9     181
 quiet stream, window EMPTY -> None        191      60      9       None      0       9     192
 the last arrival of all                   540      60      9      8.000      1       9     541
 far future -> None, not the last v      10000      60      9       None      0       9     101
@@ -20,17 +20,17 @@ flat stream, six identical samples         60      60      7      4.000      6  
 20,000 samples, past the end            20100      60  20000       None      0   20000     202
 all 19 examples agree with the rescan and the timer-driven scan
 
-SAMPLES (t seconds, v ms) = [(1, 5), (3, 3), (50, 7), (90, 2), (130, 6), (220, 1), (245, 9), (260, 4), (540, 8)]
+SAMPLES (t seconds, v ms) = [(1, 5), (3, 3), (50, 4), (90, 7), (130, 2), (220, 9), (245, 6), (260, 1), (540, 8)]
 SPAN = 60s   window = (now - 60, now]
 
   t=  1s  window [5]            count 1  avg  5.000   expired here: 0
   t=  3s  window [5, 3]         count 2  avg  4.000   expired here: 0
-  t= 50s  window [5, 3, 7]      count 3  avg  5.000   expired here: 0
-  t= 90s  window [7, 2]         count 2  avg  4.500   expired here: 2
-  t=130s  window [2, 6]         count 2  avg  4.000   expired here: 1
-  t=220s  window [1]            count 1  avg  1.000   expired here: 2
-  t=245s  window [1, 9]         count 2  avg  5.000   expired here: 0
-  t=260s  window [1, 9, 4]      count 3  avg  4.667   expired here: 0
+  t= 50s  window [5, 3, 4]      count 3  avg  4.000   expired here: 0
+  t= 90s  window [4, 7]         count 2  avg  5.500   expired here: 2
+  t=130s  window [7, 2]         count 2  avg  4.500   expired here: 1
+  t=220s  window [9]            count 1  avg  9.000   expired here: 2
+  t=245s  window [9, 6]         count 2  avg  7.500   expired here: 0
+  t=260s  window [9, 6, 1]      count 3  avg  5.333   expired here: 0
   t=540s  window [8]            count 1  avg  8.000   expired here: 3
 
   counts   : [1, 2, 3, 2, 2, 1, 2, 3, 1]
@@ -39,21 +39,21 @@ SPAN = 60s   window = (now - 60, now]
   samples at once and another retires none -- so 'one in, one out' is false both ways.
 
   one-expiry-per-arrival is wrong at t = [90, 130, 220, 245, 540]
-    t= 90s reports 4.000 over 3 samples; the truth is 4.500 over 2
-    t=130s reports 5.000 over 3 samples; the truth is 4.000 over 2
-    t=220s reports 3.000 over 3 samples; the truth is 1.000 over 1
-    t=245s reports 5.333 over 3 samples; the truth is 5.000 over 2
-    t=540s reports 7.000 over 3 samples; the truth is 8.000 over 1
+    t= 90s reports 4.667 over 3 samples; the truth is 5.500 over 2
+    t=130s reports 4.333 over 3 samples; the truth is 4.500 over 2
+    t=220s reports 6.000 over 3 samples; the truth is 9.000 over 1
+    t=245s reports 5.667 over 3 samples; the truth is 7.500 over 2
+    t=540s reports 5.000 over 3 samples; the truth is 8.000 over 1
   ...right at the first 3 arrivals, where nothing had expired yet, and right again
   at t=260 BY ACCIDENT -- the stale window happens to hold the correct three samples.
   the fixed divisor 3 is wrong at 7 of 9 arrivals -- right only when the
   live count happens to equal 3, which it does 2 times.
 
   nothing arrives between t=130 and t=220, and the answer moves anyway:
-    now=130s  truth  4.000 over 2 samples;  arrival-driven dashboard still shows 4.000 over 2
-    now=180s  truth  6.000 over 1 samples;  arrival-driven dashboard still shows 4.000 over 2
-    now=191s  truth   NONE over 0 samples;  arrival-driven dashboard still shows 4.000 over 2
-    now=219s  truth   NONE over 0 samples;  arrival-driven dashboard still shows 4.000 over 2
+    now=130s  truth  4.500 over 2 samples;  arrival-driven dashboard still shows 4.500 over 2
+    now=180s  truth  2.000 over 1 samples;  arrival-driven dashboard still shows 4.500 over 2
+    now=191s  truth   NONE over 0 samples;  arrival-driven dashboard still shows 4.500 over 2
+    now=219s  truth   NONE over 0 samples;  arrival-driven dashboard still shows 4.500 over 2
     now=10000s truth   NONE over 0 samples;  arrival-driven still shows 8.000 over 1
   so the quiet-stream error is unbounded in TIME, not in value: the number is simply old.
 
@@ -70,5 +70,7 @@ SPAN = 60s   window = (now - 60, now]
   600 irregular streams x 4 spans: the incremental total+count equals the rescan at
   every arrival and at every probed clock instant; the one-expiry version differs on
   445 of 600, which is how often a stream has a gap big enough to retire two.
+  Of those, 400 streams have a wrong answer reading HIGH and 393 one reading LOW,
+  so the all-low errors on the nine samples above are a property of their values.
 
 all assertions passed

@@ -1,7 +1,7 @@
 what it exercises                      views    ttl  distinct  estimate  set slots  sketch  expiry  saved
 the chapter's 9 views, 2 visitors          9      -         2         2          2       2       -      -
 ttl = 295, the longest silence             9    295         2         2          2       2       2      0
-ttl = 294, one hour tighter                9    294         2         2          2       2       3      0
+ttl = 294, one second tighter              9    294         2         2          2       2       3      0
 ttl = a whole day: saves nothing           9  86400         2         2          2       2       2      0
 ttl = 0: saves 2, overstates to 9          9      0         2         2          2       2       9      2
 an empty day -> 0, not an error            0      -         0         0          0       0       -      -
@@ -44,7 +44,7 @@ VIEWS = a@1  a@3  b@50  b@90  a@130  b@220  a@245  b@260  a@540    (9 views)
         1,000        1,000       983           256   1.7%
         4,000        4,000     3,721           256   7.0%
        20,000       20,000    20,004           256   0.0%
-    the exact state grows 78x across these rows and the sketch state does not
+    from the 256 row to the 20,000 row the exact state grows 78x and the sketch state does not
     grow at all; the worst error over the rows at or above k is 7.0%, against the
     sketch's own standard error of 1/sqrt(256) = 6.25%.
 

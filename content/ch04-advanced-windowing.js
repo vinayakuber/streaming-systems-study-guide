@@ -74,8 +74,8 @@ registerChapter({
   },
 
   interview: [
-    { scenario: "An analytics pipeline reports 'sessions per user', but a user who pauses for 20 minutes and returns is counted as two sessions while a 10-minute pause is one — and late events can merge sessions that were already reported.", q: "How do you model user sessions as windows, and what happens when a late event merges two already-reported sessions?", solution: "Use session windows with a gap threshold; when a late event bridges two already-emitted sessions, retract the two earlier panes and emit the merged one.", components: ["Session window — gap-based dynamic window", "Gap threshold — inactivity bound", "Merge — collapse two sessions + the bridging event", "Retraction — cancel the earlier panes"],  code: "// s1 [12:00,12:10), s2 [12:40,12:50)\n//   late event @ 12:20 -> bridges gap -> merge\n//   retract s1 (3), retract s2 (2)\n//   emit sMerged [12:00,12:50) count = 3+2+1 = 6", tieback: "This is exactly the session merging and retraction material in this chapter.", refs: ["4. Session windows", "6. Session merging", "7. Late merges need retractions"], problems: ["21-ad-click-aggregation"] },
-    { scenario: "A dashboard needs both an hourly total and a rolling 10-minute average, but the team used one window type for both and the numbers look wrong.", q: "Which window shapes should each metric use, and why?", solution: "The hourly total is a fixed window (equal, non-overlapping buckets); the rolling average is a sliding window (10-minute window advancing every minute).", components: ["Fixed window — hourly total", "Sliding window — rolling 10-min average", "Window size + slide — defines the overlap"],  code: "// fixed   : event @ 12:04 belongs to [12:00,12:05) only\n// sliding : event @ 12:04 belongs to [11:55,12:05), [11:56,12:06), ... [12:04,12:14)\n//   -> count once vs count many", tieback: "This is exactly the fixed vs sliding window material in this chapter.", refs: ["2. Fixed windows", "3. Sliding windows"], problems: ["20-metrics-monitoring"] }
+    { scenario: "An analytics pipeline reports 'sessions per user', but a user who pauses for 20 minutes and returns is counted as two sessions while a 10-minute pause is one — and late events can merge sessions that were already reported.", q: "How do you model user sessions as windows, and what happens when a late event merges two already-reported sessions?", solution: "Use session windows with a gap threshold; when a late event bridges two already-emitted sessions, retract the two earlier panes and emit the merged one.", components: ["Session window — gap-based dynamic window", "Gap threshold — inactivity bound", "Merge — collapse two sessions + the bridging event", "Retraction — cancel the earlier panes"],  code: "// seed times as one user, gap 47 s:\n// s1 [12:00:01,12:00:03] sum 8, s2 [12:01:30,12:02:10] sum 9 -- 87 s apart\n//   late event @ 12:00:50 (v 4): 47 s after s1, 40 s before s2 -> bridges -> merge\n//   retract s1 (8), retract s2 (9)\n//   emit sMerged [12:00:01,12:02:10] sum = 8+9+4 = 21", tieback: "This is exactly the session merging and retraction material in this chapter.", refs: ["4. Session windows", "6. Session merging", "7. Late merges need retractions"], problems: ["21-ad-click-aggregation"] },
+    { scenario: "A dashboard needs both an hourly total and a rolling 10-minute average, but the team used one window type for both and the numbers look wrong.", q: "Which window shapes should each metric use, and why?", solution: "The hourly total is a fixed window (equal, non-overlapping buckets); the rolling average is a sliding window (10-minute window advancing every minute).", components: ["Fixed window — hourly total", "Sliding window — rolling 10-min average", "Window size + slide — defines the overlap"],  code: "// at seed scale: fixed 120 s stands in for the hour, sliding 120 s every 60 s for the rolling window\n// fixed   : id 4 @ 12:04:05 belongs to [12:04,12:06) only\n// sliding : id 4 @ 12:04:05 belongs to [12:03,12:05) and [12:04,12:06)\n//   -> 4 fixed sums total 45 (each event once); 7 sliding sums total 78 (up to twice)", tieback: "This is exactly the fixed vs sliding window material in this chapter.", refs: ["2. Fixed windows", "3. Sliding windows"], problems: ["20-metrics-monitoring"] }
   ],
   systemDesign: {
     walkthroughs: ['ch04-system', 'ch04-system-memory'],
@@ -84,27 +84,27 @@ registerChapter({
     decomposition: [
       { box: 'event source', role: 'event source — emits events with event time and a key',
         parts: [
-          'a click {user: 42, event_time: "12:20:00"} arrives',
-          'the key is user 42, so sessions are per-user',
-          'a late event may arrive with event_time earlier than the watermark'
+          'a click {id: 7, event_time: "12:00:50", v: 4} arrives — the seed\'s late event, with the keys dropped so all 9 seed events are one user\'s, as in the interview section',
+          'with one user, the gap is measured across the whole stream; keyed, id 7 would only ever meet key "b"\'s sessions',
+          'it arrives after clicks at 12:01:30 and 12:02:10, so its event time is behind the watermark (12:03:20)'
         ] },
       { box: 'window assigner', role: 'window assigner — assigns events to session windows',
         parts: [
-          'the event is assigned to a new or existing session for user 42',
-          'the gap threshold is 30 min of inactivity',
+          'the event is assigned to a new or existing session for that one user',
+          'the gap threshold is 47 s of inactivity (the interview section\'s G; at the book\'s 120 s no event bridges)',
           'sessions are data-driven, not clock-aligned'
         ] },
       { box: 'session merger', role: 'session merger — merges sessions that a bridging event connects',
         parts: [
-          's1 [12:00,12:10) and s2 [12:40,12:50) both sit within 30 min of the event',
-          'the merger collapses them into sMerged [12:00, 12:50)',
-          'the merged count folds s1 + s2 + the bridging event'
+          's1 [12:00:01, 12:00:03] (sum 8) and s2 [12:01:30, 12:02:10] (sum 9) are 87 s apart, more than the gap, so they were two sessions',
+          'the event is 47 s after s1 and 40 s before s2, so it bridges them: the merger collapses all three into sMerged [12:00:01, 12:02:10]',
+          'the merged sum folds s1 + s2 + the bridging event: 8 + 9 + 4 = 21'
         ] },
       { box: 'trigger/retraction emitter', role: 'trigger/retraction emitter — emits and corrects panes',
         parts: [
           'the on-time trigger fires when the watermark passes a session end',
-          'a late merge retracts the two earlier panes',
-          'the merged pane is emitted so the store shows one session, not three'
+          'a late merge retracts the two earlier panes (8 and 9), both already emitted when the watermark passed end + 47 s',
+          'the merged pane (21) is emitted so the store shows one session, not three'
         ] }
     ],
     
@@ -117,10 +117,10 @@ registerChapter({
     { question: "Session windows are measured within a ___ .", options: ["A. partition", "B. key group", "C. global stream", "D. time zone"], answer: 2, explanation: "Sessions are per key — one user's session never merges with another's.", conceptRef: "8. Sessions are keyed" }
   ],
   seeAlso: [
-    { to: 2, section: 'What and Where — transformations and windowing', depth: 'the window is the "where" axis of the four-question model; ch02 fixes that axis against the other three (what/when/how).', example: 'ch04\'s fixed vs sliding vs session shapes are the "where" choice; ch02 shows the same click 12:04:00 answering 1 fixed, 3 sliding, or 1 session result, with the trigger deciding when each emits.' },
-    { to: 3, section: 'Propagation and correctness', depth: 'a window\'s lifecycle ends with garbage collection, and the watermark is what decides when a window is done — ch03 defines the signal that drives it.', example: 'ch04\'s "session done when watermark passes end + lateness" is ch03\'s watermark 12:06:30 closing [12:00,12:05); the skew formula (max_seen 12:08:30 − 120 s) is what produced that watermark.' },
-    { to: 8, section: 'Windows in SQL', depth: 'TUMBLE/HOP/SESSION are the SQL spellings of this chapter\'s fixed/sliding/session shapes, with the watermark driving emission.', example: 'ch04\'s session [12:00,12:50) after a 12:20:00 bridge event is what Flink SQL\'s SESSION(gap) computes; ch04\'s sliding 10-min/2-min is ch08\'s HOP(10 min, 2 min).' },
-    { to: 7, section: 'Checkpoints and state stores', depth: 'window state is exactly the state that a stateful processor must persist; ch07 covers how that per-window state is snapshotted and recovered.', example: 'ch04\'s per-window counts and session sets live in keyed state; ch07 shows that same state as { 42: 13 } being checkpointed with its offset so a restart resumes without recomputing the windows.' }
+    { to: 2, section: 'What and Where — transformations and windowing', depth: 'the window is the "where" axis of the four-question model; ch02 fixes that axis against the other three (what/when/how).', example: 'ch04\'s fixed vs sliding vs session shapes are the "where" choice; ch02 shows the same seed giving 4 fixed sums totalling 45 and sliding (120s every 60s) sums totalling 78, because an event falls in up to 2 sliding windows, with the trigger deciding when each emits.' },
+    { to: 3, section: 'Propagation and correctness', depth: 'a window\'s lifecycle ends with garbage collection, and the watermark is what decides when a window is done — ch03 defines the signal that drives it.', example: 'ch04\'s "session done when watermark passes end + gap" runs on ch03\'s watermark (max seen − 60 s): after id 4 it is 12:04:05 − 60 s = 12:03:05, which closes [12:00, 12:02) holding 15 of its true 19; after id 8 it is 12:09:00 − 60 s = 12:08:00, which passes 12:03:30, the end + gap of key "b"\'s session [12:00:50, 12:01:30], so that session is collected.' },
+    { to: 8, section: 'Windows in SQL', depth: 'TUMBLE/HOP/SESSION are the SQL spellings of this chapter\'s fixed/sliding/session shapes, with the watermark driving emission.', example: 'ch04\'s sliding window (120 s wide, every 60 s) is ch08\'s HOP(60 s, 120 s) — HOP(slide, size) — giving 7 rows totalling 78; ch04\'s per-key sessions at the 120 s gap are ch08\'s SESSION(gap): key "a" gets 3 rows and key "b" 2, 5 sessions for 9 events.' },
+    { to: 7, section: 'Checkpoints and state stores', depth: 'window state is exactly the state that a stateful processor must persist; ch07 covers how that per-window state is snapshotted and recovered.', example: 'ch04\'s per-window sums live in keyed state; ch07 checkpoints exactly those (key, 120 s window) entries after event 4 — { a@0:8, b@0:7, a@120:2, a@240:6 }, 4 entries holding 23, with offset 4 — so a restart replays only the 4 events after offset 4 instead of recomputing every window.' }
   ],
   sources: [
     { name: 'Akidau et al. — "The Dataflow Model" (VLDB 2015)', url: 'https://www.vldb.org/pvldb/vol8/p1792-Akidau.pdf', note: 'Session windows, merging, and the window lifecycle this chapter is built on' },

@@ -91,7 +91,7 @@
       ]
     },
     {
-      "t": "arrival 3: extends one run",
+      "t": "arrival 130: extends one run",
       "line": [
         65
       ],
@@ -107,10 +107,10 @@
           "name": "absorb",
           "locals": [
             "runs = @0x200",
-            "t = 3",
-            "hit = [1..1]",
-            "rest = (none)",
-            "lo = 1",
+            "t = 130",
+            "hit = [90..90]",
+            "rest = 1..3",
+            "lo = 90",
             "hi = ..."
           ]
         }

@@ -38,6 +38,13 @@ for (let t = PERIOD; t <= Math.max(...EVENTS.map(e => e.pt)) + PERIOD; t += PERI
   PT_FIRES.push({ at: t, ids, sum: SUM(ids) });
 }
 const PT_FIRST_CORRECT = PT_FIRES.find(f => f.sum === W0_TRUE);
+// the EARLY trigger is that same clock, firing only until the on-time pane goes out
+const EARLY = PT_FIRES.filter(f => f.at < EVENTS[ONTIME_I].pt).map(f => ({ ...f, v: f.sum }));
+// the last window: no watermark ever passes its end, so only the clock ever reports it
+const LAST_W = WIN_STARTS[WIN_STARTS.length - 1];
+const LAST_ARRIVAL = Math.max(...WINDOWS[LAST_W].map(id => EVENTS[id].pt));
+const LAST_CLOCK = Math.ceil(LAST_ARRIVAL / PERIOD) * PERIOD;
+const LAST_CLOCK_SUM = SUM(EVENTS.filter(e => e.pt <= LAST_CLOCK && winOf(e.et) === LAST_W).map(e => e.id));
 // allowed lateness: W0's state survives while watermark < W0_END + allowed, so the
 // correction only lands if allowed is large enough AT THE MOMENT id L arrives
 const WM_AT_LATE = WATERMARKS[LI];
@@ -49,6 +56,46 @@ const ACC = {
   retracting:  { panes: [ONTIME, -ONTIME, W0_TRUE],    sink: 'sum' },
 };
 const sinkSum = (panes) => panes.reduce((a, b) => a + b, 0);
+// THE TWO TRIGGER LISTINGS, EXECUTED. ch02-when-memory and ch02-system-memory are the same
+// loop: the clock fires early panes between arrivals until the on-time pane, every event is
+// fed (any event can move the watermark), state is dropped once the watermark passes
+// W0_END + allowed, and each later firing is a refinement shaped by `how`.
+const simulate = (how, allowed) => {
+  const firings = [], published = [], trace = [];
+  let ids = [], last = null, onTime = false, t = PERIOD;
+  const pane = (at, kind) => {
+    const v = SUM(ids);
+    firings.push({ at, kind, v });
+    if (last === null) published.push({ at, v });
+    else {
+      if (how === 'retracting') published.push({ at, v: -last });
+      published.push({ at, v: how === 'discarding' ? v - last : v });
+    }
+    last = v;
+  };
+  for (let i = 0; i < EVENTS.length; i++) {
+    const e = EVENTS[i];
+    while (!onTime && t <= e.pt) { pane(t, 'EARLY'); t += PERIOD; }
+    trace.push({ last: last === null ? 'NONE' : last, onTime, t });
+    if (WATERMARKS[i] >= W0_END + allowed) break;
+    if (winOf(e.et) === W0) ids = ids.concat([e.id]);
+    if (!onTime && WATERMARKS[i] >= W0_END) { pane(e.pt, 'ON-TIME'); onTime = true; }
+    else if (onTime && winOf(e.et) === W0) pane(e.pt, 'LATE');
+  }
+  return { firings, published, trace, ids, final: SUM(ids),
+           stored: published.reduce((a, p) => a + p.v, 0), received: published.length };
+};
+const WHEN_SIM = simulate('accumulating', ALLOWED_MIN);
+const WHEN_LOW = simulate('accumulating', ALLOWED_MIN - 1);
+const SYS = simulate('retracting', ALLOWED_MIN);
+const SYS_ACC = simulate('accumulating', ALLOWED_MIN);
+const SYS_DISC = simulate('discarding', ALLOWED_MIN);
+const SYS_LOW = simulate('retracting', ALLOWED_MIN - 1);
+const SYS_TRACE = SYS.trace;
+const KIND_WORD = { EARLY: 'early', 'ON-TIME': 'on-time', LATE: 'late' };
+const WHATS = ['sum(v)', 'count', 'distinct key'];
+const WHERES = ['global', `fixed ${WIN}s`, `sessions ${GAP}s`];
+const GRID = WHATS.length * WHERES.length;
 const sinkReplace = (panes) => panes[panes.length - 1];
 const RIGHT = W0_TRUE;
 const WRONG_SUM_ACC = sinkSum(ACC.accumulating.panes);      // sink sums accumulating panes
@@ -64,6 +111,12 @@ if (WRONG_SUM_ACC === RIGHT || WRONG_REPL_DISC === RIGHT) fail('a mismatched sin
 if (ALLOWED_MIN <= 0) fail('the window state is still open with zero allowed lateness — no threshold to teach');
 if (SESSIONS.a.length < 3 || SESSIONS.b.length < 2) fail('session counts changed; the windowing comparison needs a >= 3 and b >= 2');
 if (!PT_FIRST_CORRECT) fail('a processing-time trigger never reaches the right answer in this seed');
+const kinds = (sim) => sim.firings.map(f => `${f.kind}:${f.v}`).join(' ');
+if (kinds(WHEN_SIM) !== EARLY.map(f => `EARLY:${f.v}`).concat([`ON-TIME:${ONTIME}`, `LATE:${W0_TRUE}`]).join(' ')) fail(`the trigger listing fires ${kinds(WHEN_SIM)}, not the early/on-time/late sequence the prose describes`);
+if (WHEN_SIM.final !== W0_TRUE || WHEN_LOW.final !== ONTIME) fail('allowed lateness at the threshold does not decide between the true sum and the on-time pane');
+if (SYS.stored !== RIGHT || SYS_DISC.stored !== RIGHT || SYS_ACC.stored === RIGHT || SYS_LOW.stored !== ONTIME) fail('the system loop no longer lands retracting/discarding on the truth and accumulating off it');
+if (kinds(SYS) !== kinds(WHEN_SIM)) fail('the system loop and the trigger listing fire differently; one trigger definition must serve both');
+if (!(LAST_CLOCK_SUM > 0) || WATERMARKS[WATERMARKS.length - 1] >= LAST_W + WIN) fail('the last window is either closed by the watermark or empty at the clock firing; the "only the early pane reports it" claim is false');
 
 const W = 1140;
 const secs = (n) => `${n}s`;
@@ -99,8 +152,6 @@ const C1 = [
     cap: `Same transform throughout — \`sum(v)\` — and four different shapes of answer. The sliding row is the one that surprises people: its results add up to ${SLIDE_TOTAL} against a dataset containing ${TOTAL}, because each event falls in up to ${Math.max(...EVENTS.map(e => slidingStarts(e.et).length))} overlapping windows. Partitioning windows preserve the total; overlapping ones do not, by design.` },
   { t: 'the two axes really are independent', draw: (c) => {
       let s = c.panel('WHAT x WHERE — EVERY COMBINATION IS LEGAL', 'a');
-      const WHATS = ['sum(v)', 'count', 'distinct key'];
-      const WHERES = ['global', `fixed ${secs(WIN)}`, `sessions ${secs(GAP)}`];
       s += c.line(c.P.main.x + 24, c.P.main.y + 46, 'the grid is filled in for key a; no cell is forbidden and no cell is implied by another', { size: 11, weight: 700, fill: c.C.line });
       WHERES.forEach((wh, j) => s += c.cv.text(c.P.main.x + 320 + j * 240, c.P.main.y + 68, wh, { size: 11, weight: 700, mono: false, anchor: 'middle', fill: c.C.line, band: 'gh' + j }));
       const aIds = EVENTS.filter(e => e.key === 'a').map(e => e.id);
@@ -118,10 +169,10 @@ const C1 = [
         WHERES.forEach((wh, j) => s += c.cv.text(c.P.main.x + 320 + j * 240, y + 22, cell(i, j), { size: 11, anchor: 'middle', fill: c.C.ink, band: `gv${i}_${j}` }));
       });
       return s + c.note('g1', c.P.main.x + 24, c.P.main.y + 200, 1040, [
-        `Nine cells, nine legal pipelines. Changing the row does not constrain the column and the reverse is also true.`,
+        `${GRID} cells, ${GRID} legal pipelines. Changing the row does not constrain the column and the reverse is also true.`,
         `This is why the book asks the two questions separately: a design that answers only one of them is not half-specified, it is unspecified.`,
       ], c.C.good, c.C.goodFill); },
-    cap: `Nine cells and every one is a real pipeline you could run. The grid is the argument for separating the questions: "we sum purchases" names a row and leaves the answer undetermined, and "we use session windows" names a column and does the same. Both are needed before any number exists.` },
+    cap: `${GRID} cells and every one is a real pipeline you could run. The grid is the argument for separating the questions: "we sum purchases" names a row and leaves the answer undetermined, and "we use session windows" names a column and does the same. Both are needed before any number exists.` },
   { t: 'batch already answers both — implicitly', draw: (c) =>
       c.panel('A MAPREDUCE JOB, IN THESE TERMS', 'p')
       + c.mapRows('bm', c.P.main.x + 24, c.P.main.y + 52, [
@@ -167,7 +218,7 @@ const C2 = [
   { t: 'so a pipeline wants THREE triggers, not one', draw: (c) =>
       c.panel('EARLY · ON-TIME · LATE', 'a')
       + c.mapRows('tr', c.P.main.x + 24, c.P.main.y + 52, [
-        [`EARLY — every ${secs(PERIOD)} before the watermark`, `speculative: ${PT_FIRES.slice(0, 3).map(f => f.sum).join(', ')} — fast and knowingly incomplete`],
+        [`EARLY — every ${secs(PERIOD)} before the watermark`, `speculative: ${EARLY.map(f => f.v).join(', ')} — fast and knowingly incomplete`],
         [`ON-TIME — when the watermark passes ${mm(W0_END)}`, `${ONTIME} at ${hhmmss(EVENTS[ONTIME_I].pt)} — the pipeline's best claim`],
         [`LATE — once per straggler after that`, `${W0_TRUE} at ${hhmmss(L.pt)}, when id ${L.id} lands`],
       ], { w: 1040, rh: 40, hot: 2, label: 'three separate triggers on one window, each answering a different need' })
@@ -246,10 +297,10 @@ const C3 = [
     cap: `Four lines fully specify one result's behaviour, and each line was shown to change an observable number. That is the test for whether a question belongs on the list: drop WHEN and the ${secs(ALLOWED_MIN)} threshold disappears along with the ${ONTIME}-then-${W0_TRUE} sequence; drop HOW and the sink's value becomes undetermined among three.` },
 ];
 
-// =================== CONCEPT 4 — THE PURCHASE COUNTER (systemDesign) ========
+// =================== CONCEPT 4 — THE PURCHASE SUMMER (systemDesign) ==========
 const C4 = [
   { t: 'the pipeline, and the one window it is specified for', draw: (c) =>
-      c.panel('PURCHASE COUNTING — FOUR STAGES AND FOUR ANSWERS', 'a')
+      c.panel('PURCHASE SUMMING — FOUR STAGES AND FOUR ANSWERS', 'a')
       + c.mapRows('pp', c.P.main.x + 24, c.P.main.y + 52, [
         [`writer (event source)`, `emits a purchase stamped with its event time`],
         [`transport (stream)`, `delays and reorders; also computes the watermark (max seen − ${secs(LAG)})`],
@@ -263,28 +314,26 @@ const C4 = [
     cap: `A deliberately small design, so every number is checkable. The four questions are not spread across the pipeline evenly: WHERE is the collector's single rule, and WHAT, WHEN and HOW all live in the aggregator's state. That is also where every difficulty in this design is, which is why "where is the state?" is the useful first question about any streaming system.` },
   { t: 'the publish sequence, with real times', draw: (c) =>
       c.panel('WHAT A CONSUMER ACTUALLY RECEIVES, IN ORDER', 'a')
-      + c.mapRows('sq', c.P.main.x + 24, c.P.main.y + 52, [
-        [`${hhmmss(PT_FIRES[0].at)} — EARLY pane`, `${PT_FIRES[0].sum}  (ids ${PT_FIRES[0].ids.join(',') || 'none'} have arrived)`],
-        [`${hhmmss(PT_FIRES[1].at)} — EARLY pane`, `${PT_FIRES[1].sum}  (ids ${PT_FIRES[1].ids.join(',')})`],
-        [`${hhmmss(EVENTS[ONTIME_I].pt)} — ON-TIME pane`, `${ONTIME}  (watermark passed ${mm(W0_END)}; the pipeline's best claim)`],
-        [`${hhmmss(L.pt)} — RETRACTION + LATE pane`, `${-ONTIME}, then ${W0_TRUE}  (id ${L.id} landed)`],
-      ], { w: 1040, rh: 36, hot: 3, label: `one window, one result, ${3 + 2} published values` })
-      + c.note('q1', c.P.main.x + 24, c.P.main.y + 212, 1040, [
-        `A sink that only adds ends at ${sinkSum([PT_FIRES[0].sum, PT_FIRES[1].sum - PT_FIRES[0].sum, ONTIME - PT_FIRES[1].sum, -ONTIME, W0_TRUE])} — correct — because every refinement carries its own undo.`,
-        `The "answer" to this query was published ${4} times over ${secs(L.pt - PT_FIRES[0].at)}. That is not a malfunction; it is what answering a question about an unbounded stream looks like.`,
+      + c.mapRows('sq', c.P.main.x + 24, c.P.main.y + 52, SYS.firings.map((f, k) => [
+        `${hhmmss(f.at)} — ${f.kind} pane ${f.v}`,
+        `publishes ${SYS.published.filter(p => p.at === f.at).map(p => p.v).join(', then ')}${k === 0 ? '  (nothing to undo yet)' : '  (undo, then the new total)'}`,
+      ]), { w: 1040, rh: 30, hot: SYS.firings.length - 1, label: `one window, ${SYS.firings.length} firings, ${SYS.received} published values` })
+      + c.note('q1', c.P.main.x + 24, c.P.main.y + 68 + SYS.firings.length * 30, 1040, [
+        `A sink that only adds ends at ${SYS.stored} — correct — because every refinement carries its own undo.`,
+        `The "answer" to this query was published ${SYS.firings.length} times over ${secs(L.pt - SYS.firings[0].at)}. That is not a malfunction; it is what answering a question about an unbounded stream looks like.`,
       ], c.C.good, c.C.goodFill),
-    cap: `Read the column: ${PT_FIRES[0].sum}, ${PT_FIRES[1].sum}, ${ONTIME}, then ${-ONTIME} and ${W0_TRUE}. One query, one window, five published values across ${secs(L.pt - PT_FIRES[0].at)} — and every one of them was the right answer to "what do you know now?". A consumer that treats the first as final is the bug, not the pipeline.` },
+    cap: `Read the column: ${SYS.published.map(p => p.v).join(', ')}. One query, one window, ${SYS.received} published values across ${secs(L.pt - SYS.firings[0].at)}, summing to ${SYS.stored} — and every firing was the right answer to "what do you know now?". A consumer that treats the first as final is the bug, not the pipeline.` },
   { t: 'the two settings that decide whether it is ever right', draw: (c) =>
       c.panel('THE TWO KNOBS, AND THEIR EXACT THRESHOLDS', 'a')
       + c.mapRows('kb', c.P.main.x + 24, c.P.main.y + 52, [
         [`allowed lateness < ${secs(ALLOWED_MIN)}`, `id ${L.id} discarded · final answer ${ONTIME} · ${Math.round(100 * (W0_TRUE - ONTIME) / W0_TRUE)}% low, permanently`],
         [`allowed lateness >= ${secs(ALLOWED_MIN)}`, `id ${L.id} accepted · final answer ${W0_TRUE} · state held longer`],
-        [`accumulation = discarding, summing sink`, `${RIGHT} — correct, and the cheapest to transmit`],
-        [`accumulation = accumulating, summing sink`, `${WRONG_SUM_ACC} — double counted by ${WRONG_SUM_ACC - RIGHT}`],
+        [`accumulation = discarding, summing sink`, `${SYS_DISC.stored} — correct, and the cheapest to transmit`],
+        [`accumulation = accumulating, summing sink`, `${SYS_ACC.stored} — over-counted by ${SYS_ACC.stored - RIGHT}`],
       ], { w: 1040, rh: 36, hot: 3, label: 'two independent settings; one wrong value in either is enough' })
       + c.note('k1', c.P.main.x + 24, c.P.main.y + 212, 1040, [
-        `Neither knob is about performance. Allowed lateness decides whether ${W0_TRUE} is reachable at all; accumulation decides whether the sink lands on ${RIGHT} or ${WRONG_SUM_ACC}.`,
-        `And they are independent: correct lateness with a mismatched sink still gives ${WRONG_SUM_ACC}.`,
+        `Neither knob is about performance. Allowed lateness decides whether ${W0_TRUE} is reachable at all; accumulation decides whether the sink lands on ${SYS.stored} or ${SYS_ACC.stored}.`,
+        `And they are independent: correct lateness with a mismatched sink still gives ${SYS_ACC.stored}.`,
       ], c.C.hot, c.C.hotFill),
     cap: `Two settings, and each has a threshold that is a number rather than a judgement. Allowed lateness must be at least ${secs(ALLOWED_MIN)} — set by the watermark's jump, not by id ${L.id}'s ${secs(L.pt - L.et)} of skew. And the accumulation mode must match what the sink does with a pane. Get either wrong and the pipeline is still "working".` },
   { t: 'and what this design does NOT settle', draw: (c) =>
@@ -292,8 +341,8 @@ const C4 = [
       + c.note('x1', c.P.main.x + 24, c.P.main.y + 46, 1040, [`Allowed lateness >= ${secs(ALLOWED_MIN)} keeps window state alive longer. With ${WIN_STARTS.length} windows that is cheap; with a million open windows it is the memory bill.`], c.C.warn, c.C.warnFill)
       + c.note('x2', c.P.main.x + 24, c.P.main.y + 112, 1040, [`Retractions require the sink to accept a negative. A counter in a key-value store usually can; an append-only billing ledger usually cannot.`], c.C.hot, c.C.hotFill)
       + c.note('x3', c.P.main.x + 24, c.P.main.y + 178, 1040, [`The ${secs(ALLOWED_MIN)} threshold was computed from watermarks we can see in full. A live pipeline sets that number before observing them.`], c.C.hot, c.C.hotFill)
-      + c.note('x4', c.P.main.x + 24, c.P.main.y + 244, 1040, [`One window was specified. The window starting ${mm(WIN_STARTS[WIN_STARTS.length - 1])} never closes in this dataset, so it is never published at all — not early, not on-time, not late.`], c.C.blue, c.C.blueFill),
-    cap: `The last gap is the sharpest: this chapter fully specified ONE window and the final window of the same dataset is never published by any of the three triggers, because the watermark never passes its end. A complete answer to all four questions still says nothing about a window whose "when" never arrives.` },
+      + c.note('x4', c.P.main.x + 24, c.P.main.y + 244, 1040, [`One window was specified. The window starting ${mm(LAST_W)} never closes in this dataset: the on-time and late triggers never publish it, and its only published value is the speculative early pane ${LAST_CLOCK_SUM} at ${hhmmss(LAST_CLOCK)}.`], c.C.blue, c.C.blueFill),
+    cap: `The last gap is the sharpest: this chapter fully specified ONE window, and the final window of the same dataset is never published by the on-time or late trigger, because the watermark never passes its end — only the clock reports it (${LAST_CLOCK_SUM} at ${hhmmss(LAST_CLOCK)}), a value the pipeline never claims is complete. A complete answer to all four questions still says nothing about a window whose "when" never arrives.` },
 ];
 
 // =============================== EMIT DIAGRAMS ==============================
@@ -310,7 +359,7 @@ const DIAGRAMS = [
       `- **sliding, ${secs(WIN)} wide every ${secs(PERIOD)}** — ${SLIDE_STARTS.length} results, totalling **${SLIDE_TOTAL}**.`,
       `- **session windows, ${secs(GAP)} gap** — key \`a\` gets ${SESSIONS.a.length} sessions, key \`b\` gets ${SESSIONS.b.length}.`, '',
       `Read the sliding row twice. Its results sum to ${SLIDE_TOTAL} over a dataset containing ${TOTAL}, because each event falls into up to ${Math.max(...EVENTS.map(e => slidingStarts(e.et).length))} overlapping windows. Nothing was duplicated — **overlap is a property of the windowing**, and partitioning windowings (fixed, global) preserve the total while overlapping ones do not.`, '',
-      `**And the two axes are genuinely independent.** Three transforms × three windowings is nine legal pipelines; picking a row constrains no column. So "we sum purchases" leaves the answer undetermined, and so does "we use session windows".`],
+      `**And the two axes are genuinely independent.** The grid in the walkthrough below picks ${WHATS.length} of those transforms and ${WHERES.length} of those windowings — ${GRID} legal pipelines — and picking a row constrains no column. So "we sum purchases" leaves the answer undetermined, and so does "we use session windows".`],
     whenHeading: 'When each windowing is the right one, and what batch was doing all along',
     when: [
       `**Global window** when the question has no time boundary — a lifetime total, a running all-time count. On unbounded input this means state that never retires, so it is rarer than it sounds.`, '',
@@ -323,14 +372,14 @@ const DIAGRAMS = [
     sub: `The sliding-window total ${SLIDE_TOTAL} and every per-window sum are computed from the seed and asserted against the fixed total ${TOTAL}.` },
   { name: 'ch02-when', steps: C2,
     title: 'When — triggers, watermarks, and allowed lateness',
-    subtitle: `processing-time trigger emits ${PT_FIRES.slice(0, 3).map(f => f.sum).join(', ')} · watermark trigger emits ${ONTIME} · threshold for the fix: ${secs(ALLOWED_MIN)}`,
+    subtitle: `early trigger emits ${EARLY.map(f => f.v).join(', ')} · watermark trigger emits ${ONTIME} · threshold for the fix: ${secs(ALLOWED_MIN)}`,
     heading: 'Why "when" is a processing-time decision about an event-time question',
     why: [
       `A window is useless until something decides to emit it. That decision is a **trigger**, and triggers come in kinds that differ in what they are reacting to.`, '',
       `**A processing-time trigger fires on the clock** — every ${secs(PERIOD)}, say. Following window [${mm(W0)}, ${mm(W0_END)})${''}, it emits ${PT_FIRES.slice(0, 4).map(f => f.sum).join(', then ')}: whatever had arrived. It first reaches the right answer, ${W0_TRUE}, at ${hhmmss(PT_FIRST_CORRECT.at)} — and it cannot tell that firing apart from the ones before it.`, '',
       `**A watermark is a completeness signal:** "no event with an event time earlier than *t* will arrive." That lets a trigger make a different kind of claim — fire when the watermark passes ${mm(W0_END)}, because the window is *done*. It fires exactly once, after event id ${EVENTS[ONTIME_I].id} at ${hhmmss(EVENTS[ONTIME_I].pt)}, emitting **${ONTIME}** from ids ${ONTIME_IDS.join(', ')}.`, '',
       `${ONTIME}, not ${W0_TRUE}: id ${L.id} has not arrived. **The claim of completeness and the error are the same event** — the watermark was the pipeline's best estimate and it was wrong.`, '',
-      `**So a real pipeline wants three triggers on one window,** not a choice between them: **early** (speculative, before the watermark — ${PT_FIRES.slice(0, 3).map(f => f.sum).join(', ')}), **on-time** (at the watermark — ${ONTIME}), and **late** (once per straggler — ${W0_TRUE} at ${hhmmss(L.pt)}). They serve three different consumers and all three fire.`, '',
+      `**So a real pipeline wants three triggers on one window,** not a choice between them: **early** (speculative, before the watermark — ${EARLY.map(f => f.v).join(', ')} at ${EARLY.map(f => hhmmss(f.at)).join(', ')}), **on-time** (at the watermark — ${ONTIME}), and **late** (once per straggler — ${W0_TRUE} at ${hhmmss(L.pt)}). They serve three different consumers and all three fire.`, '',
       `**Allowed lateness** bounds the waiting: it is how long window state is kept after the watermark passes, which is garbage collection for that state. And it has an exact threshold here. When id ${L.id} arrives, the watermark stands at ${hhmmss(WM_AT_LATE)} (${WM_AT_LATE}s); state survives while the watermark is below ${mm(W0_END)} + allowed, so **allowed lateness must be at least ${secs(ALLOWED_MIN)}** for the correction to land. At ${secs(ALLOWED_MIN - 1)} the state is already gone and ${ONTIME} stands forever.`, '',
       `Note that ${secs(ALLOWED_MIN)} is *not* id ${L.id}'s ${secs(L.pt - L.et)} of skew, which is the number a reader would guess. It comes from how far the watermark had advanced — it jumped from ${hhmmss(WATERMARKS[ONTIME_I - 1])} to ${hhmmss(WATERMARKS[ONTIME_I])} in a single event. **The knob is calibrated against the watermark, not against the data.**`],
     whenHeading: 'When to use each trigger, and what allowed lateness costs',
@@ -339,7 +388,7 @@ const DIAGRAMS = [
       `**Use the watermark trigger when the result is meant to be an answer** rather than a status — a report, an hourly figure, anything someone will quote. It fires once per window with a meaningful claim attached.`, '',
       `**Use late triggers whenever correctness outranks simplicity,** and accept that your published numbers will move.`, '',
       `**Set allowed lateness from your skew tail, then price the memory.** It keeps window state alive, so the bill is (open windows × state per window). With ${WIN_STARTS.length} windows that is nothing; with a million open session windows it is the dominant cost of the pipeline.`, '',
-      `**What this does not settle:** "when" produced ${PT_FIRES.slice(0, 3).length + 2} separate published values for ONE window, and nothing here says what a consumer should do with the second one. If a sink stored ${ONTIME} and then receives ${W0_TRUE}, does it add or replace? That question is "how", and until it is answered the pipeline's correctness is undefined — not merely unoptimised.`],
+      `**What this does not settle:** "when" produced ${EARLY.length + 2} separate published values for ONE window, and nothing here says what a consumer should do with the second one. If a sink stored ${ONTIME} and then receives ${W0_TRUE}, does it add or replace? That question is "how", and until it is answered the pipeline's correctness is undefined — not merely unoptimised.`],
     diagramHeading: 'Visual walkthrough — a clock trigger, a watermark trigger, and one threshold',
     sub: `The trigger sequences and the ${secs(ALLOWED_MIN)} threshold are computed from the seed's watermarks and asserted.` },
   { name: 'ch02-how', steps: C3,
@@ -369,33 +418,30 @@ const DIAGRAMS = [
     diagramHeading: 'Visual walkthrough — two panes, three modes, five outcomes',
     sub: `All five mode-and-sink outcomes are computed from the seed and asserted: three reach ${RIGHT}, two do not.` },
   { name: 'ch02-system', steps: C4,
-    title: 'System design — a purchase counter, fully specified',
-    subtitle: `one window, ${4} published values: ${PT_FIRES[0].sum} → ${PT_FIRES[1].sum} → ${ONTIME} → (${-ONTIME}, ${W0_TRUE})`,
+    title: 'System design — a purchase summer, fully specified',
+    subtitle: `one window, ${SYS.firings.length} firings: ${SYS.firings.map(f => f.v).join(' → ')} · ${SYS.received} values published under retraction`,
     heading: 'Why one result needs all four answers before it is defined',
     why: [
-      `**The question.** Count purchases per window. A purchase arrives late, so the pipeline must close the window on the watermark and let allowed lateness correct the already-emitted count.`, '',
+      `**The question.** Sum purchase values per window. A purchase arrives late, so the pipeline must close the window on the watermark and let allowed lateness correct the already-emitted sum.`, '',
       `**The pipeline:** writer (event source) → transport (stream, which also computes the watermark) → collector (window assigner) → aggregator/store (per-window state).`, '',
       `Note where the four questions live: **WHERE** is the collector's single rule (assign by event time to fixed ${secs(WIN)} windows), and **WHAT, WHEN and HOW all live in the aggregator's state**. That is also where every difficulty is — which is why "where is the state?" is the first useful question about any streaming system.`, '',
       `**The window being specified** is [${mm(W0)}, ${mm(W0_END)}): ids ${W0_IDS.join(', ')}, true sum **${W0_TRUE}**. One of them, id ${L.id}, arrives at ${hhmmss(L.pt)} — ${secs(L.pt - L.et)} after it happened, and after the window has already been published.`, '',
       `**So here is what a consumer actually receives, in order:**`, '',
-      `- ${hhmmss(PT_FIRES[0].at)} — early pane **${PT_FIRES[0].sum}** (ids ${PT_FIRES[0].ids.join(', ') || 'none'} had arrived)`,
-      `- ${hhmmss(PT_FIRES[1].at)} — early pane **${PT_FIRES[1].sum}**`,
-      `- ${hhmmss(EVENTS[ONTIME_I].pt)} — on-time pane **${ONTIME}**, the watermark having passed ${mm(W0_END)}`,
-      `- ${hhmmss(L.pt)} — retraction **${-ONTIME}** then late pane **${W0_TRUE}**`, '',
-      `Five values for one question, over ${secs(L.pt - PT_FIRES[0].at)}. Every one was the right answer to "what do you know now?", and a consumer that treats the first as final is the bug.`],
+      ...SYS.firings.map((f, k) => `- ${hhmmss(f.at)} — ${KIND_WORD[f.kind]} pane **${f.v}**${k === 0 ? ` (ids ${EARLY[0].ids.join(', ')} had arrived)` : ` — published as retraction **${SYS.published.filter(p => p.at === f.at)[0].v}** then **${f.v}**`}${f.kind === 'ON-TIME' ? `, the watermark having passed ${mm(W0_END)}` : ''}`), '',
+      `${SYS.received} values for one question, over ${secs(L.pt - SYS.firings[0].at)}, and an add-only sink lands on ${SYS.stored}. Every firing was the right answer to "what do you know now?", and a consumer that treats the first as final is the bug.`],
     whenHeading: 'When this design is right, the two thresholds, and four gaps',
     when: [
       `**Two settings decide whether it is ever correct, and both have numeric thresholds rather than judgement calls:**`, '',
       `**1. Allowed lateness ≥ ${secs(ALLOWED_MIN)}.** Below that, window state is already collected when id ${L.id} arrives: the event is discarded and ${ONTIME} stands forever, ${Math.round(100 * (W0_TRUE - ONTIME) / W0_TRUE)}% low. At or above it, the late trigger fires and corrects to ${W0_TRUE}. The threshold comes from the watermark's position (${WM_AT_LATE}s) when the straggler lands — **not** from its ${secs(L.pt - L.et)} of skew.`, '',
-      `**2. The accumulation mode must match the sink.** Retracting into a summing sink gives ${RIGHT}; accumulating into the same sink gives ${WRONG_SUM_ACC}. These are independent of setting 1 — correct lateness with a mismatched sink still produces ${WRONG_SUM_ACC}.`, '',
+      `**2. The accumulation mode must match the sink.** Retracting into a summing sink gives ${SYS.stored}; accumulating into the same sink gives ${SYS_ACC.stored}, because each of the ${SYS.firings.length} panes is a running total added on top of the last. These are independent of setting 1 — correct lateness with a mismatched sink still produces ${SYS_ACC.stored}.`, '',
       `**Use this design when the consumer can accept a moving number.** A dashboard, a cache, a downstream aggregation: all fine. An append-only ledger that bills on the first value published is not, and that is a contract problem rather than a configuration one.`, '',
       `**What this does NOT settle — four gaps:**`, '',
       `1. **Allowed lateness is memory.** Holding state past the watermark costs (open windows × state per window). With ${WIN_STARTS.length} windows it is free; with a million open windows it is the pipeline's dominant cost.`,
       `2. **Retractions require a sink that accepts negatives.** ${-ONTIME} has to be representable and meaningful downstream.`,
       `3. **The ${secs(ALLOWED_MIN)} threshold was computed from watermarks visible in full.** A live pipeline sets that number before observing them, and is therefore guessing.`,
-      `4. **Only one window was specified.** The window starting ${mm(WIN_STARTS[WIN_STARTS.length - 1])} is never published by ANY of the three triggers, because the watermark never passes its end — a complete answer to all four questions still says nothing about a window whose "when" never arrives.`],
-    diagramHeading: 'Visual walkthrough — four stages, five published values, two thresholds',
-    sub: `The publish sequence, the ${secs(ALLOWED_MIN)} lateness threshold and the ${WRONG_SUM_ACC}-vs-${RIGHT} sink outcomes are all derived from the seed and asserted.` },
+      `4. **Only one window was specified.** The window starting ${mm(LAST_W)} is never published by the on-time or late trigger, because the watermark never passes its end — only the speculative early pane (${LAST_CLOCK_SUM} at ${hhmmss(LAST_CLOCK)}) ever reports it, so its only published value is one the pipeline never claims is complete. A complete answer to all four questions still says nothing about a window whose "when" never arrives.`],
+    diagramHeading: `Visual walkthrough — four stages, ${SYS.received} published values, two thresholds`,
+    sub: `The publish sequence, the ${secs(ALLOWED_MIN)} lateness threshold and the ${SYS_ACC.stored}-vs-${SYS.stored} sink outcomes are all derived from the seed and asserted.` },
 ];
 for (const d of DIAGRAMS) {
   const Dg = buildDiagramWalkthrough({ W, name: d.name, stepSecs: 5.5,
@@ -532,11 +578,11 @@ PROGRAMS.push({
 PROGRAMS.push({
   name: 'ch02-when-memory',
   title: 'When — three triggers on one window, and the lateness threshold',
-  subtitle: `on-time ${ONTIME} at ${hhmmss(EVENTS[ONTIME_I].pt)} · late ${W0_TRUE} at ${hhmmss(L.pt)} · needs allowed >= ${ALLOWED_MIN}s`,
+  subtitle: `${EARLY.length} early · on-time ${ONTIME} at ${hhmmss(EVENTS[ONTIME_I].pt)} · late ${W0_TRUE} at ${hhmmss(L.pt)} · needs allowed >= ${ALLOWED_MIN}s`,
   src: COMMON.concat([
     '',
     'type Pane  { at, value, kind }',
-    'type State { ids, panes, open }',
+    'type State { ids, panes, open, onTime }',
     '',
     `// primitive: PERIOD — the early trigger's firing interval.  PERIOD = ${PERIOD}`,
     `// primitive: ALLOWED — allowed lateness, in seconds of event time.  ALLOWED = ${ALLOWED_MIN}`,
@@ -559,24 +605,40 @@ PROGRAMS.push({
     '    return watermarkAfter(i) < W0 + WIN + ALLOWED',
     '}',
     '',
-    '// function: feed(st, e, i) — one arriving event, through all three triggers.',
-    `//   feed(st, EVENTS[${ONTIME_I}], ${ONTIME_I}) appends an ON-TIME pane of ${ONTIME}`,
-    `//   feed(st, EVENTS[${L.id}], ${LI}) appends a LATE pane of ${W0_TRUE}`,
-    'fun feed(st, e, i) {',
-    '    if (winOf(e.et) != W0) { return st }',
-    '    if (st.open == false)  { return st }                       // dropped: too late',
-    '    st.ids = append(st.ids, e.id)',
-    '    if (e.pt % PERIOD == 0)        { st.panes = append(st.panes, Pane(e.pt, sum(st.ids), "EARLY")) }',
-    '    if (onTimeDue(i))              { st.panes = append(st.panes, Pane(e.pt, sum(st.ids), "ON-TIME")) }',
-    '    if (onTimeDue(i - 1))          { st.panes = append(st.panes, Pane(e.pt, sum(st.ids), "LATE")) }',
-    '    st.open = stillOpen(i)',
+    '// function: early(st, t) — the clock trigger: a speculative pane at time t, until',
+    '//   the on-time pane has gone out.',
+    `//   early(st, ${EARLY[0].at}) appends an EARLY pane of ${EARLY[0].v}`,
+    'fun early(st, t) {',
+    '    if (st.onTime == false) { st.panes = append(st.panes, Pane(t, sum(st.ids), "EARLY")) }',
     '    return st',
     '}',
     '',
-    '// function: main() — THE CALLER: replay the stream into one window\'s state.',
+    '// function: feed(st, e, i) — one arriving event, through the on-time and late triggers.',
+    '//   Every event is fed, in or out of the window, because any event can move the watermark.',
+    `//   feed(st, EVENTS[${ONTIME_I}], ${ONTIME_I}) appends an ON-TIME pane of ${ONTIME}`,
+    `//   feed(st, EVENTS[${L.id}], ${LI}) appends a LATE pane of ${W0_TRUE}`,
+    'fun feed(st, e, i) {',
+    '    st.open = stillOpen(i)',
+    '    if (st.open == false)  { return st }                       // state gone: too late',
+    '    if (winOf(e.et) == W0) { st.ids = append(st.ids, e.id) }',
+    '    if (st.onTime == false && onTimeDue(i)) {',
+    '        st.panes  = append(st.panes, Pane(e.pt, sum(st.ids), "ON-TIME"))',
+    '        st.onTime = true',
+    '        return st',
+    '    }',
+    '    if (st.onTime && winOf(e.et) == W0) { st.panes = append(st.panes, Pane(e.pt, sum(st.ids), "LATE")) }',
+    '    return st',
+    '}',
+    '',
+    '// function: main() — THE CALLER: replay the stream, with the clock firing between arrivals.',
     'fun main() {',
-    '    var st = State([], [], true)',
+    '    var st = State([], [], true, false)',
+    '    var t  = PERIOD',
     '    for (i in 0 .. len(EVENTS) - 1) {',
+    '        while (t <= EVENTS[i].pt) {',
+    '            st = early(st, t)',
+    '            t  = t + PERIOD',
+    '        }',
     '        st = feed(st, EVENTS[i], i)',
     '    }',
     '    val final = sum(st.ids)',
@@ -584,39 +646,44 @@ PROGRAMS.push({
     '}',
   ]),
   heap: {
-    st:    { addr: '0x100', type: 'State', val: () => `ids [${W0_IDS.join(',')}] · open ${ALLOWED_MIN > WATERMARKS[LI] - W0_END ? 'true' : 'false'}` },
-    panes: { addr: '0x200', type: 'Pane[]', val: () => `ON-TIME ${ONTIME} @${hhmmss(EVENTS[ONTIME_I].pt)} · LATE ${W0_TRUE} @${hhmmss(L.pt)}` },
+    st:    { addr: '0x100', type: 'State', val: () => `ids [${WHEN_SIM.ids.join(',')}] · onTime true` },
+    panes: { addr: '0x200', type: 'Pane[]', val: () => WHEN_SIM.firings.map(f => `${f.kind} ${f.v} @${hhmmss(f.at)}`).join(' · ') },
   },
   steps: (at) => {
     const MAIN = (o = {}) => ({ name: 'main', locals: ['st = @0x100',
-      `i = ${o.i !== undefined ? o.i : '...'}`, `final = ${o.final !== undefined ? o.final : '...'}`,
+      `i = ${o.i !== undefined ? o.i : '...'}`, `t = ${o.t !== undefined ? o.t : '...'}`, `final = ${o.final !== undefined ? o.final : '...'}`,
       `fired = ${o.fired !== undefined ? o.fired : '...'}`] });
+    const E0 = EARLY[0], E0_NEXT = EVENTS.findIndex(e => e.pt >= E0.at);
     return [
-      { t: `the watermark has not passed ${mm(W0_END)}, so nothing fires`, line: at('fun onTimeDue(i)', 'return watermarkAfter(i) >= W0 + WIN'),
+      { t: `the clock fires before the watermark: an EARLY pane of ${E0.v}`, line: at('fun early(st, t)', 'if (st.onTime == false) { st.panes = append(st.panes, Pane(t, sum(st.ids), "EARLY")) }'),
+        stack: [MAIN({ i: E0_NEXT, t: E0.at }), { name: 'early', locals: ['st = @0x100', `t = ${E0.at}`] }],
+        heap: [{ key: 'st', hot: true }, { key: 'panes', hot: true }],
+        cap: `Before event id ${EVENTS[E0_NEXT].id} (seen at ${hhmmss(EVENTS[E0_NEXT].pt)}) is fed, \`t\` = ${E0.at} has come round, so the clock fires first and publishes \`sum([${E0.ids.join(', ')}])\` = ${E0.v}. It fires ${EARLY.length} times in all — ${EARLY.map(f => f.v).join(', ')} — every one before the watermark passes ${W0_END} (${mm(W0_END)}), so every one is speculative.` },
+      { t: `the watermark has not passed ${mm(W0_END)}, so no on-time pane`, line: at('fun onTimeDue(i)', 'return watermarkAfter(i) >= W0 + WIN'),
         stack: [MAIN({ i: ONTIME_I - 1 }), { name: 'feed', locals: ['st = @0x100', `e = EVENTS[${EVENTS[ONTIME_I - 1].id}]`, `i = ${ONTIME_I - 1}`] },
                 { name: 'onTimeDue', locals: [`i = ${ONTIME_I - 1}`] }],
         heap: [{ key: 'st', hot: true }],
         cap: `\`watermarkAfter(${ONTIME_I - 1})\` is ${WATERMARKS[ONTIME_I - 1]}, and \`W0 + WIN\` is ${W0_END}, so ${WATERMARKS[ONTIME_I - 1]} >= ${W0_END} is false and the window holds. Its state already contains ids ${EVENTS.filter((e, i) => i <= ONTIME_I - 1 && winOf(e.et) === W0).map(e => e.id).join(', ')} — the answer exists, it is just not claimed yet.` },
-      { t: 'it passes, and the ON-TIME pane is published', line: at('if (onTimeDue(i))              { st.panes = append(st.panes, Pane(e.pt, sum(st.ids), "ON-TIME")) }'),
+      { t: 'it passes, and the ON-TIME pane is published', line: at('st.panes  = append(st.panes, Pane(e.pt, sum(st.ids), "ON-TIME"))'),
         stack: [MAIN({ i: ONTIME_I }), { name: 'feed', locals: ['st = @0x100', `e = EVENTS[${EVENTS[ONTIME_I].id}]`, `i = ${ONTIME_I}`] }],
         heap: [{ key: 'st' }, { key: 'panes', hot: true }],
-        cap: `\`watermarkAfter(${ONTIME_I})\` jumped to ${WATERMARKS[ONTIME_I]}, so the trigger fires and publishes \`sum([${ONTIME_IDS.join(', ')}])\` = **${ONTIME}**. The window's true total is ${W0_TRUE}. The pane and the error are produced by the same line, because the watermark's claim was wrong.` },
+        cap: `Event id ${EVENTS[ONTIME_I].id} is not in the window (\`winOf(${EVENTS[ONTIME_I].et})\` = ${winOf(EVENTS[ONTIME_I].et)}), but it still moves the watermark: \`watermarkAfter(${ONTIME_I})\` jumped to ${WATERMARKS[ONTIME_I]}, so the trigger fires and publishes \`sum([${ONTIME_IDS.join(', ')}])\` = **${ONTIME}**. The window's true total is ${W0_TRUE}. The pane and the error are produced by the same line, because the watermark's claim was wrong.` },
       { t: `id ${L.id} arrives — and \`open\` is what decides its fate`, line: at('fun stillOpen(i)', 'return watermarkAfter(i) < W0 + WIN + ALLOWED'),
         stack: [MAIN({ i: LI }), { name: 'feed', locals: ['st = @0x100', `e = EVENTS[${L.id}]`, `i = ${LI}`] },
                 { name: 'stillOpen', locals: [`i = ${LI}`] }],
         heap: [{ key: 'st' }, { key: 'panes' }],
-        cap: `\`watermarkAfter(${LI})\` is ${WATERMARKS[LI]} and the bound is ${W0_END} + ALLOWED. With ALLOWED = ${ALLOWED_MIN} that is ${W0_END + ALLOWED_MIN}, so ${WATERMARKS[LI]} < ${W0_END + ALLOWED_MIN} holds and the state survives. With ALLOWED = ${ALLOWED_MIN - 1} the bound is ${W0_END + ALLOWED_MIN - 1} and the comparison fails — one second of configuration decides between ${W0_TRUE} and ${ONTIME}.` },
-      { t: 'so one window published twice, and the second one is right', line: at('    val fired = len(st.panes)'),
-        stack: [MAIN({ i: EVENTS.length - 1, final: W0_TRUE, fired: 2 })],
+        cap: `\`watermarkAfter(${LI})\` is ${WATERMARKS[LI]} and the bound is ${W0_END} + ALLOWED. With ALLOWED = ${ALLOWED_MIN} that is ${W0_END + ALLOWED_MIN}, so ${WATERMARKS[LI]} < ${W0_END + ALLOWED_MIN} holds, the state survives and a LATE pane of ${WHEN_SIM.final} follows. With ALLOWED = ${ALLOWED_MIN - 1} the bound is ${W0_END + ALLOWED_MIN - 1}, the comparison fails, \`feed\` returns before id ${L.id} is added — one second of configuration decides between ${WHEN_SIM.final} and ${WHEN_LOW.final}.` },
+      { t: `so one window published ${WHEN_SIM.firings.length} times, and the last one is right`, line: at('    val fired = len(st.panes)'),
+        stack: [MAIN({ i: EVENTS.length - 1, final: WHEN_SIM.final, fired: WHEN_SIM.firings.length })],
         heap: [{ key: 'st' }, { key: 'panes' }],
-        cap: `\`final\` is ${W0_TRUE} and \`fired\` is 2: an ON-TIME pane of ${ONTIME} and a LATE pane of ${W0_TRUE}. The window produced two published values for one question, which is correct behaviour — and it is exactly the situation the next concept, "how", exists to make safe for a consumer.` },
+        cap: `\`final\` is ${WHEN_SIM.final} and \`fired\` is ${WHEN_SIM.firings.length}: ${EARLY.length} EARLY panes (${EARLY.map(f => f.v).join(', ')}), an ON-TIME pane of ${ONTIME} and a LATE pane of ${W0_TRUE}. The window produced ${WHEN_SIM.firings.length} published values for one question, which is correct behaviour — and it is exactly the situation the next concept, "how", exists to make safe for a consumer.` },
     ];
   },
   intro: [
-    `**What is being answered.** What a trigger actually is, and where allowed lateness takes effect — as one \`feed\` function replayed over the stream.`, '',
-    `Three predicates do all the work. \`onTimeDue(i)\` asks whether the watermark has passed the window end. \`stillOpen(i)\` asks whether the window's STATE is still held — and that is the only thing that decides whether a straggler can change an answer.`, '',
-    `Step 3 is the one to read closely: the comparison is \`watermarkAfter(${LI}) < ${W0_END} + ALLOWED\`, which is ${WATERMARKS[LI]} < ${W0_END + ALLOWED_MIN}. One second lower and it fails. The threshold is ${ALLOWED_MIN}s because of where the **watermark** stood — not because of id ${L.id}'s ${L.pt - L.et}s of skew.`],
-  sub: `The trigger firings and the ${ALLOWED_MIN}s threshold are computed from the seed's watermarks and asserted.` });
+    `**What is being answered.** What a trigger actually is, and where allowed lateness takes effect — as a clock and one \`feed\` function replayed over the stream.`, '',
+    `\`early(st, t)\` is the clock trigger, fired from \`main\` whenever \`t\` comes round before the next arrival. \`onTimeDue(i)\` asks whether the watermark has passed the window end. \`stillOpen(i)\` asks whether the window's STATE is still held — and that is the only thing that decides whether a straggler can change an answer. Every event is fed, in the window or not, because any event can move the watermark.`, '',
+    `Step 4 is the one to read closely: the comparison is \`watermarkAfter(${LI}) < ${W0_END} + ALLOWED\`, which is ${WATERMARKS[LI]} < ${W0_END + ALLOWED_MIN}. One second lower and it fails. The threshold is ${ALLOWED_MIN}s because of where the **watermark** stood — not because of id ${L.id}'s ${L.pt - L.et}s of skew.`],
+  sub: `The trigger firings (computed by running this listing's logic over the seed) and the ${ALLOWED_MIN}s threshold are derived from the seed's watermarks and asserted.` });
 
 // ---- concept 3: accumulation, and the sink that disagrees -------------------
 PROGRAMS.push({
@@ -704,24 +771,22 @@ PROGRAMS.push({
     `That is the whole lesson. Three pairings reach ${RIGHT}; \`badSum\` reaches **${WRONG_SUM_ACC}** and \`badRepl\` reaches **${WRONG_REPL_DISC}**. Every function in the listing is correct in all five cases, and the only thing that varied was an agreement nobody wrote down.`],
   sub: `All five mode-and-sink outcomes are computed from the seed and asserted: three equal ${RIGHT}, two do not.` });
 
-// ---- concept 4: the fully specified purchase counter -----------------------
+// ---- concept 4: the fully specified purchase summer ------------------------
 PROGRAMS.push({
   name: 'ch02-system-memory',
-  title: 'The purchase counter — all four answers, as one loop',
-  subtitle: `${PT_FIRES[0].sum} → ${PT_FIRES[1].sum} → ${ONTIME} → (${-ONTIME}, ${W0_TRUE}) · sink lands on ${RIGHT}`,
+  title: 'The purchase summer — all four answers, as one loop',
+  subtitle: `panes ${SYS.firings.map(f => f.v).join(' → ')} · ${SYS.received} values published under retraction · sink lands on ${SYS.stored}`,
   src: COMMON.concat([
     '',
-    'type Spec  { what, where, whenEarly, allowed, how }',
+    'type Spec  { what, where, every, allowed, how }',
     'type Dash  { stored, received }',
     '',
     `// primitive: SPEC — the four answers, as data rather than as prose.`,
     `//   SPEC = ("sum", "fixed ${WIN}s", every ${PERIOD}s, allowed ${ALLOWED_MIN}s, "retracting")`,
-    `// primitive: ONTIME — the on-time pane's value.  ONTIME = ${ONTIME}`,
-    `// primitive: TRUE_SUM — the window's true total.  TRUE_SUM = ${W0_TRUE}`,
     '// primitive: watermarkAfter(i) — the completeness claim after event i.',
     `//   watermarkAfter(${ONTIME_I}) = ${WATERMARKS[ONTIME_I]}      watermarkAfter(${LI}) = ${WATERMARKS[LI]}`,
     '',
-    '// function: publish(dash, value) — one pane reaching the consumer. The sink can',
+    '// function: publish(dash, value) — one value reaching the consumer. The sink can',
     '//   only ADD, which is the common case and the reason SPEC.how is "retracting".',
     `//   publish(dash, ${ONTIME}) sets stored : 0 -> ${ONTIME}`,
     `//   publish(dash, ${-ONTIME}) sets stored : ${ONTIME} -> 0`,
@@ -739,20 +804,39 @@ PROGRAMS.push({
     '    return publish(dash, newValue)',
     '}',
     '',
+    '// function: pane(dash, last, value) — one firing. The first is published as it',
+    '//   is; every later one is a refinement of the one before.',
+    `//   pane(Dash(0, 0), NONE, ${SYS.firings[0].v}) = Dash(${SYS.firings[0].v}, 1)`,
+    'fun pane(dash, last, value) {',
+    '    if (last == NONE) { return publish(dash, value) }',
+    '    return refine(dash, last, value)',
+    '}',
+    '',
     '// function: run(events) — the whole pipeline, for window W0.',
-    `//   run(EVENTS).stored = ${W0_TRUE}      run(EVENTS).received = 4`,
+    `//   run(EVENTS).stored = ${SYS.stored}      run(EVENTS).received = ${SYS.received}`,
     'fun run(events) {',
-    '    var dash = Dash(0, 0)',
-    '    var ids  = []',
-    '    var last = NONE',
+    '    var dash   = Dash(0, 0)',
+    '    var ids    = []',
+    '    var last   = NONE',
+    '    var onTime = false',
+    '    var t      = SPEC.every',
     '    for (i in 0 .. len(events) - 1) {',
     '        val e = events[i]',
-    '        if (winOf(e.et) != W0) { continue }',
-    '        if (watermarkAfter(i) >= W0 + WIN + SPEC.allowed) { continue }   // state gone',
-    '        ids = append(ids, e.id)',
-    '        if (last == NONE) { dash = publish(dash, sum(ids)) }',
-    '        if (last != NONE) { dash = refine(dash, last, sum(ids)) }',
-    '        last = sum(ids)',
+    '        while (onTime == false && t <= e.pt) {                     // WHEN: early, on the clock',
+    '            dash = pane(dash, last, sum(ids))',
+    '            last = sum(ids)',
+    '            t    = t + SPEC.every',
+    '        }',
+    '        if (watermarkAfter(i) >= W0 + WIN + SPEC.allowed) { break }   // state gone',
+    '        if (winOf(e.et) == W0) { ids = append(ids, e.id) }            // WHERE',
+    '        if (onTime == false && watermarkAfter(i) >= W0 + WIN) {       // WHEN: on time',
+    '            dash   = pane(dash, last, sum(ids))',
+    '            last   = sum(ids)',
+    '            onTime = true',
+    '        } else if (onTime && winOf(e.et) == W0) {                     // WHEN: late',
+    '            dash = pane(dash, last, sum(ids))',
+    '            last = sum(ids)',
+    '        }',
     '    }',
     '    return dash',
     '}',
@@ -765,40 +849,42 @@ PROGRAMS.push({
     '}',
   ]),
   heap: {
-    dash: { addr: '0x100', type: 'Dash', val: () => `stored ${W0_TRUE} · received 4` },
-    ids:  { addr: '0x200', type: `int[${W0_IDS.length}]`, val: () => `[${W0_IDS.join(', ')}]` },
+    dash: { addr: '0x100', type: 'Dash', val: () => `stored ${SYS.stored} · received ${SYS.received}` },
+    ids:  { addr: '0x200', type: `int[${SYS.ids.length}]`, val: () => `[${SYS.ids.join(', ')}]` },
   },
   steps: (at) => {
     const MAIN = (o = {}) => ({ name: 'main', locals: [
       `dash = ${o.dash || '...'}`, `final = ${o.final !== undefined ? o.final : '...'}`,
       `count = ${o.count !== undefined ? o.count : '...'}`] });
     const RUN = (o) => ({ name: 'run', locals: ['events = EVENTS', 'dash = @0x100', 'ids = @0x200',
-      `last = ${o.last}`, `i = ${o.i}`, `e = EVENTS[${o.eid}]`] });
+      `last = ${o.last}`, `onTime = ${o.onTime}`, `t = ${o.t}`, `i = ${o.i}`, `e = EVENTS[${o.eid}]`] });
+    const SKIP = EVENTS.findIndex((e, i) => i < ONTIME_I && winOf(e.et) !== W0);
     return [
-      { t: 'WHERE: anything outside this window is skipped', line: at('fun run(events)', 'if (winOf(e.et) != W0) { continue }'),
-        stack: [MAIN(), RUN({ last: 'NONE', i: 3, eid: 3 })],
+      { t: 'WHERE: anything outside this window adds nothing', line: at('fun run(events)', 'if (winOf(e.et) == W0) { ids = append(ids, e.id) }            // WHERE'),
+        stack: [MAIN(), RUN({ last: SYS_TRACE[SKIP].last, onTime: SYS_TRACE[SKIP].onTime, t: SYS_TRACE[SKIP].t, i: SKIP, eid: EVENTS[SKIP].id })],
         heap: [{ key: 'dash' }, { key: 'ids', hot: true }],
-        cap: `\`winOf(${EVENTS[3].et})\` = ${winOf(EVENTS[3].et)}, which is not W0 = ${W0}, so event id 3 is skipped entirely. That one line is the whole of the collector's job — the WHERE answer — and it reads \`e.et\`, never the arrival time.` },
-      { t: 'WHEN: the allowed-lateness check is what can drop an event', line: at('if (watermarkAfter(i) >= W0 + WIN + SPEC.allowed) { continue }   // state gone'),
-        stack: [MAIN(), RUN({ last: ONTIME, i: LI, eid: L.id })],
+        cap: `\`winOf(${EVENTS[SKIP].et})\` = ${winOf(EVENTS[SKIP].et)}, which is not W0 = ${W0}, so event id ${EVENTS[SKIP].id} is never added to \`ids\`. That one line is the whole of the collector's job — the WHERE answer — and it reads \`e.et\`, never the arrival time. The event still passes through the loop, because its arrival is what lets the clock and the watermark move.` },
+      { t: 'WHEN: the allowed-lateness check is what can drop an event', line: at('if (watermarkAfter(i) >= W0 + WIN + SPEC.allowed) { break }   // state gone'),
+        stack: [MAIN(), RUN({ last: SYS_TRACE[LI].last, onTime: SYS_TRACE[LI].onTime, t: SYS_TRACE[LI].t, i: LI, eid: L.id })],
         heap: [{ key: 'dash' }, { key: 'ids' }],
-        cap: `For id ${L.id} this is ${WATERMARKS[LI]} >= ${W0_END} + ${ALLOWED_MIN}, i.e. ${WATERMARKS[LI]} >= ${W0_END + ALLOWED_MIN} — false, so the event is kept. Lower \`SPEC.allowed\` by one second and this \`continue\` fires: the event vanishes and the answer stays ${ONTIME} forever. One line, one config value, two different final numbers.` },
+        cap: `For id ${L.id} this is ${WATERMARKS[LI]} >= ${W0_END} + ${ALLOWED_MIN}, i.e. ${WATERMARKS[LI]} >= ${W0_END + ALLOWED_MIN} — false, so the event is kept. Lower \`SPEC.allowed\` by one second and this \`break\` fires: the event vanishes and the answer stays ${SYS_LOW.stored} forever. One line, one config value, two different final numbers.` },
       { t: 'HOW: the refinement emits an undo before the new total', line: at('fun refine(dash, oldValue, newValue)', 'if (SPEC.how == "retracting") { dash = publish(dash, 0 - oldValue) }', '    dash.stored   = dash.stored + value'),
-        stack: [MAIN(), RUN({ last: ONTIME, i: LI, eid: L.id }), { name: 'refine', locals: ['dash = @0x100', `oldValue = ${ONTIME}`, `newValue = ${W0_TRUE}`] },
+        stack: [MAIN(), RUN({ last: ONTIME, onTime: SYS_TRACE[LI].onTime, t: SYS_TRACE[LI].t, i: LI, eid: L.id }), { name: 'pane', locals: ['dash = @0x100', `last = ${ONTIME}`, `value = ${W0_TRUE}`] },
+                { name: 'refine', locals: ['dash = @0x100', `oldValue = ${ONTIME}`, `newValue = ${W0_TRUE}`] },
                 { name: 'publish', locals: ['dash = @0x100', `value = ${-ONTIME}`] }],
         heap: [{ key: 'dash', hot: true }, { key: 'ids' }],
-        cap: `\`publish(dash, ${-ONTIME})\` takes \`stored\` from ${ONTIME} back to 0, then the fall-through publishes ${W0_TRUE}. The sink only ever adds, and still ends up correct. Change \`SPEC.how\` to \`"accumulating"\` and the retraction line is skipped — \`stored\` becomes ${WRONG_SUM_ACC}.` },
+        cap: `\`publish(dash, ${-ONTIME})\` takes \`stored\` from ${ONTIME} back to 0, then the fall-through publishes ${W0_TRUE}. Every refinement before this one did the same — ${SYS.firings.length - 1} refinements, ${SYS.firings.length - 1} undos — so the sink only ever adds, and still ends up correct. Change \`SPEC.how\` to \`"accumulating"\` and the retraction line is skipped: the sink receives ${SYS_ACC.published.map(p => p.v).join(', ')} and \`stored\` becomes ${SYS_ACC.stored}.` },
       { t: 'WHAT: and the consumer ends on the right number', line: at('    val count = dash.received'),
-        stack: [MAIN({ dash: '@0x100', final: W0_TRUE, count: 4 })],
+        stack: [MAIN({ dash: '@0x100', final: SYS.stored, count: SYS.received })],
         heap: [{ key: 'dash' }, { key: 'ids' }],
-        cap: `\`final\` = ${W0_TRUE} after \`count\` = 4 published values. All four answers were needed to get here: WHERE picked the ${W0_IDS.length} events, WHAT summed them, WHEN decided that ${ONTIME} goes out first and that id ${L.id} is still admissible, and HOW made the correction safe for a sink that can only add.` },
+        cap: `\`final\` = ${SYS.stored} after \`count\` = ${SYS.received} published values: ${SYS.published.map(p => p.v).join(', ')}. All four answers were needed to get here: WHERE picked the ${SYS.ids.length} events, WHAT summed them, WHEN decided that ${SYS.published[0].v} goes out first and that id ${L.id} is still admissible, and HOW made every correction safe for a sink that can only add.` },
     ];
   },
   intro: [
     `**What is being answered.** The four questions as four lines of one loop, with the real published values.`, '',
-    `\`SPEC\` holds the four answers as data: \`"sum"\`, \`"fixed ${WIN}s"\`, early every ${PERIOD}s with allowed lateness ${ALLOWED_MIN}s, and \`"retracting"\`. Each step below highlights the line that implements one of them.`, '',
-    `Two lines are worth reading twice. The \`continue\` in step 2 is where allowed lateness takes effect — one second lower and id ${L.id} disappears. The retraction in step 3 is what keeps a sink that can only ADD on the right answer; skip it and \`stored\` ends at ${WRONG_SUM_ACC} instead of ${W0_TRUE}.`],
-  sub: `The publish sequence, the lateness comparison and both sink outcomes are derived from the seed and asserted.` });
+    `\`SPEC\` holds the four answers as data: \`"sum"\`, \`"fixed ${WIN}s"\`, early every ${PERIOD}s with allowed lateness ${ALLOWED_MIN}s, and \`"retracting"\`. Each step below highlights the line that implements one of them. Run over the seed, the window fires ${SYS.firings.length} times — ${SYS.firings.map(f => `${f.kind} ${f.v}`).join(', ')} — and the sink receives ${SYS.received} values.`, '',
+    `Two lines are worth reading twice. The \`break\` in step 2 is where allowed lateness takes effect — one second lower and id ${L.id} disappears. The retraction in step 3 is what keeps a sink that can only ADD on the right answer; skip it and \`stored\` ends at ${SYS_ACC.stored} instead of ${SYS.stored}.`],
+  sub: `The publish sequence (computed by running this listing's logic over the seed), the lateness comparison and both sink outcomes are derived from the seed and asserted.` });
 
 for (const g of PROGRAMS) {
   const M2 = buildMemoryWalkthrough({ src: g.src, heap: g.heap, steps: [], name: g.name,

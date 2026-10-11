@@ -10,7 +10,7 @@ Monotonicity is not an accident. Event times in this dataset go backwards 2 time
 
 **A perfect watermark is possible in principle.** Define it as the largest time *t* for which no event with event time below *t* is still to come. Compute it over this stream and it sits at **12:00:50 for 6 of the 9 events**, because id 7 is always still coming. It is correct and useless: nothing can be emitted while it is stalled.
 
-The heuristic reached 12:03:05 over that same span — **135s of apparent progress, all of it an unverified guess.**
+The heuristic reached 12:03:20 over that same span — **150s of apparent progress, all of it an unverified guess.**
 
 **And that is exactly the price of the on-time answer.** Window [12:00, 12:02) holds ids 0, 1, 2, 7, true sum **19**. Under the heuristic it closes after event id 4 and publishes **15** at 12:04:06 — 21% low. Under the perfect watermark it closes after event id 7 and publishes **19** at 12:04:40 — correct, and **34s later**.
 
@@ -51,7 +51,7 @@ Two numbers exist at that instant: the watermark (12:03:05, in event time) and t
 
 <img src="../diagrams/anim/ch03-watermark/frames/step-03.svg" alt="Step 3: a PERFECT watermark exists — and it stalls" width="1040">
 
-This is the clearest statement of what a heuristic watermark is FOR. The perfect watermark is correct and useless — it sits at 12:00:50 for 6 of the 9 events, so nothing can be emitted. The heuristic reaches 12:03:05 in the same span, and every bit of that 135s of progress is an unverified guess.
+This is the clearest statement of what a heuristic watermark is FOR. The perfect watermark is correct and useless — it sits at 12:00:50 for 6 of the 9 events, so nothing can be emitted. The heuristic reaches 12:03:20 in the same span, and every bit of that 150s of progress is an unverified guess.
 
 </details>
 <details>

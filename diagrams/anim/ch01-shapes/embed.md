@@ -8,7 +8,7 @@ A pipeline's whole design falls out of one question: **does the input end?** The
 
 **2. Unbounded data, processed as batch.** The data never ends, so the pipeline slices it artificially — run every 120s over whatever arrived — and each run is a little bounded job. This is what most systems called "streaming" actually are.
 
-The slices are cut on **arrival** time, so they are the wrong buckets: **2 of 9 events land in a chunk that is not their event-time window** — id 6 out by 50s, id 7 out by 230s. And from inside a chunk there is nothing to notice: it is internally consistent, it finishes cleanly, and it reports a wrong number.
+The slices are cut on **arrival** time, so they are the wrong buckets: **2 of 9 events land in a chunk that is not their event-time window** — id 6 out by 120s (1 window), id 7 out by 240s (2 windows). And from inside a chunk there is nothing to notice: it is internally consistent, it finishes cleanly, and it reports a wrong number.
 
 **3. Unbounded data, processed as streaming.** Keep the event-time windows — so the buckets are right — and make *closing* a separate, processing-time decision driven by the watermark. Window [12:00, 12:02) closes after event id 4, which is 3 events before id 7 arrives — so lateness is now a *case*, not an accident. And the last window **never closes**: nothing ever pushes the watermark past its end.
 
@@ -45,7 +45,7 @@ Start here, because it is the case where none of this book's problems exist. The
 
 <img src="../diagrams/anim/ch01-shapes/frames/step-02.svg" alt="Step 2: unbounded data as batch: slice by the WRONG clock" width="1040">
 
-This is the pattern most "streaming" systems actually are: a batch job on a timer. It works, it is simple, and 2 of 9 events land in the wrong bucket — id 6 by 50s and id 7 by 230s. The chunk boundary is a fact about the pipeline's clock, and it is being used to answer a question about the users' clock.
+This is the pattern most "streaming" systems actually are: a batch job on a timer. It works, it is simple, and 2 of 9 events land in the wrong bucket — id 6 by 120s (1 window) and id 7 by 240s (2 windows). The chunk boundary is a fact about the pipeline's clock, and it is being used to answer a question about the users' clock.
 
 </details>
 <details>

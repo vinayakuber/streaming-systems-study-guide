@@ -33,7 +33,7 @@ On the second pass `proc.chargedKeys` already contains "order-4", so the functio
 
 <img src="../diagrams/anim/ch05-effects-memory/frames/step-03.svg" alt="Step 3: dedup covers 1 crash point, and misses the other 2" width="980">
 
-`seen` only gains the id when the crash happens BEFORE the shuffle. For the other 2 crash points the record is already past the dedup set — or the set died with the process — so `contains(seen, ORDER.id)` is false on the retry and the charge runs again.
+`seen` still holds the id only when the shuffle's own process survived, and the test only helps when the copy comes back THROUGH it — both true only for "upstream crash, shuffle alive". Here `seen` is [4] but `viaShuffle` is false: the sink retried from after the dedup point. After "crash after the charge, before the offset commit" `seen` is [] instead. Either way the charge runs again.
 
 </details>
 <details>
@@ -41,7 +41,7 @@ On the second pass `proc.chargedKeys` already contains "order-4", so the functio
 
 <img src="../diagrams/anim/ch05-effects-memory/frames/step-04.svg" alt="Step 4: so the two guards are NOT interchangeable here" width="980">
 
-`byDedup` = 1 and `byKey` = 3. In the previous concept these two guards were redundant for an aggregation; here they are not, and the reason is structural: dedup is inside the pipeline, and 2 of the 3 crash points are after the point where the pipeline stops knowing anything.
+`byDedup` = 1 and `byKey` = 3. In the previous concept these two guards were redundant for an aggregation; here they are not, and the reason is structural: dedup is inside the pipeline, and in 2 of the 3 crash points the second copy either never passes the shuffle or arrives after its memory died.
 
 </details>
 

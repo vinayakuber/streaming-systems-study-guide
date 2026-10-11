@@ -32,7 +32,7 @@ None of the three is "the right one"; they trade accuracy, latency and downstrea
 **What this design does NOT settle — four gaps, each a later chapter:**
 
 1. **The 60s lag is a guess.** It was wrong about id 7 by 170s, and nothing inside the pipeline could detect that. Option C's 230s was only knowable *after* id 7 happened.
-2. **One window never closes.** [12:08, …) still holds 8. Unbounded input means unbounded state unless something expires it.
+2. **One minute never closes.** [12:09, 12:10) still holds 8. Unbounded input means unbounded state unless something expires it.
 3. **Nothing here is exactly-once.** If the transport redelivers id 7, the 12:00 minute reads 16, and this design cannot distinguish that from a real click.
 4. **It is sized for 9 events.** Nothing here says what happens at a million per second.
 

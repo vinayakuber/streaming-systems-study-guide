@@ -27,8 +27,8 @@ Two honest ways out. **Close the aggregate explicitly** — if the total is per 
 #### The same problem, asked 3 other ways
 
 Each of these is the program below with different nouns. The reason to read them is not the
-answer — it is the *recognition*. 4 surfaces (turnstiles, analytics, commerce, risk), one shape, and in every
-case the appealing first answer is to materialise a sequence you cannot afford.
+answer — it is the *recognition*. 4 surfaces (counters, analytics, commerce, risk), one shape, and in every
+case the appealing first answer is to bound the state with an expiry — drop whatever has gone quiet for longer than some allowance — and keep calling the answer exact, when a key that is dropped and then seen again is indistinguishable from one never seen, so the answer goes wrong with no error raised.
 
 <details>
 <summary><b>Variation 2</b> — the unique-visitor count <i>(looks like analytics)</i></summary>
@@ -87,7 +87,8 @@ This is **the unique-visitor count** solved on its own: a complete file, every h
                                       an expiry OVERSTATES a distinct count
     the nine views, ttl = 0   -> 9    every view its own visitor, which is the view count
     the nine views, ttl = a whole day -> 2   right again, and it saved nothing at all: at
-                                      this size the expiry frees 0 slots in every row above
+                                      this size only ttl = 0 frees any slots (2), and it
+                                      overstates the count to 9 to do it
   And at the sketch's own boundary, and at scale:
     255 distinct visitors   -> 255     below K = 256, so the sketch is exact
     256 distinct visitors   -> 257     at K, the estimator takes over and is 1 high
@@ -265,7 +266,7 @@ BIGGER_STREAM = stream_of(12_000, 1)
 EXAMPLES = [
     ("the chapter's 9 views, 2 visitors",    VIEWS,         None,     2,  None,     2, None),
     ("ttl = 295, the longest silence",       VIEWS,          295,     2,     2,     2,    0),
-    ("ttl = 294, one hour tighter",          VIEWS,          294,     2,     3,     2,    0),
+    ("ttl = 294, one second tighter",        VIEWS,          294,     2,     3,     2,    0),
     ("ttl = a whole day: saves nothing",     VIEWS,          DAY,     2,     2,     2,    0),
     ("ttl = 0: saves 2, overstates to 9",    VIEWS,            0,     2,     9,     2,    2),
     ("an empty day -> 0, not an error",      EMPTY_DAY,     None,     0,  None,     0, None),
@@ -390,7 +391,7 @@ def main():
     # rather than inside a threshold picked to make them pass.
     se = K ** -0.5
     assert max(r[4] for r in big) < 3 * se, (max(r[4] for r in big), se)
-    print(f"    the exact state grows {rows[-1][1] // rows[1][1]}x across these rows and the sketch state does not")
+    print(f"    from the {big[0][0]:,} row to the {rows[-1][0]:,} row the exact state grows {rows[-1][1] // big[0][1]}x and the sketch state does not")
     print(f"    grow at all; the worst error over the rows at or above k is "
           f"{max(r[4] for r in big):.1%}, against the")
     print(f"    sketch's own standard error of 1/sqrt({K}) = {se:.2%}.")
@@ -476,7 +477,7 @@ Running it prints:
 what it exercises                      views    ttl  distinct  estimate  set slots  sketch  expiry  saved
 the chapter's 9 views, 2 visitors          9      -         2         2          2       2       -      -
 ttl = 295, the longest silence             9    295         2         2          2       2       2      0
-ttl = 294, one hour tighter                9    294         2         2          2       2       3      0
+ttl = 294, one second tighter              9    294         2         2          2       2       3      0
 ttl = a whole day: saves nothing           9  86400         2         2          2       2       2      0
 ttl = 0: saves 2, overstates to 9          9      0         2         2          2       2       9      2
 an empty day -> 0, not an error            0      -         0         0          0       0       -      -
@@ -519,7 +520,7 @@ VIEWS = a@1  a@3  b@50  b@90  a@130  b@220  a@245  b@260  a@540    (9 views)
         1,000        1,000       983           256   1.7%
         4,000        4,000     3,721           256   7.0%
        20,000       20,000    20,004           256   0.0%
-    the exact state grows 78x across these rows and the sketch state does not
+    from the 256 row to the 20,000 row the exact state grows 78x and the sketch state does not
     grow at all; the worst error over the rows at or above k is 7.0%, against the
     sketch's own standard error of 1/sqrt(256) = 6.25%.
 
@@ -591,7 +592,7 @@ This is **the abandoned shopping cart** solved on its own: a complete file, ever
   7 at hour 90; a adds a 2 at hour 130; b adds a 9 at hour 220; a adds a 6 at hour 245; b
   adds a 1 at hour 260; and a adds an 8 at hour 540.  The true carts are a = 5+3+2+6+8 = 24
   and b = 4+7+9+1 = 21, so 45 of value in all.  Shopper 'a' goes quiet from hour 245 to hour
-  540 -- 295 hours, which is over ten days -- and then comes back expecting their cart.
+  540 -- 295 hours, which is just over twelve days -- and then comes back expecting their cart.
 
   GIVEN AN ALLOWANCE AND AN HOUR TO LOOK AT, HOW MUCH CART VALUE SURVIVES, AND HOW MANY
   CARTS HAS MEMORY BEEN SPARED?
@@ -649,7 +650,7 @@ import random
 
 # The chapter's nine seed events, read as cart additions: (shopper, item_price, hour).  The
 # prices are the chapter's values, so the true cart totals are its 24 and 21.  Shopper 'a' is
-# silent from hour 245 to hour 540 -- the chapter's longest gap, 295 hours, which is ten days
+# silent from hour 245 to hour 540 -- the chapter's longest gap, 295 hours, which is 12 days 7 hours
 # and is exactly the shopper the product requirement is about.
 ADDITIONS = [("a", 5, 1), ("a", 3, 3), ("b", 4, 50), ("b", 7, 90), ("a", 2, 130),
              ("b", 9, 220), ("a", 6, 245), ("b", 1, 260), ("a", 8, 540)]
@@ -713,8 +714,9 @@ def show_examples():
     Each row is checked against `truth_of` -- the brute-force cart, which cannot be wrong --
     and against the store, which must reproduce it exactly on every row.  The two cost
     columns are printed per row so the reader can see where the bound is worth anything: at
-    the chapter's scale the allowance saves 0 carts and loses up to 37 of the 45 units of cart
-    value, and the saving only turns positive at the asymptotic scale on the last two rows.
+    the chapter's scale the allowance saves at most 2 carts, and only by dropping carts whose
+    value is then lost -- up to 37 of the 45 units of cart value; the saving only becomes large
+    (1,899 and 2,000) at the asymptotic scale on the last two rows.
     """
     print(f"{'what it exercises':37s} {'events':>7} {'ttl':>6} {'hour':>6} {'true':>6} "
           f"{'kept':>6} {'held':>6} {'+ttl':>6} {'saved':>6} {'reloads':>8}")
@@ -946,7 +948,7 @@ def main():
     print(f"  at the chapter's 294-hour allowance the saving is 0 for every hour up to the last")
     print(f"  addition -- the chapter's own figure -- so the correctness cost arrives before any")
     print(f"  memory benefit.  At the week-long allowance it is 2, reached at hour {h}, and the hour")
-    print(f"  is the whole story: shopper 'a' expired at {245 + WEEK} and 'b' at {260 + WEEK}, so the two carts the")
+    print(f"  is the whole story: shopper 'a' expired at {245 + WEEK + 1} and 'b' at {260 + WEEK + 1}, so the two carts the")
     print(f"  bound has stopped holding are precisely the two the shoppers no longer have.  A")
     print(f"  saving visible only after the data is gone is the damage, measured from the other")
     print(f"  side.  The real case for the bound is asymptotic, and the honest thing is to go")
@@ -1083,7 +1085,7 @@ ADDITIONS = a@1:5  a@3:3  b@50:4  b@90:7  a@130:2  b@220:9  a@245:6  b@260:1  a@
   at the chapter's 294-hour allowance the saving is 0 for every hour up to the last
   addition -- the chapter's own figure -- so the correctness cost arrives before any
   memory benefit.  At the week-long allowance it is 2, reached at hour 429, and the hour
-  is the whole story: shopper 'a' expired at 413 and 'b' at 428, so the two carts the
+  is the whole story: shopper 'a' expired at 414 and 'b' at 429, so the two carts the
   bound has stopped holding are precisely the two the shoppers no longer have.  A
   saving visible only after the data is gone is the damage, measured from the other
   side.  The real case for the bound is asymptotic, and the honest thing is to go
@@ -1164,7 +1166,8 @@ This is **the fraud score over a lifetime** solved on its own: a complete file, 
     ttl = 294, cache 1      -> (29, 1)   one day tighter, the other side of that edge: 'a'
                                          restarts and 16 points of history vanish
     ttl = 100, cache 2      -> (8, 4)    four restarts, and 37 of the 45 points gone
-    ttl = 0, cache 0        -> (8, 7)    the last signal per account only
+    ttl = 0, cache 0        -> (8, 7)    the last signal only: 'b''s last point is swept
+                                         when 'a''s day-540 signal arrives
     an EMPTY stream         -> (0, 0)    no signals, so no score.  0, not an error
     a single signal         -> (7, 0)    the smallest real stream
     cache of 0 slots        -> (45, 0)   write-through: 9 store reads instead of 2, and the
@@ -1181,7 +1184,8 @@ This is **the fraud score over a lifetime** solved on its own: a complete file, 
   And on 2,000 accounts seen once plus one that never stops:
     ttl = 100, cache 64     -> (301, 0)      1,899 accounts out of memory and 1,899 histories
                                              thrown away; at the nine-signal size above, the
-                                             same expiry saves 0 accounts
+                                             same expiry saves 1 account ('b', whose
+                                             score is then simply gone)
     ttl = 0, cache 0        -> (1, 199)      everything saved, everything lost
 
   Every line above is a row in the EXAMPLES table below, and every row is asserted three
@@ -1262,9 +1266,9 @@ def show_examples():
     `true_scores` is the requirement written out, so it is the reference that cannot be wrong;
     every row is checked against it, against the store, and against the cache at that row's
     capacity.  The cost columns are printed per row so the reader can see what each answer
-    buys: `saved` is the scores the expiry stops holding -- 0 at the chapter's scale, where
-    the expiry has already cost 16 of account 'a''s 24 points, and 1,899 only on the last two
-    rows -- against the `reads` and `writes` the cache pays to be right at every one of them.
+    buys: `saved` is the scores the expiry stops holding -- at most 1 at the chapter's scale, where
+    the expiry has already cost 16 of account 'a''s 24 points, and 1,899 and 2,000 on the last
+    two rows -- against the `reads` and `writes` the cache pays to be right at every one of them.
     """
     print(f"{'what it exercises':36s} {'events':>7} {'ttl':>6} {'cap':>4} {'true':>6} "
           f"{'expiry':>7} {'restarts':>9} {'held':>6} {'+ttl':>6} {'saved':>6} "
@@ -1715,7 +1719,7 @@ def totals(events, ttl, spill=None):
     aggregate restarted mid-stream" with "the state was released at the end".
 
     `spill` (a dict) turns the deletion into a write-out-and-reload, which is the
-    variation-2 escape; with it, the totals come out exact at any allowance.
+    variation-3 escape (the abandoned cart); with it, the totals come out exact at any allowance.
     """
     acc, last, resets = {}, {}, []
     for e in events:
@@ -1748,7 +1752,7 @@ def held_at(events, ttl, t):
 # The three variations.
 
 def the_unique_visitor_count(visitors, k=256):
-    """Variation 1, surface: analytics.  Count DISTINCT visitors, not a sum.
+    """Variation 2, surface: analytics.  Count DISTINCT visitors, not a sum.
 
     Non-obvious point: `add` now needs a SET rather than an integer, so the state is
     the size of the visitor set and `drop_stale` is no help -- every visitor must be
@@ -1775,7 +1779,7 @@ def the_unique_visitor_count(visitors, k=256):
     return len(exact), len(exact), est, len(mins)
 
 def the_abandoned_shopping_cart(events, ttl):
-    """Variation 2, surface: commerce.  Hold each user's cart, expire inactive ones,
+    """Variation 3, surface: commerce.  Hold each user's cart, expire inactive ones,
     and a user who returns after a week still expects their cart.
 
     Non-obvious point: here the expiry is the FEATURE and the silent restart is the
@@ -1784,7 +1788,7 @@ def the_abandoned_shopping_cart(events, ttl):
     `add` reads it back, so memory is bounded by ACTIVE users while correctness is
     bounded by nothing.
 
-    Returns (totals_with_spill, totals_without_spill, spill_store).
+    Returns (totals_with_spill, totals_without_spill, live_accumulator_at_end).
     """
     spill = {}
     live, _ = totals(events, ttl, spill=spill)
@@ -1792,7 +1796,7 @@ def the_abandoned_shopping_cart(events, ttl):
     return dict(spill), plain, live
 
 def the_fraud_score_over_a_lifetime(events):
-    """Variation 3, surface: risk.  Score each account on its ENTIRE history; accounts
+    """Variation 4, surface: risk.  Score each account on its ENTIRE history; accounts
     lie dormant for years and must keep their score.
 
     Non-obvious point: the requirement forbids every bound, so the chapter's answer is

@@ -33,7 +33,7 @@ The inner loop starts at `i + 1` — it inspects events that have not arrived. F
 
 <img src="../diagrams/anim/ch03-watermark-memory/frames/step-03.svg" alt="Step 3: so the perfect watermark is stuck at 50 for 6 events" width="980">
 
-For every `i` from 1 to 5 this line finds the same event — id 7, `et` = 50 — so `smallest` is 50 every time. 6 consecutive values, no progress. The heuristic reached 185 over that span, which is 135s of progress it could not justify.
+For every `i` from 1 to 6 this line finds the same event — id 7, `et` = 50 — so `smallest` is 50 every time. 6 consecutive values, no progress. The heuristic reached 200 over that span, which is 150s of progress it could not justify.
 
 </details>
 <details>

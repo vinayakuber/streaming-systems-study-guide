@@ -11,7 +11,7 @@ That buffer is the alignment cost, and with badly skewed sources it is the laten
 **The snapshot is tied to a position, or it is useless.** Three recoveries from the same crash:
 
 - state **+ matching offset 4** → replay 4 events, total **45** — correct
-- state, **offset reset to 0** → replay all 9, total **68** — double counted
+- state, **offset reset to -1** (nothing folded) → replay all 9, total **68** — double counted
 - **offset 4, state lost** → replay 4, total **22** — the prefix is missing
 
 The two failures are wrong in **opposite directions**, which is the clearest argument for atomicity: a half-committed checkpoint is not a slightly-stale checkpoint, it is a wrong one.

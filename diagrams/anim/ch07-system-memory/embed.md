@@ -6,7 +6,7 @@
 
 Two details are worth watching. `store.durable` is **false**: the local state store is fast and dies with the machine, which is why `commit` exists at all. And `copyOf` makes the checkpoint a snapshot rather than a reference, so the processor can keep working while the upload runs.
 
-Step 4 is the requirement stated as code: `if (atomic == false) { cp.offset = 0 }`. The entries landed and the offset did not, so `torn.total` reaches 68 against 45. This design assumes that commit is atomic; it does not make it so.
+Step 4 is the requirement stated as code: `if (atomic == false) { cp.offset = -1 }`. The entries landed and the offset did not, so `torn.total` reaches 68 against 45. This design assumes that commit is atomic; it does not make it so.
 
 The animation steps through the code, holding each line long enough to read the STACK (call frames and their locals) and the HEAP (allocated arrays and objects) as they are AT THAT MOMENT. Expand any step to study it on its own.
 
@@ -41,7 +41,7 @@ The loop starts at `cp.offset + 1` = 5 and runs 4 times. `total` ends at 45 acro
 
 <img src="../diagrams/anim/ch07-system-memory/frames/step-04.svg" alt="Step 4: a torn commit replays the prefix and over-counts" width="980">
 
-With `atomic` false the entries landed and the offset did not, so `resume` replays from index 1 and `torn.total` reaches 68 — over by the whole 23 the checkpoint already held. The design REQUIRES this commit to be atomic and does not itself provide that.
+With `atomic` false the entries landed and the offset did not, so `resume` replays from index 0, all 9 events, and `torn.total` reaches 68 — over by the whole 23 the checkpoint already held. The design REQUIRES this commit to be atomic and does not itself provide that.
 
 </details>
 

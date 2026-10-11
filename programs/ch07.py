@@ -76,7 +76,7 @@ def totals(events, ttl, spill=None):
     aggregate restarted mid-stream" with "the state was released at the end".
 
     `spill` (a dict) turns the deletion into a write-out-and-reload, which is the
-    variation-2 escape; with it, the totals come out exact at any allowance.
+    variation-3 escape (the abandoned cart); with it, the totals come out exact at any allowance.
     """
     acc, last, resets = {}, {}, []
     for e in events:
@@ -109,7 +109,7 @@ def held_at(events, ttl, t):
 # The three variations.
 
 def the_unique_visitor_count(visitors, k=256):
-    """Variation 1, surface: analytics.  Count DISTINCT visitors, not a sum.
+    """Variation 2, surface: analytics.  Count DISTINCT visitors, not a sum.
 
     Non-obvious point: `add` now needs a SET rather than an integer, so the state is
     the size of the visitor set and `drop_stale` is no help -- every visitor must be
@@ -136,7 +136,7 @@ def the_unique_visitor_count(visitors, k=256):
     return len(exact), len(exact), est, len(mins)
 
 def the_abandoned_shopping_cart(events, ttl):
-    """Variation 2, surface: commerce.  Hold each user's cart, expire inactive ones,
+    """Variation 3, surface: commerce.  Hold each user's cart, expire inactive ones,
     and a user who returns after a week still expects their cart.
 
     Non-obvious point: here the expiry is the FEATURE and the silent restart is the
@@ -145,7 +145,7 @@ def the_abandoned_shopping_cart(events, ttl):
     `add` reads it back, so memory is bounded by ACTIVE users while correctness is
     bounded by nothing.
 
-    Returns (totals_with_spill, totals_without_spill, spill_store).
+    Returns (totals_with_spill, totals_without_spill, live_accumulator_at_end).
     """
     spill = {}
     live, _ = totals(events, ttl, spill=spill)
@@ -153,7 +153,7 @@ def the_abandoned_shopping_cart(events, ttl):
     return dict(spill), plain, live
 
 def the_fraud_score_over_a_lifetime(events):
-    """Variation 3, surface: risk.  Score each account on its ENTIRE history; accounts
+    """Variation 4, surface: risk.  Score each account on its ENTIRE history; accounts
     lie dormant for years and must keep their score.
 
     Non-obvious point: the requirement forbids every bound, so the chapter's answer is

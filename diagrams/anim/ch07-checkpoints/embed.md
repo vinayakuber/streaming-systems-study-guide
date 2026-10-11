@@ -12,7 +12,7 @@ The offset is not bookkeeping — a snapshot that does not say *where* it was ta
 
 And the gap **widens**, because full scales with total state while incremental scales with how fast it changes. On a large, mostly-idle state that is the difference between uploading 10 GB and 10 KB.
 
-**The frequency is a trade with no free point.** Checkpoint every 1 event: 9 uploads, worst-case replay 0. Every 3: 8 uploads, replay 2. Once: 7 upload, replay 8. Both ends are correct.
+**The frequency is a trade with no free point.** Checkpoint every 1 event: 9 uploads, worst-case replay 0. Every 3: 8 uploads, replay 2. Once: 7 uploads, replay 8. Both ends are correct.
 
 #### When to checkpoint how often, and what the store choice actually decides
 
@@ -37,7 +37,7 @@ The animation loops through all 4 steps. Expand any step to study it on its own.
 
 <img src="../diagrams/anim/ch07-checkpoints/frames/step-01.svg" alt="Step 1: a checkpoint is a snapshot plus a stream position" width="1040">
 
-A checkpoint is a pair, and the pairing is the point. The state says what the aggregation holds; the offset says which prefix of the stream it holds. Commit them non-atomically and ch05's scenario follows exactly: state saved but offset stale re-applies 4 events worth 22.
+A checkpoint is a pair, and the pairing is the point. The state says what the aggregation holds; the offset says which prefix of the stream it holds. Commit them non-atomically and ch05's double count follows: state saved but offset stale (reset to -1, nothing folded) re-applies the 5 events worth 23 that the state already holds.
 
 </details>
 <details>
@@ -61,7 +61,7 @@ The numbers make the asymmetry visible: full uploads grow every checkpoint (2, 5
 
 <img src="../diagrams/anim/ch07-checkpoints/frames/step-04.svg" alt="Step 4: and the frequency is a trade with no free point" width="1040">
 
-Four frequencies, and the trade is monotone in both directions — no setting is free. Checkpoint every event and recovery replays 0 but you pay 9 uploads; checkpoint once and you pay 7 upload and replay 8 events. The number to start from is the recovery time you can tolerate, not the I/O you would prefer.
+Four frequencies, and the trade is monotone in both directions — no setting is free. Checkpoint every event and recovery replays 0 but you pay 9 uploads; checkpoint once and you pay 7 uploads and replay 8 events. The number to start from is the recovery time you can tolerate, not the I/O you would prefer.
 
 </details>
 

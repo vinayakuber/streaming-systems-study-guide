@@ -34,6 +34,7 @@ const RUN = running();
 const ADDS = N, SUBS = RUN.trace.filter(t => t.removed !== null).length;
 const RECOMPUTE_OPS = NWIN * W;
 const WARMUP = W - 1;
+const BIG_W = 1e5;
 
 // ---- the drift, measured ----------------------------------------------------
 // It is the MIXTURE of magnitudes that drifts, not the magnitude. Multiplying every value
@@ -213,12 +214,12 @@ const steps = (at) => [
   { t: `and what else the window needs`, line: at('fun onArrival(xs, i)::if (i - W >= 0) {'),
     stack: [MAIN({ slow: `${RECOMPUTE_OPS} reads`, fast: `${ADDS + SUBS} ops`, early: 'NOT_YET', same: 'true', drift: DRIFTED }), OA({ i: FIRST_SUB.i })],
     heap: [{ key: 'values', hot: true }, { key: 'state' }],
-    cap: `The subtraction reads index ${FIRST_SUB.i - W}, so the last W values must be retained — a ring buffer of W entries, not the whole stream. So the real cost is O(1) **time** and O(W) **space**, and claiming O(1) for both is the overstatement to avoid: the total is one number and the window is still W values.` },
+    cap: `The subtraction reads index ${FIRST_SUB.i - W}, so the last W values must be retained — a ring buffer of W entries, not the whole stream. So the real cost is two operations per arrival, whatever W is, and W retained values (${W} here) plus the total. Claiming "one number" for the memory as well is the overstatement to avoid: the total is one number and the window is still W values.` },
 
   { t: 'the bill', line: at('val drift = '),
     stack: [MAIN({ slow: `${RECOMPUTE_OPS} reads`, fast: `${ADDS + SUBS} ops`, early: 'NOT_YET', same: 'true', drift: DRIFTED })],
     heap: [{ key: 'values' }, { key: 'state' }, { key: 'out' }],
-    cap: `Two operations per arrival instead of ${W}, W values retained, and ${WARMUP} answers withheld at the start. Three things to volunteer: the warm-up is **W − 1 answers**, not a rounding detail; the space is **O(W)** even though the time is O(1); and the running total is **exact only for exact arithmetic** — ${DRIFTED} of ${NWIN} answers drift as soon as one value is large enough to swamp the others, and no step ever corrects it.` },
+    cap: `Two operations per arrival instead of ${W}, W values retained, and ${WARMUP} answers withheld at the start. Three things to volunteer: the warm-up is **W − 1 answers**, not a rounding detail; the memory is **W values** (${W} here) plus the total, even though each arrival costs only two operations; and the running total is **exact only for exact arithmetic** — ${DRIFTED} of ${NWIN} answers drift as soon as one value is large enough to swamp the others, and no step ever corrects it.` },
 ];
 
 const r = buildInterviewSection({
@@ -228,7 +229,8 @@ const r = buildInterviewSection({
   title: 'The average of the last W — stack and heap at every step',
   subtitle: `${N} values, W = ${W} · ${RECOMPUTE_OPS} reads vs ${ADDS + SUBS} operations · ${WARMUP} answers withheld · ${DRIFTED} of ${NWIN} drift with one value at ${HUGE}`,
   problem: {
-    surface: 'weather station',
+    surface: 'rolling average',
+    trap: 'to treat the window as one running number: true of what an update costs, false of what must be kept — the subtraction needs the departing value, a maximum cannot be recovered from it, a time window needs its live count beside it, and a restart needs the W values behind it',
     statement: [`**Values arrive one at a time, forever.** Report the **average of the last \`W\`** after every arrival.`, '',
       `**You may not re-read the window on each arrival.**`, '',
       `Then: **what do you report before \`W\` values have arrived?** And: **is the running total exactly right?**`],
@@ -240,8 +242,8 @@ const r = buildInterviewSection({
     `The reframe is to keep the window's **total** instead of its contents: add the arrival, subtract the one that left. Exactly one value leaves when one arrives, so the update is **two operations whatever \`W\` is**.`, '',
     `Then the two things the follow-ups are for.`, '',
     `**The warm-up.** Before \`W\` values exist there is no average of \`W\` values, so **W − 1 answers must be withheld** — here ${WARMUP}. Dividing by \`W\` from the first arrival is the standard bug, and it reports figures that are quietly too low rather than obviously wrong.`, '',
-    `**The exactness.** The two methods are not the same computation: one adds \`W\` numbers from scratch, the other adds and subtracts forever. With small integers they agree, asserted answer by answer. Replace one value with ${HUGE} and they stop agreeing — ${DRIFTED} of ${NWIN} answers differ, while scaling **every** value equally drifts on none, because the values then share an exponent and the arithmetic stays exact — because a double cannot hold the total and one value to the same precision, so **adding a value and later subtracting it does not return to where you started**, and nothing ever corrects the residue. The fixes are to use exact arithmetic (count in pence, not pounds) or to recompute periodically, which bounds the residue.`, '',
-    `And one overstatement to avoid: the subtraction needs the **departing value**, so the last \`W\` values must be retained. The time is O(1) and the space is **O(W)** — the total is one number and the window is still \`W\` values.`,
+    `**The exactness.** The two methods are not the same computation: one adds \`W\` numbers from scratch, the other adds and subtracts forever. With small integers they agree, asserted answer by answer. Replace one value with ${HUGE} and they stop agreeing — ${DRIFTED} of ${NWIN} answers differ — because a double cannot hold the total and one value to the same precision, so **adding a value and later subtracting it does not return to where you started**, and nothing ever corrects the residue. Scaling **every** value equally drifts on ${UNI_DRIFT === 0 ? 'none' : UNI_DRIFT}, because the values then share an exponent and the arithmetic stays exact. The fixes are to use exact arithmetic (count in pence, not pounds) or to recompute periodically, which bounds the residue.`, '',
+    `And one overstatement to avoid: the subtraction needs the **departing value**, so the last \`W\` values must be retained. Each arrival costs two operations whatever \`W\` is, but the memory is \`W\` values plus one total — ${W + 1} numbers here, ${(BIG_W + 1).toLocaleString('en-US')} at the stated W = 10⁵. The total is one number and the window is still \`W\` values.`,
   ],
   variations: [
     { name: 'the rolling maximum', surface: 'risk',
@@ -251,13 +253,13 @@ const r = buildInterviewSection({
 
     { name: 'the time-based window', surface: 'monitoring',
       statement: [`Average everything from **the last 60 seconds** rather than the last \`W\` values. Arrivals are irregular.`],
-      whyHard: `The count stops being fixed, so "exactly one leaves when one arrives" is false — zero or many may expire — and the divisor changes on every arrival, which means the count must be maintained alongside the total. The subtler part is that the answer changes **with no arrival at all**: values age out while the stream is quiet, so a correct implementation must be able to recompute on a timer rather than only on input. That is the same clock-versus-arrival distinction the batching problem turns on.`,
+      whyHard: `The count stops being fixed, so "exactly one leaves when one arrives" is false — zero or many may expire — and the divisor changes on every arrival, which means the count must be maintained alongside the total. The subtler part is that the answer changes **with no arrival at all**: values age out while the stream is quiet, so a correct implementation must be able to recompute on a timer rather than only on input. That is the chapter's event-time vs processing-time split in miniature: an arrival-driven answer is keyed to when data came in, a timer-driven one to the clock.`,
       maps: `\`onArrival\` looping the subtraction and maintaining a count, plus a timer-driven recompute — \`report\` dividing by the live count rather than by W.` },
 
     { name: 'the average that must survive a restart', surface: 'reliability',
       statement: [`The process is restarted. **The running average must continue**, not start again.`],
-      whyHard: `The total is one number and looks trivially checkpointable, and that is the trap: restoring the total without the last \`W\` values makes the next subtraction impossible, so the state that must be saved is the whole window rather than the accumulator. And the checkpoint must be consistent with the input position, or restoring an older total against a newer position double-counts. Recognising that the thing to persist is **larger than the thing being reported** is the content.`,
-      maps: `0x200 and the retained window both persisted, with the input position — the O(W) space from the traced frames becoming the checkpoint size.` },
+      whyHard: `The total is one number and looks trivially checkpointable, and that is the trap: restoring the total without the last \`W\` values makes the next subtraction impossible, so the state that must be saved is the whole window rather than the accumulator. And the checkpoint must be consistent with the input position, or the restart is silently wrong: a position ahead of the saved state (an older total against a newer position) skips input, and a position behind it double-counts. Recognising that the thing to persist is **larger than the thing being reported** is the content.`,
+      maps: `The retained window (0x100's last W values) persisted together with the input position, and 0x200 rebuilt from it on restart — W + 1 numbers to report one.` },
   ],
   program: {
     src: SRC, heap: HEAP, steps, rel: '../diagrams/anim/ch01-interview-memory',
@@ -265,7 +267,7 @@ const r = buildInterviewSection({
     intro: [
       `The reframe above is six paragraphs; this is both answers running and then the drift measured, with the two things a whiteboard cannot show — **what is allocated, and when**.`, '',
       `Measured on ${xStr()} with W = ${W}: recomputation costs **${RECOMPUTE_OPS} reads** and the running total costs **${ADDS + SUBS} operations** — ${ADDS} additions and ${SUBS} subtractions — returning the same ${NWIN} answers, asserted. ${WARMUP} answers are withheld during the warm-up. Then the same program with one value replaced by ${HUGE}: **${DRIFTED} of ${NWIN}** answers no longer match a recomputation, the worst by ${WORST_DRIFT} — while multiplying *every* value by ${HUGE} drifts on **none**, which is why it is the mixture and not the magnitude.`],
-    sub: `Locals live in the frame and vanish when it is popped; 0x200 is the single number the design is famous for, and 0x100 is the W values the subtraction still needs — which is why the space is O(W) and not O(1). The large value is a declared parameter used only to make the drift measurable on this machine, and the no-drift case is asserted alongside it so "it is the mixture, not the magnitude" cannot silently become false. Every figure is asserted — including that the running total agrees with recomputation exactly on the small values, that it is cheaper, that the warm-up is exactly W − 1 arrivals long, that something really does leave the window, that the mixed-magnitude version really does drift, that **not every** such answer drifts (so the small-value case is visibly the exact one), and that uniformly scaling every value drifts on **none**. Generated by \`node tools/gen_ch01_interview.js\` on \`tools/interviewkit.js\`.`,
+    sub: `Locals live in the frame and vanish when it is popped; 0x200 is the single number the design is famous for, and 0x100 is the W values the subtraction still needs — which is why the memory is W values plus the total, not one number. The large value is a declared parameter used only to make the drift measurable on this machine, and the no-drift case is asserted alongside it so "it is the mixture, not the magnitude" cannot silently become false. Every figure is asserted — including that the running total agrees with recomputation exactly on the small values, that it is cheaper, that the warm-up is exactly W − 1 arrivals long, that something really does leave the window, that the mixed-magnitude version really does drift, that **not every** such answer drifts (so the small-value case is visibly the exact one), and that uniformly scaling every value drifts on **none**. Generated by \`node tools/gen_ch01_interview.js\` on \`tools/interviewkit.js\`.`,
   },
 });
 console.log(`OK  ${r.steps} steps, canvas ${r.W}x${r.H} (${r.total}s loop) -> diagrams/anim/ch01-interview-memory`);

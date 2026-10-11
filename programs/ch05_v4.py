@@ -241,8 +241,8 @@ def show_examples():
     The two cost columns price the SAME outcome for BOTH messages, which is the whole point of
     the variation: a duplicate is cheap for a parcel notice and expensive for a charge notice,
     so the identical row is acceptable under one message and not the other.  Rows that cost
-    nothing either way -- a clean run, or a crash under a far-end key -- are the ties, and
-    they are the only rows where the choice does not have to be made.
+    nothing either way -- a clean run, or an effect-first crash under a far-end key -- are the
+    ties, and they are the only rows where the choice does not have to be made.
     """
     parcel, charged = PROFILES["your parcel has arrived"], PROFILES["you have been charged"]
 
@@ -353,7 +353,8 @@ def main():
     print(f"\n  give the push service an idempotency key and effect-first becomes exact at all {N}")
     print(f"  crash points, and at every item at once.  The missing feature is the problem; no")
     print(f"  arrangement of the worker's two writes substitutes for it.")
-    # and with the key, the ORDER stops mattering at all -- which is the proof it was the fix
+    # with the key, effect-first becomes exact -- but the ORDER still matters: the key cannot
+    # recover an item position-first skipped
     assert run(ITEMS, "effect_then_position", {C}, far_end_key=True) == want
     assert tally(ITEMS, run(ITEMS, "position_then_effect", {C}, far_end_key=True)) == ([], [C])
     print(f"  note it only rescues the at-least-once side: a key cannot un-skip an item that was")
@@ -381,9 +382,12 @@ def main():
             if expected_cost(ITEMS, "effect_then_position", {"duplicate": d, "loss": 20})
             > expected_cost(ITEMS, "position_then_effect", {"duplicate": d, "loss": 20})]
     assert flip and min(flip) == 21, min(flip) if flip else None
-    print(f"  holding the cost of a loss at 20, at-least-once stops winning the moment a")
-    print(f"  duplicate costs {min(flip)} -- the crossover is exactly where the two costs cross,")
-    print(f"  because each design fails on exactly one item per crash.")
+    tie = min(flip) - 1
+    assert (expected_cost(ITEMS, "effect_then_position", {"duplicate": tie, "loss": 20})
+            == expected_cost(ITEMS, "position_then_effect", {"duplicate": tie, "loss": 20})), tie
+    print(f"  holding the cost of a loss at 20, the two designs tie when a duplicate costs {tie}")
+    print(f"  and at-least-once starts losing at {min(flip)} -- the crossover is exactly where the")
+    print(f"  two costs cross, because each design fails on exactly one item per crash.")
 
     # ---- boundaries
     assert run([], "effect_then_position", {0}) == []

@@ -30,7 +30,7 @@ The one row with no batch equivalent is `GROUP BY key, TUMBLE(et, INTERVAL '120'
 
 **And which clock is a one-token choice with different answers.** `TUMBLE(et, …)` and `TUMBLE(pt, …)` differ by three characters, and over this dataset they disagree on **3 of the 4 windows** — window [12:00, 12:02) reads 19 by event time and 15 by processing time. Both are valid SQL producing valid results, and no engine can flag the wrong one.
 
-**So some results append and others update.** `SELECT * FROM clicks WHERE v > 5` is **append-only**: 4 rows, each a fact that can never be revised, because a row either matched or it did not. The windowed aggregate is **updating**: 2 of its 4 window rows gets revised — window [12:00, 12:02) emits 15 and later becomes 19.
+**So some results append and others update.** `SELECT * FROM clicks WHERE v > 5` is **append-only**: 4 rows, each a fact that can never be revised, because a row either matched or it did not. The windowed total `SELECT SUM(v) FROM clicks GROUP BY TUMBLE(et, INTERVAL '120' SECOND)` is **updating**: 1 of its 4 window rows gets revised — window [12:00, 12:02) emits 15 and later becomes 19.
 
 That distinction is readable from the query text, and it tells you what the sink must be capable of before any code exists.
 
@@ -81,7 +81,7 @@ This is ch01's two-clock problem arriving as a one-token edit. `TUMBLE(et, ...)`
 
 <img src="../diagrams/anim/ch08-sql/frames/step-04.svg" alt="Step 4: so some results append and others UPDATE" width="1040">
 
-The update mode is readable from the query, which makes it a design input rather than a surprise. A `WHERE` produces 4 facts that never change; a windowed `GROUP BY` produces 4 rows of which 2 get revised — window [12:00, 12:02) goes 15 then 19. An INSERT-only sink is compatible with the first and not the second.
+The update mode is readable from the query, which makes it a design input rather than a surprise. A `WHERE` produces 4 facts that never change; a windowed `GROUP BY` produces 4 rows of which 1 gets revised — window [12:00, 12:02) goes 15 then 19. An INSERT-only sink is compatible with the first and not the second.
 
 </details>
 
@@ -146,7 +146,7 @@ Read the two heap rows against each other at bucket 0: 19 and 15. Both Results c
 
 1. **TUMBLE — fixed windows** — **TUMBLE(size)** is a fixed (tumbling) window: equal, non-overlapping spans. It is the SQL spelling of the fixed window from the Beam model.
 
-2. **HOP — sliding windows** — **HOP(size, slide)** is a sliding window: fixed length, advancing by slide. It is the SQL spelling of the sliding window.
+2. **HOP — sliding windows** — **HOP(slide, size)** is a sliding window: fixed length (size), advancing by slide. It is the SQL spelling of the sliding window.
 
 3. **SESSION — session windows** — **SESSION(gap)** is a session window: a burst of activity closed by a gap of inactivity. The query engine merges sessions as data arrives.
 
@@ -412,19 +412,19 @@ Compare the heap rows. Pairing on `et` and on `pt` gives different pair sets fro
 Concepts this chapter mentions but does not fully unpack are linked below — each pointer names the chapter where the concept is covered in depth and gives a concrete example that ties the two chapters together.
 
 - **[Chapter 2: The What, Where, When, and How of Data Processing → What and Where — transformations and windowing](ch02-the-what-where-when-and-how-of-data-processing.md#what-and-where--transformations-and-windowing)** — streaming SQL is a declarative spelling of the what/where/when/how model — SELECT/WHERE/GROUP BY (what), TUMBLE/HOP/SESSION (where), watermark + trigger (when), retraction (how).
-  - _Example:_ ch08's GROUP BY TUMBLE is ch02's "what + where"; ch08's retraction of (C1, 3) before (C1, 4) is ch02's accumulating-and-retracting mode.
+  - _Example:_ ch08's GROUP BY TUMBLE is ch02's "what + where"; ch08's retraction of 15 before 19 for [12:00, 12:02) is ch02's accumulating-and-retracting mode.
 - **[Chapter 3: Watermarks → Propagation and correctness](ch03-watermarks.md#propagation-and-correctness)** — the watermark that drives SQL emission is the same completeness signal ch03 defines — and it propagates as the minimum across a query's inputs.
-  - _Example:_ ch08's TUMBLE window emits when the watermark passes 12:05:00; ch03 shows that watermark = max_seen 12:08:30 − skew 120 s = 12:06:30, or min(12:06:00, 12:04:30) = 12:04:30 for a join.
+  - _Example:_ ch08's TUMBLE window [12:00, 12:02) emits when the watermark passes 12:02:00, which happens after id 4; ch03 shows that watermark = max_seen 12:04:05 − 60 s = 12:03:05, and for a join min(12:08:00, 12:03:20) = 12:03:20.
 - **[Chapter 4: Advanced Windowing → Window shapes — fixed, sliding, session](ch04-advanced-windowing.md#window-shapes--fixed-sliding-session)** — TUMBLE/HOP/SESSION are the SQL spellings of ch04's fixed/sliding/session windows, including session merging.
-  - _Example:_ ch08's HOP(10 min, 2 min) putting one click into 3 rows is ch04's sliding window [12:00,12:10) + [12:02,12:12) + [12:04,12:14); ch08's SESSION is ch04's gap-based merge.
+  - _Example:_ ch08's HOP(60 s, 120 s) putting id 4 (et 12:04:05) into 2 rows is ch04's sliding window [12:03, 12:05) + [12:04, 12:06); ch08's SESSION is ch04's gap-based merge.
 - **[Chapter 6: Streams and Tables → The duality](ch06-streams-and-tables.md#the-duality)** — append-only vs updating results is the stream/table duality in SQL — an updating query emits a changelog, an append-only query emits a stream of facts.
-  - _Example:_ ch08's "updating result retracts (C1, 3) then adds (C1, 4)" is ch06's changelog (old, new) pair; ch08's append-only mode is ch06's plain stream.
+  - _Example:_ ch08's "updating result retracts 15 then adds 19" for [12:00, 12:02) is ch06's changelog record carrying old → new: ch06's last update, 16 → 24, sums to 16 − 16 + 24 = 24 only because the old value travels with it; ch08's append-only mode is ch06's plain stream.
 - **[Chapter 9: Streaming Joins → Windowed and temporal joins](ch09-streaming-joins.md#windowed-and-temporal-joins)** — SQL joins are where windowing, watermarks, and the stream/table duality meet — ch09 covers windowed (interval) and temporal joins in depth.
-  - _Example:_ ch08's "match clicks and impressions within 5 min" is ch09's windowed join; ch08's "join emits when both watermarks pass" is ch09's hold-until-both-sides-pass rule.
+  - _Example:_ ch08's Q2 interval join, i.et within 60 s of c.et, is ch09's windowed join with its 60 s bound and 5 true matches; ch08's "join emits when both watermarks pass", min(12:08:00, 12:03:20) = 12:03:20, is why ch09's click 4 (bound 12:05:05) never emits: 2 of its 5 clicks wait forever, holding 2 of the 5 matches.
 
 ## System Design Interview
 
-> **The question:** Design a continuous SQL query that keeps a campaign click count current. Premise: the query buckets clicks into a TUMBLE window and updates the result only when the watermark closes the window, so the count stays correct as late clicks arrive.
+> **The question:** Design a continuous SQL query that keeps a click total current. Premise: the query buckets clicks into a TUMBLE window and updates the result only when the watermark closes the window, so the count stays correct as late clicks arrive.
 
 **The pipeline:** streams (clicks, impressions) -> SQL engine (continuous query) -> watermark + window -> updating result -> sink
 
@@ -434,31 +434,31 @@ Concepts this chapter mentions but does not fully unpack are linked below — ea
 
 _Role: streams — feed the SQL engine with event-time data_
 
-- a click {campaign: "C1", event_time: "12:03:00"} arrives
-- an impression {campaign: "C1", event_time: "12:02:00"} arrives
+- id 4 {key: "a", et: "12:04:05", v: 6} arrives at 12:04:06
+- id 7 {key: "b", et: "12:00:50", v: 4} arrives at 12:04:40, after its window has emitted
 - both carry event time for the query's time attribute
 
 ### SQL engine (continuous query)
 
 _Role: SQL engine — runs the query forever_
 
-- the query groups by TUMBLE(event_time, 5 min) and campaign
+- the query groups by TUMBLE(et, 120 s) — one total per window
 - the engine folds each row into the right window
-- updating results emit retractions for changed keys
+- updating results emit retractions for changed windows
 
 ### watermark + window
 
 _Role: watermark + window — decides when results emit_
 
-- the watermark at 12:06:30 closes the [12:00, 12:05) window
-- a HOP window would emit the same event into multiple spans
-- a join waits for both sides' watermarks
+- the watermark reaches 12:03:05 after id 4 (et 12:04:05 − 60 s) and closes [12:00, 12:02), which emits 15
+- a HOP(60 s, 120 s) window would put id 4 into 2 rows, [12:03, 12:05) + [12:04, 12:06)
+- a join waits for both sides' watermarks: min(12:08:00, 12:03:20) = 12:03:20
 
 ### sink
 
 _Role: sink — applies the updating result_
 
-- the sink receives (C1, 3) retracted then (C1, 4) added
+- the sink receives 15 for [12:00, 12:02), then 15 retracted and 19 added when id 7 arrives at 12:04:40
 - append-only sinks are simpler but wrong for updating results
 - an upsert sink applies retractions correctly
 
@@ -467,13 +467,13 @@ _Role: sink — applies the updating result_
 
 #### Why the sink requirement is readable from the query, and the timing is not
 
-**The question.** A continuous SQL query that keeps a campaign click count current: it buckets clicks into a TUMBLE window and updates the result when the watermark closes the window, so the count stays correct as late clicks arrive.
+**The question.** A continuous SQL query that keeps a click total current: it buckets clicks into a TUMBLE window and updates the result when the watermark closes the window, so the count stays correct as late clicks arrive.
 
 **The pipeline:** streams → SQL engine (continuous query) → watermark + window → updating result → sink.
 
-**The query:** `SELECT key, SUM(v) FROM clicks GROUP BY key, TUMBLE(et, INTERVAL '120' SECOND)`
+**The query:** `SELECT SUM(v) FROM clicks GROUP BY TUMBLE(et, INTERVAL '120' SECOND)` — one total per window, so each window is one result row
 
-**One thing is decidable from that text alone:** a windowed `GROUP BY` produces an **updating** stream, so the sink must UPSERT or accept retractions. 2 of the 4 window rows is revised here. Had the query been a `WHERE`, an append-only sink would have been fine — and knowing which before building anything is the practical value of the distinction.
+**One thing is decidable from that text alone:** a windowed `GROUP BY` produces an **updating** stream, so the sink must UPSERT or accept retractions. 1 of the 4 window rows is revised here. Had the query been a `WHERE`, an append-only sink would have been fine — and knowing which before building anything is the practical value of the distinction.
 
 **And one thing is not.** Follow window [12:00, 12:02)\: it finally holds 19 from ids 0, 1, 2, 7. The watermark passes 12:02 after event 4, at 12:04:06, and the engine emits **15**. Then id 7 arrives at 12:04:40 and the row is updated to **19**.
 
@@ -483,7 +483,7 @@ None of 15, 19 or 12:04:06 appears anywhere in the SQL. All three come from the 
 
 #### When this design is right, and the four things it does not settle
 
-**It is right when the sink can UPSERT by (key, window).** That is the one hard requirement, and it is known from the query shape rather than discovered in testing.
+**It is right when the sink can UPSERT by window.** That is the one hard requirement, and it is known from the query shape rather than discovered in testing.
 
 **Use the SQL form rather than a hand-written pipeline for this kind of query.** Four window shapes, two clocks and the whole trigger/accumulation apparatus are available in a statement you can review in one screen — which is a real advantage, as long as the review reads the window and the clock first.
 
@@ -507,7 +507,7 @@ The animation loops through all 4 steps. Expand any step to study it on its own.
 
 <img src="../diagrams/anim/ch08-system/frames/step-01.svg" alt="Step 1: the pipeline, and the one line of SQL it runs" width="1040">
 
-The useful property of a SQL-first design is that the sink requirement falls out of the query text. A windowed `GROUP BY` is an updating stream — 2 of 4 window rows is revised here — so the sink must UPSERT. Had the query been a `WHERE`, an append-only sink would have been fine, and that is decidable before anything is built.
+The useful property of a SQL-first design is that the sink requirement falls out of the query text. A windowed `GROUP BY` is an updating stream — 1 of 4 window rows is revised here — so the sink must UPSERT. Had the query been a `WHERE`, an append-only sink would have been fine, and that is decidable before anything is built.
 
 </details>
 <details>
@@ -607,10 +607,11 @@ A team wants analysts to write ad-click aggregations in SQL over a live stream, 
 - Watermark — drives emission
 
 ```java
-SELECT window_start, campaign, COUNT(*)
+SELECT window_start, SUM(v)
 FROM clicks
-GROUP BY TUMBLE(event_time, INTERVAL '5' MINUTE), campaign
--- emits when the watermark passes each 5-min window end
+GROUP BY TUMBLE(et, INTERVAL '120' SECOND)
+-- [12:00, 12:02) emits 15 once the watermark reaches 12:03:05,
+-- then 19 when late id 7 arrives at 12:04:40
 ```
 
 _This is exactly the streaming-SQL window material in this chapter._
@@ -635,10 +636,9 @@ A SQL query joins clicks with impressions, but it emits matches before a late im
 ```java
 SELECT ...
 FROM clicks c JOIN impressions i
-  ON c.campaign = i.campaign
-  AND i.event_time BETWEEN c.event_time - INTERVAL '5' MINUTE
-                      AND c.event_time + INTERVAL '5' MINUTE
--- emits when both watermarks pass the window
+  ON i.et BETWEEN c.et - INTERVAL '60' SECOND
+              AND c.et + INTERVAL '60' SECOND
+-- emits when min(12:08:00, 12:03:20) = 12:03:20 passes the bound
 ```
 
 _This is exactly the windowed-join material in this chapter._
@@ -657,13 +657,6 @@ _From the 28 problems:_ 21-ad-click-aggregation
 ### The Solution
 
 A continuous query emits updated results as data arrives, rather than reading a finite table once.
-
-```java
-SELECT window_start, campaign, COUNT(*)
-FROM clicks
-GROUP BY TUMBLE(event_time, INTERVAL '5' MINUTE), campaign
--- emits when the watermark passes each 5-min window end
-```
 
 
 ### Key Facts

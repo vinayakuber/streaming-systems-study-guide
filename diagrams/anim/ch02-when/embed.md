@@ -10,7 +10,7 @@ A window is useless until something decides to emit it. That decision is a **tri
 
 15, not 19: id 7 has not arrived. **The claim of completeness and the error are the same event** — the watermark was the pipeline's best estimate and it was wrong.
 
-**So a real pipeline wants three triggers on one window,** not a choice between them: **early** (speculative, before the watermark — 8, 15, 15), **on-time** (at the watermark — 15), and **late** (once per straggler — 19 at 12:04:40). They serve three different consumers and all three fire.
+**So a real pipeline wants three triggers on one window,** not a choice between them: **early** (speculative, before the watermark — 8, 15, 15, 15 at 12:01:00, 12:02:00, 12:03:00, 12:04:00), **on-time** (at the watermark — 15), and **late** (once per straggler — 19 at 12:04:40). They serve three different consumers and all three fire.
 
 **Allowed lateness** bounds the waiting: it is how long window state is kept after the watermark passes, which is garbage collection for that state. And it has an exact threshold here. When id 7 arrives, the watermark stands at 12:03:20 (200s); state survives while the watermark is below 12:02 + allowed, so **allowed lateness must be at least 81s** for the correction to land. At 80s the state is already gone and 15 stands forever.
 
@@ -26,7 +26,7 @@ Note that 81s is *not* id 7's 230s of skew, which is the number a reader would g
 
 **Set allowed lateness from your skew tail, then price the memory.** It keeps window state alive, so the bill is (open windows × state per window). With 4 windows that is nothing; with a million open session windows it is the dominant cost of the pipeline.
 
-**What this does not settle:** "when" produced 5 separate published values for ONE window, and nothing here says what a consumer should do with the second one. If a sink stored 15 and then receives 19, does it add or replace? That question is "how", and until it is answered the pipeline's correctness is undefined — not merely unoptimised.
+**What this does not settle:** "when" produced 6 separate published values for ONE window, and nothing here says what a consumer should do with the second one. If a sink stored 15 and then receives 19, does it add or replace? That question is "how", and until it is answered the pipeline's correctness is undefined — not merely unoptimised.
 
 #### Visual walkthrough — a clock trigger, a watermark trigger, and one threshold
 

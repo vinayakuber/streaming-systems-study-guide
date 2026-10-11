@@ -52,11 +52,13 @@
   answers cannot drift from what the program returns.
 
 The fold needs addition where the chapter's needed assignment, which still works and is
-barely a change.  Compaction BREAKS: you cannot keep "the last +5" and drop the earlier
-ones, because every entry contributes.  The repair is to turn the log into absolute values
+barely a change.  The chapter's compaction BREAKS: you cannot keep "the last +5" and drop
+the earlier ones, because every entry contributes.  The repair is to turn the log into absolute values
 first -- fold, then emit -- which is the chapter's two functions composed, and it shows that
 the log's FORMAT was the first thing stated for a reason.  A log of states can be compacted
-and replayed; a log of deltas can be neither, and both failures are the same fact: an
+by keeping the last entry and replayed; a log of deltas cannot be compacted by keeping the
+last entry, and cannot be replayed twice -- it can only be compacted by summing per key, and
+that result is safe to apply once, to an empty state.  Both failures are the same fact: an
 assignment is idempotent and an addition is not.
 
 WORKED EXAMPLES: the EXAMPLES table below holds 12 input/output pairs -- an empty log and a
@@ -367,8 +369,8 @@ def main():
     # the scale that makes compaction worth doing at all
     BIG_KEYS, BIG_ENTRIES = 50, 20_000
     # increments are positive here, as a counter's are: the first attempt used increments
-    # cycling through -3..3, and at 400 entries per counter they summed to exactly zero, so
-    # compact_last came out EXACT at scale and the comparison said nothing.  An accidental
+    # cycling through -3..3, and at 400 entries per counter the first 399 cancelled exactly, so
+    # the last increment equalled the total and compact_last came out EXACT at scale and the comparison said nothing.  An accidental
     # cancellation is the one case where the wrong compaction looks right, and it is easier
     # to build by accident than it sounds.
     big = [(f"m{i % BIG_KEYS}", 1 + (i % 3)) for i in range(BIG_ENTRIES)]

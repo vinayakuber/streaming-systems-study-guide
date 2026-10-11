@@ -164,7 +164,7 @@ The offset is not bookkeeping — a snapshot that does not say *where* it was ta
 
 And the gap **widens**, because full scales with total state while incremental scales with how fast it changes. On a large, mostly-idle state that is the difference between uploading 10 GB and 10 KB.
 
-**The frequency is a trade with no free point.** Checkpoint every 1 event: 9 uploads, worst-case replay 0. Every 3: 8 uploads, replay 2. Once: 7 upload, replay 8. Both ends are correct.
+**The frequency is a trade with no free point.** Checkpoint every 1 event: 9 uploads, worst-case replay 0. Every 3: 8 uploads, replay 2. Once: 7 uploads, replay 8. Both ends are correct.
 
 #### When to checkpoint how often, and what the store choice actually decides
 
@@ -189,7 +189,7 @@ The animation loops through all 4 steps. Expand any step to study it on its own.
 
 <img src="../diagrams/anim/ch07-checkpoints/frames/step-01.svg" alt="Step 1: a checkpoint is a snapshot plus a stream position" width="1040">
 
-A checkpoint is a pair, and the pairing is the point. The state says what the aggregation holds; the offset says which prefix of the stream it holds. Commit them non-atomically and ch05's scenario follows exactly: state saved but offset stale re-applies 4 events worth 22.
+A checkpoint is a pair, and the pairing is the point. The state says what the aggregation holds; the offset says which prefix of the stream it holds. Commit them non-atomically and ch05's double count follows: state saved but offset stale (reset to -1, nothing folded) re-applies the 5 events worth 23 that the state already holds.
 
 </details>
 <details>
@@ -213,7 +213,7 @@ The numbers make the asymmetry visible: full uploads grow every checkpoint (2, 5
 
 <img src="../diagrams/anim/ch07-checkpoints/frames/step-04.svg" alt="Step 4: and the frequency is a trade with no free point" width="1040">
 
-Four frequencies, and the trade is monotone in both directions — no setting is free. Checkpoint every event and recovery replays 0 but you pay 9 uploads; checkpoint once and you pay 7 upload and replay 8 events. The number to start from is the recovery time you can tolerate, not the I/O you would prefer.
+Four frequencies, and the trade is monotone in both directions — no setting is free. Checkpoint every event and recovery replays 0 but you pay 9 uploads; checkpoint once and you pay 7 uploads and replay 8 events. The number to start from is the recovery time you can tolerate, not the I/O you would prefer.
 
 </details>
 
@@ -227,7 +227,7 @@ Four frequencies, and the trade is monotone in both directions — no setting is
 
 **What is being answered.** Why a checkpoint is a pair, and what the two checkpointing modes actually upload.
 
-`take(upto)` returns a `Checkpoint(ent, upto)` — the state and the offset in one value. `restore(cp, useOffset)` then shows why they must match: the replay loop starts at `useOffset + 1`, so that one expression is the whole correctness of the recovery. Called with 4 it gives 45; called with 0 it gives 68.
+`take(upto)` returns a `Checkpoint(ent, upto)` — the state and the offset in one value. `restore(cp, useOffset)` then shows why they must match: the replay loop starts at `useOffset + 1`, so that one expression is the whole correctness of the recovery. Called with 4 it gives 45; called with -1 it gives 68.
 
 `uploadVolume` prices the modes by their arguments: `countEntries(0, c)` grows with every checkpoint, `countEntries(prev + 1, c)` depends only on the gap. 14 against 8.
 
@@ -256,7 +256,7 @@ The loop starts at `useOffset + 1` = 5, so it adds the 4 events after the checkp
 
 <img src="../diagrams/anim/ch07-checkpoints-memory/frames/step-03.svg" alt="Step 3: and with a stale offset the prefix is counted twice" width="980">
 
-`restore(cp, 0)` replays from index 1, re-adding events already in `cp.entries`: 68 instead of 45, over by exactly the 23 the checkpoint had already accumulated. Same state, same stream, one wrong argument.
+`restore(cp, -1)` replays from index 0, all 9 events, re-adding events already in `cp.entries`: 68 instead of 45, over by exactly the 23 the checkpoint had already accumulated. Same state, same stream, one wrong argument.
 
 </details>
 <details>
@@ -297,7 +297,7 @@ That buffer is the alignment cost, and with badly skewed sources it is the laten
 **The snapshot is tied to a position, or it is useless.** Three recoveries from the same crash:
 
 - state **+ matching offset 4** → replay 4 events, total **45** — correct
-- state, **offset reset to 0** → replay all 9, total **68** — double counted
+- state, **offset reset to -1** (nothing folded) → replay all 9, total **68** — double counted
 - **offset 4, state lost** → replay 4, total **22** — the prefix is missing
 
 The two failures are wrong in **opposite directions**, which is the clearest argument for atomicity: a half-committed checkpoint is not a slightly-stale checkpoint, it is a wrong one.
@@ -404,7 +404,7 @@ Read the two heap rows together: 68 DOUBLE COUNTED and 22 LOST THE PREFIX, again
 
 <img src="../diagrams/anim/ch07-recovery-memory/frames/step-04.svg" alt="Step 4: so the checkpoint interval IS the at-least-once error bound" width="980">
 
-`errorBound` sums the v of the events since the last checkpoint and keeps the largest — 12 at k = 3. Note what it takes as its only argument: `k`. The interval chosen in the previous concept for I/O and recovery time also sets how wrong an at-least-once answer can be.
+`errorBound` sums the v of the events since the last checkpoint and keeps the largest — 13 at k = 3. Note what it takes as its only argument: `k`. The interval chosen in the previous concept for I/O and recovery time also sets how wrong an at-least-once answer can be.
 
 </details>
 
@@ -445,8 +445,8 @@ Two honest ways out. **Close the aggregate explicitly** — if the total is per 
 #### The same problem, asked 3 other ways
 
 Each of these is the program below with different nouns. The reason to read them is not the
-answer — it is the *recognition*. 4 surfaces (turnstiles, analytics, commerce, risk), one shape, and in every
-case the appealing first answer is to materialise a sequence you cannot afford.
+answer — it is the *recognition*. 4 surfaces (counters, analytics, commerce, risk), one shape, and in every
+case the appealing first answer is to bound the state with an expiry — drop whatever has gone quiet for longer than some allowance — and keep calling the answer exact, when a key that is dropped and then seen again is indistinguishable from one never seen, so the answer goes wrong with no error raised.
 
 <details>
 <summary><b>Variation 2</b> — the unique-visitor count <i>(looks like analytics)</i></summary>
@@ -505,7 +505,8 @@ This is **the unique-visitor count** solved on its own: a complete file, every h
                                       an expiry OVERSTATES a distinct count
     the nine views, ttl = 0   -> 9    every view its own visitor, which is the view count
     the nine views, ttl = a whole day -> 2   right again, and it saved nothing at all: at
-                                      this size the expiry frees 0 slots in every row above
+                                      this size only ttl = 0 frees any slots (2), and it
+                                      overstates the count to 9 to do it
   And at the sketch's own boundary, and at scale:
     255 distinct visitors   -> 255     below K = 256, so the sketch is exact
     256 distinct visitors   -> 257     at K, the estimator takes over and is 1 high
@@ -683,7 +684,7 @@ BIGGER_STREAM = stream_of(12_000, 1)
 EXAMPLES = [
     ("the chapter's 9 views, 2 visitors",    VIEWS,         None,     2,  None,     2, None),
     ("ttl = 295, the longest silence",       VIEWS,          295,     2,     2,     2,    0),
-    ("ttl = 294, one hour tighter",          VIEWS,          294,     2,     3,     2,    0),
+    ("ttl = 294, one second tighter",        VIEWS,          294,     2,     3,     2,    0),
     ("ttl = a whole day: saves nothing",     VIEWS,          DAY,     2,     2,     2,    0),
     ("ttl = 0: saves 2, overstates to 9",    VIEWS,            0,     2,     9,     2,    2),
     ("an empty day -> 0, not an error",      EMPTY_DAY,     None,     0,  None,     0, None),
@@ -808,7 +809,7 @@ def main():
     # rather than inside a threshold picked to make them pass.
     se = K ** -0.5
     assert max(r[4] for r in big) < 3 * se, (max(r[4] for r in big), se)
-    print(f"    the exact state grows {rows[-1][1] // rows[1][1]}x across these rows and the sketch state does not")
+    print(f"    from the {big[0][0]:,} row to the {rows[-1][0]:,} row the exact state grows {rows[-1][1] // big[0][1]}x and the sketch state does not")
     print(f"    grow at all; the worst error over the rows at or above k is "
           f"{max(r[4] for r in big):.1%}, against the")
     print(f"    sketch's own standard error of 1/sqrt({K}) = {se:.2%}.")
@@ -894,7 +895,7 @@ Running it prints:
 what it exercises                      views    ttl  distinct  estimate  set slots  sketch  expiry  saved
 the chapter's 9 views, 2 visitors          9      -         2         2          2       2       -      -
 ttl = 295, the longest silence             9    295         2         2          2       2       2      0
-ttl = 294, one hour tighter                9    294         2         2          2       2       3      0
+ttl = 294, one second tighter              9    294         2         2          2       2       3      0
 ttl = a whole day: saves nothing           9  86400         2         2          2       2       2      0
 ttl = 0: saves 2, overstates to 9          9      0         2         2          2       2       9      2
 an empty day -> 0, not an error            0      -         0         0          0       0       -      -
@@ -937,7 +938,7 @@ VIEWS = a@1  a@3  b@50  b@90  a@130  b@220  a@245  b@260  a@540    (9 views)
         1,000        1,000       983           256   1.7%
         4,000        4,000     3,721           256   7.0%
        20,000       20,000    20,004           256   0.0%
-    the exact state grows 78x across these rows and the sketch state does not
+    from the 256 row to the 20,000 row the exact state grows 78x and the sketch state does not
     grow at all; the worst error over the rows at or above k is 7.0%, against the
     sketch's own standard error of 1/sqrt(256) = 6.25%.
 
@@ -1009,7 +1010,7 @@ This is **the abandoned shopping cart** solved on its own: a complete file, ever
   7 at hour 90; a adds a 2 at hour 130; b adds a 9 at hour 220; a adds a 6 at hour 245; b
   adds a 1 at hour 260; and a adds an 8 at hour 540.  The true carts are a = 5+3+2+6+8 = 24
   and b = 4+7+9+1 = 21, so 45 of value in all.  Shopper 'a' goes quiet from hour 245 to hour
-  540 -- 295 hours, which is over ten days -- and then comes back expecting their cart.
+  540 -- 295 hours, which is just over twelve days -- and then comes back expecting their cart.
 
   GIVEN AN ALLOWANCE AND AN HOUR TO LOOK AT, HOW MUCH CART VALUE SURVIVES, AND HOW MANY
   CARTS HAS MEMORY BEEN SPARED?
@@ -1067,7 +1068,7 @@ import random
 
 # The chapter's nine seed events, read as cart additions: (shopper, item_price, hour).  The
 # prices are the chapter's values, so the true cart totals are its 24 and 21.  Shopper 'a' is
-# silent from hour 245 to hour 540 -- the chapter's longest gap, 295 hours, which is ten days
+# silent from hour 245 to hour 540 -- the chapter's longest gap, 295 hours, which is 12 days 7 hours
 # and is exactly the shopper the product requirement is about.
 ADDITIONS = [("a", 5, 1), ("a", 3, 3), ("b", 4, 50), ("b", 7, 90), ("a", 2, 130),
              ("b", 9, 220), ("a", 6, 245), ("b", 1, 260), ("a", 8, 540)]
@@ -1131,8 +1132,9 @@ def show_examples():
     Each row is checked against `truth_of` -- the brute-force cart, which cannot be wrong --
     and against the store, which must reproduce it exactly on every row.  The two cost
     columns are printed per row so the reader can see where the bound is worth anything: at
-    the chapter's scale the allowance saves 0 carts and loses up to 37 of the 45 units of cart
-    value, and the saving only turns positive at the asymptotic scale on the last two rows.
+    the chapter's scale the allowance saves at most 2 carts, and only by dropping carts whose
+    value is then lost -- up to 37 of the 45 units of cart value; the saving only becomes large
+    (1,899 and 2,000) at the asymptotic scale on the last two rows.
     """
     print(f"{'what it exercises':37s} {'events':>7} {'ttl':>6} {'hour':>6} {'true':>6} "
           f"{'kept':>6} {'held':>6} {'+ttl':>6} {'saved':>6} {'reloads':>8}")
@@ -1364,7 +1366,7 @@ def main():
     print(f"  at the chapter's 294-hour allowance the saving is 0 for every hour up to the last")
     print(f"  addition -- the chapter's own figure -- so the correctness cost arrives before any")
     print(f"  memory benefit.  At the week-long allowance it is 2, reached at hour {h}, and the hour")
-    print(f"  is the whole story: shopper 'a' expired at {245 + WEEK} and 'b' at {260 + WEEK}, so the two carts the")
+    print(f"  is the whole story: shopper 'a' expired at {245 + WEEK + 1} and 'b' at {260 + WEEK + 1}, so the two carts the")
     print(f"  bound has stopped holding are precisely the two the shoppers no longer have.  A")
     print(f"  saving visible only after the data is gone is the damage, measured from the other")
     print(f"  side.  The real case for the bound is asymptotic, and the honest thing is to go")
@@ -1501,7 +1503,7 @@ ADDITIONS = a@1:5  a@3:3  b@50:4  b@90:7  a@130:2  b@220:9  a@245:6  b@260:1  a@
   at the chapter's 294-hour allowance the saving is 0 for every hour up to the last
   addition -- the chapter's own figure -- so the correctness cost arrives before any
   memory benefit.  At the week-long allowance it is 2, reached at hour 429, and the hour
-  is the whole story: shopper 'a' expired at 413 and 'b' at 428, so the two carts the
+  is the whole story: shopper 'a' expired at 414 and 'b' at 429, so the two carts the
   bound has stopped holding are precisely the two the shoppers no longer have.  A
   saving visible only after the data is gone is the damage, measured from the other
   side.  The real case for the bound is asymptotic, and the honest thing is to go
@@ -1582,7 +1584,8 @@ This is **the fraud score over a lifetime** solved on its own: a complete file, 
     ttl = 294, cache 1      -> (29, 1)   one day tighter, the other side of that edge: 'a'
                                          restarts and 16 points of history vanish
     ttl = 100, cache 2      -> (8, 4)    four restarts, and 37 of the 45 points gone
-    ttl = 0, cache 0        -> (8, 7)    the last signal per account only
+    ttl = 0, cache 0        -> (8, 7)    the last signal only: 'b''s last point is swept
+                                         when 'a''s day-540 signal arrives
     an EMPTY stream         -> (0, 0)    no signals, so no score.  0, not an error
     a single signal         -> (7, 0)    the smallest real stream
     cache of 0 slots        -> (45, 0)   write-through: 9 store reads instead of 2, and the
@@ -1599,7 +1602,8 @@ This is **the fraud score over a lifetime** solved on its own: a complete file, 
   And on 2,000 accounts seen once plus one that never stops:
     ttl = 100, cache 64     -> (301, 0)      1,899 accounts out of memory and 1,899 histories
                                              thrown away; at the nine-signal size above, the
-                                             same expiry saves 0 accounts
+                                             same expiry saves 1 account ('b', whose
+                                             score is then simply gone)
     ttl = 0, cache 0        -> (1, 199)      everything saved, everything lost
 
   Every line above is a row in the EXAMPLES table below, and every row is asserted three
@@ -1680,9 +1684,9 @@ def show_examples():
     `true_scores` is the requirement written out, so it is the reference that cannot be wrong;
     every row is checked against it, against the store, and against the cache at that row's
     capacity.  The cost columns are printed per row so the reader can see what each answer
-    buys: `saved` is the scores the expiry stops holding -- 0 at the chapter's scale, where
-    the expiry has already cost 16 of account 'a''s 24 points, and 1,899 only on the last two
-    rows -- against the `reads` and `writes` the cache pays to be right at every one of them.
+    buys: `saved` is the scores the expiry stops holding -- at most 1 at the chapter's scale, where
+    the expiry has already cost 16 of account 'a''s 24 points, and 1,899 and 2,000 on the last
+    two rows -- against the `reads` and `writes` the cache pays to be right at every one of them.
     """
     print(f"{'what it exercises':36s} {'events':>7} {'ttl':>6} {'cap':>4} {'true':>6} "
           f"{'expiry':>7} {'restarts':>9} {'held':>6} {'+ttl':>6} {'saved':>6} "
@@ -2133,7 +2137,7 @@ def totals(events, ttl, spill=None):
     aggregate restarted mid-stream" with "the state was released at the end".
 
     `spill` (a dict) turns the deletion into a write-out-and-reload, which is the
-    variation-2 escape; with it, the totals come out exact at any allowance.
+    variation-3 escape (the abandoned cart); with it, the totals come out exact at any allowance.
     """
     acc, last, resets = {}, {}, []
     for e in events:
@@ -2166,7 +2170,7 @@ def held_at(events, ttl, t):
 # The three variations.
 
 def the_unique_visitor_count(visitors, k=256):
-    """Variation 1, surface: analytics.  Count DISTINCT visitors, not a sum.
+    """Variation 2, surface: analytics.  Count DISTINCT visitors, not a sum.
 
     Non-obvious point: `add` now needs a SET rather than an integer, so the state is
     the size of the visitor set and `drop_stale` is no help -- every visitor must be
@@ -2193,7 +2197,7 @@ def the_unique_visitor_count(visitors, k=256):
     return len(exact), len(exact), est, len(mins)
 
 def the_abandoned_shopping_cart(events, ttl):
-    """Variation 2, surface: commerce.  Hold each user's cart, expire inactive ones,
+    """Variation 3, surface: commerce.  Hold each user's cart, expire inactive ones,
     and a user who returns after a week still expects their cart.
 
     Non-obvious point: here the expiry is the FEATURE and the silent restart is the
@@ -2202,7 +2206,7 @@ def the_abandoned_shopping_cart(events, ttl):
     `add` reads it back, so memory is bounded by ACTIVE users while correctness is
     bounded by nothing.
 
-    Returns (totals_with_spill, totals_without_spill, spill_store).
+    Returns (totals_with_spill, totals_without_spill, live_accumulator_at_end).
     """
     spill = {}
     live, _ = totals(events, ttl, spill=spill)
@@ -2210,7 +2214,7 @@ def the_abandoned_shopping_cart(events, ttl):
     return dict(spill), plain, live
 
 def the_fraud_score_over_a_lifetime(events):
-    """Variation 3, surface: risk.  Score each account on its ENTIRE history; accounts
+    """Variation 4, surface: risk.  Score each account on its ENTIRE history; accounts
     lie dormant for years and must keep their score.
 
     Non-obvious point: the requirement forbids every bound, so the chapter's answer is
@@ -2497,15 +2501,15 @@ One addition per event, two numbers per live key, a measured memory saving of **
 Concepts this chapter mentions but does not fully unpack are linked below — each pointer names the chapter where the concept is covered in depth and gives a concrete example that ties the two chapters together.
 
 - **[Chapter 4: Advanced Windowing → The window lifecycle](ch04-advanced-windowing.md#the-window-lifecycle)** — the state this chapter persists is, in a windowed pipeline, per-window state — ch04 shows where that state is born, merged, and garbage-collected.
-  - _Example:_ ch07's persisted count { 42: 13 } is the same keyed state ch04 accumulates per window; ch04's session set { s1, s2 } is exactly what a checkpoint must snapshot for recovery.
+  - _Example:_ ch07's persisted entry a@0 = 8 is one (key, window) group of ch04's step 3, "group and trigger"; ch04's 5 state entries, one per (key, session), are exactly what a checkpoint must snapshot, and ch04's step 4 is what finally releases them.
 - **[Chapter 5: Exactly-Once and Side Effects → What exactly-once means](ch05-exactly-once-and-side-effects.md#what-exactly-once-means)** — exactly-once recovery is the payoff of checkpointing — pairing state with the source offset so no record is lost or double-counted.
-  - _Example:_ ch07's checkpoint { count: {42:13}, offset: 500 } resumed at 501 is ch05's "replayable source + dedup": the offset says what was already folded, so a replay does not double-count.
+  - _Example:_ ch07's checkpoint { 4 entries holding 23, offset: 4 } resumed at 5 is ch05's two failures avoided at once: drop the 4 records after the offset and the total is ch05's 23, apply them twice and it is ch05's 67; resuming at 5 applies them once and gives 45.
 - **[Chapter 6: Streams and Tables → The duality](ch06-streams-and-tables.md#the-duality)** — a state store is the materialized table of the stream — ch06 formalizes why the running count is a table and the incoming events are the changelog.
-  - _Example:_ ch07's count state { 42: 13 } is ch06's table; the events folded into it are ch06's changelog [ +10, -3, +5 ], and the checkpoint is the materialization that survives a restart.
+  - _Example:_ ch07's entry a@0 = 8 is ch06's fold stopped early: ch06's key "a" walks 0 → 5 → 8 → 10 → 16 → 24, and a@0 holds the first two steps, ids 0 and 1 (+5, +3); the checkpoint is that table materialized so it survives a restart.
 - **[Chapter 8: Streaming SQL → SQL as a stream language](ch08-streaming-sql.md#sql-as-a-stream-language)** — streaming SQL state is the same state-store discipline under the hood — a GROUP BY count lives in keyed state that the engine checkpoints.
-  - _Example:_ ch07's checkpointed { 42: 13 } is ch08's result table { C1: 4 } persisted between emissions; both rely on the state store to survive a failure.
+  - _Example:_ ch07's checkpointed {a@0:8, b@0:7, a@120:2, a@240:6} is 4 of the 7 groups of ch08's GROUP BY key, TUMBLE(et, INTERVAL '120' SECOND), persisted between emissions; ch08's window [12:00, 12:02) can emit 15 and later become 19 only because the 15 survived in that state.
 - **[Chapter 9: Streaming Joins → Correctness and state](ch09-streaming-joins.md#correctness-and-state)** — join state is bounded and garbage-collected by the same watermark + lateness discipline that governs checkpointing — ch09 shows the buffer side.
-  - _Example:_ ch07's "bound state growth" is ch09's join buffer: rows are dropped once both watermarks pass the join window + allowed lateness, so the persisted buffer never grows without limit.
+  - _Example:_ ch07's "bound state growth" is ch09's join buffer: a buffered row may be dropped once both watermarks pass its event time plus 60 s, so the buffer peaks at 5 of 9 rows; ch09's 2 clicks that never emit are 2 rows that are never freed, which a checkpoint then persists across every restart.
 
 ## System Design Interview
 
@@ -2519,7 +2523,7 @@ Concepts this chapter mentions but does not fully unpack are linked below — ea
 
 _Role: stream — delivers records with a source offset_
 
-- a record for key 42 arrives at offset 500
+- event 4 (key "a", v 6) arrives at offset 4
 - the offset is the replayable source position
 - events after the offset are not yet folded
 
@@ -2527,7 +2531,7 @@ _Role: stream — delivers records with a source offset_
 
 _Role: processor — folds records into a state store_
 
-- the count for key 42 updates { 42: 10 } -> { 42: 13 }
+- entry a@240 goes NONE -> 6; the store now holds 4 entries totalling 23
 - hot keys stay in memory, the rest spill to disk
 - the state store holds the running aggregation
 
@@ -2535,8 +2539,8 @@ _Role: processor — folds records into a state store_
 
 _Role: checkpoint — snapshots state and offset together_
 
-- a barrier triggers the snapshot at offset 500
-- the snapshot captures { count: { 42: 13 }, offset: 500 }
+- a barrier triggers the snapshot at offset 4
+- the snapshot captures { entries: {a@0:8, b@0:7, a@120:2, a@240:6}, offset: 4 }
 - incremental mode uploads only the changed keys
 
 ### durable storage
@@ -2567,7 +2571,7 @@ _Role: durable storage — holds the checkpoint bytes_
 
 That is the design's entire claim, as one equation: **23 loaded + 22 replayed = 45**, the no-crash total. Every failed recovery earlier in this chapter failed that equation, and always because the state and the offset did not match.
 
-**Two settings, and one of them is free.** Incremental rather than full checkpointing is 8 uploads instead of 14 at k = 3, with identical recovery behaviour — no trade at all. The frequency trades in three directions at once: I/O, recovery time, and under at-least-once the error bound (up to 22 of 45 at a checkpoint every 3 events).
+**Two settings, and one of them is free.** Incremental rather than full checkpointing is 8 uploads instead of 14 at k = 3, with identical recovery behaviour — no trade at all. The frequency trades in three directions at once: I/O, recovery time, and under at-least-once the error bound (up to 13 of 45 at a checkpoint every 3 events).
 
 #### When this design is enough, and the four things it does not settle
 
@@ -2635,7 +2639,7 @@ The first gap is the load-bearing one. Every correct recovery in this chapter as
 
 Two details are worth watching. `store.durable` is **false**: the local state store is fast and dies with the machine, which is why `commit` exists at all. And `copyOf` makes the checkpoint a snapshot rather than a reference, so the processor can keep working while the upload runs.
 
-Step 4 is the requirement stated as code: `if (atomic == false) { cp.offset = 0 }`. The entries landed and the offset did not, so `torn.total` reaches 68 against 45. This design assumes that commit is atomic; it does not make it so.
+Step 4 is the requirement stated as code: `if (atomic == false) { cp.offset = -1 }`. The entries landed and the offset did not, so `torn.total` reaches 68 against 45. This design assumes that commit is atomic; it does not make it so.
 
 The animation steps through the code, holding each line long enough to read the STACK (call frames and their locals) and the HEAP (allocated arrays and objects) as they are AT THAT MOMENT. Expand any step to study it on its own.
 
@@ -2670,7 +2674,7 @@ The loop starts at `cp.offset + 1` = 5 and runs 4 times. `total` ends at 45 acro
 
 <img src="../diagrams/anim/ch07-system-memory/frames/step-04.svg" alt="Step 4: a torn commit replays the prefix and over-counts" width="980">
 
-With `atomic` false the entries landed and the offset did not, so `resume` replays from index 1 and `torn.total` reaches 68 — over by the whole 23 the checkpoint already held. The design REQUIRES this commit to be atomic and does not itself provide that.
+With `atomic` false the entries landed and the offset did not, so `resume` replays from index 0, all 9 events, and `torn.total` reaches 68 — over by the whole 23 the checkpoint already held. The design REQUIRES this commit to be atomic and does not itself provide that.
 
 </details>
 
@@ -2695,9 +2699,9 @@ A streaming aggregation keeps a running count per user in memory; when the job r
 - Incremental snapshot — only the delta
 
 ```java
-// count {42:13} at offset 500
-//   checkpoint saves {count:{42:13}, offset:500}
-//   restart restores count 13, resumes at 501
+// state {a@0:8, b@0:7, a@120:2, a@240:6} at offset 4
+//   checkpoint saves {entries, offset: 4}
+//   restart restores 23, resumes at 5
 //   -> no reset, no full replay
 ```
 
@@ -2721,10 +2725,10 @@ A metrics pipeline has 10 GB of state; snapshotting the whole thing every minute
 - Frequency — tuned to failure budget
 
 ```java
-// 1000 keys, 12 changed
-//   incremental: upload 12 keys
-//   full:        upload 1000 keys
-//   -> 0.3% of the I/O
+// the 9 seed events as a scale model, checkpoint every 3
+//   full:        upload 2 + 5 + 7 = 14 entries
+//   incremental: upload 2 + 3 + 3 = 8 entries
+//   -> 57% of the I/O, and the gap widens as state grows
 ```
 
 _This is exactly the incremental-checkpoint material in this chapter._
@@ -2745,9 +2749,9 @@ _From the 28 problems:_ 20-metrics-monitoring
 A checkpoint captures every stage's state at one logical point in the stream, aligned by a barrier.
 
 ```java
-// count {42:13} at offset 500
-//   checkpoint saves {count:{42:13}, offset:500}
-//   restart restores count 13, resumes at 501
+// state {a@0:8, b@0:7, a@120:2, a@240:6} at offset 4
+//   checkpoint saves {entries, offset: 4}
+//   restart restores 23, resumes at 5
 //   -> no reset, no full replay
 ```
 
@@ -2761,9 +2765,9 @@ A checkpoint captures every stage's state at one logical point in the stream, al
 | 4. Incremental checkpoints | Incremental checkpoints upload only the keys that changed since the last snapshot. | Flink's incremental checkpointing for RocksDB. |
 | 5. Checkpoint barriers | A barrier flows through the stream; each stage snapshots on seeing it, producing a coherent multi-stage snapshot (Chandy-Lamport). | Flink checkpoint barriers are the production form. |
 | 6. Exactly-once recovery | Exactly-once checkpointing aligns state with source offsets so no record is lost or double-counted. | Flink's exactly-once checkpoint mode. |
-| 9. Stateless vs stateful operators | Stateless operators (map, filter) transform each record on its own and hold no state; stateful operators (group-by, window, join, dedup) hold per-key state in a state store. | A Flink map is stateless; a keyed COUNT is stateful and uses the state backend. |
 | 7. Checkpoint frequency | Frequent checkpoints shorten recovery but raise I/O; infrequent ones are cheap but replay more on restart. | A 1-minute interval is a common starting point. |
 | 8. Bound state growth | Watermarks plus allowed lateness let the pipeline garbage-collect finished window state. | Dataflow's allowed-lateness is the garbage-collection horizon. |
+| 9. Stateless vs stateful operators | Stateless operators (map, filter) transform each record on its own and hold no state; stateful operators (group-by, window, join, dedup) hold per-key state in a state store. | A Flink map is stateless; a keyed COUNT is stateful and uses the state backend. |
 
 
 ### Tradeoffs & When
@@ -2809,7 +2813,7 @@ A checkpoint captures every stage's state at one logical point in the stream, al
 
 **Claim.** An embedded state store like RocksDB keeps hot keys cached and spills the rest to disk.
 
-**Grounding.** It is the difference between fitting 10 GB of state in memory or on a disk-backed store.
+**Grounding.** This chapter's state is 7 entries and fits anywhere; at a scale such as 10 GB (an illustration outside the chapter's dataset) it is the difference between running out of memory and running on a disk-backed store.
 
 **In the wild.** Flink's RocksDB state backend is the production form.
 
@@ -2820,7 +2824,7 @@ A checkpoint captures every stage's state at one logical point in the stream, al
 
 **Claim.** Incremental checkpoints upload only the keys that changed since the last snapshot.
 
-**Grounding.** Uploading a delta of 12 keys vs a full 1000 is the practical win.
+**Grounding.** Checkpointing every 3 of the 9 events, full uploads 14 entries and incremental 8, 43% less; the gap widens as state grows relative to how fast it changes.
 
 **In the wild.** Flink's incremental checkpointing for RocksDB.
 
@@ -2842,7 +2846,7 @@ A checkpoint captures every stage's state at one logical point in the stream, al
 
 **Claim.** Exactly-once checkpointing aligns state with source offsets so no record is lost or double-counted.
 
-**Grounding.** Resume at offset 501 after offset 500 was folded = no double-count.
+**Grounding.** Resume at offset 5 after offset 4 was folded = no double-count.
 
 **In the wild.** Flink's exactly-once checkpoint mode.
 

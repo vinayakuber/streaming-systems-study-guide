@@ -10,7 +10,7 @@ The one row with no batch equivalent is `GROUP BY key, TUMBLE(et, INTERVAL '120'
 
 **And which clock is a one-token choice with different answers.** `TUMBLE(et, …)` and `TUMBLE(pt, …)` differ by three characters, and over this dataset they disagree on **3 of the 4 windows** — window [12:00, 12:02) reads 19 by event time and 15 by processing time. Both are valid SQL producing valid results, and no engine can flag the wrong one.
 
-**So some results append and others update.** `SELECT * FROM clicks WHERE v > 5` is **append-only**: 4 rows, each a fact that can never be revised, because a row either matched or it did not. The windowed aggregate is **updating**: 2 of its 4 window rows gets revised — window [12:00, 12:02) emits 15 and later becomes 19.
+**So some results append and others update.** `SELECT * FROM clicks WHERE v > 5` is **append-only**: 4 rows, each a fact that can never be revised, because a row either matched or it did not. The windowed total `SELECT SUM(v) FROM clicks GROUP BY TUMBLE(et, INTERVAL '120' SECOND)` is **updating**: 1 of its 4 window rows gets revised — window [12:00, 12:02) emits 15 and later becomes 19.
 
 That distinction is readable from the query text, and it tells you what the sink must be capable of before any code exists.
 
@@ -61,7 +61,7 @@ This is ch01's two-clock problem arriving as a one-token edit. `TUMBLE(et, ...)`
 
 <img src="../diagrams/anim/ch08-sql/frames/step-04.svg" alt="Step 4: so some results append and others UPDATE" width="1040">
 
-The update mode is readable from the query, which makes it a design input rather than a surprise. A `WHERE` produces 4 facts that never change; a windowed `GROUP BY` produces 4 rows of which 2 get revised — window [12:00, 12:02) goes 15 then 19. An INSERT-only sink is compatible with the first and not the second.
+The update mode is readable from the query, which makes it a design input rather than a surprise. A `WHERE` produces 4 facts that never change; a windowed `GROUP BY` produces 4 rows of which 1 gets revised — window [12:00, 12:02) goes 15 then 19. An INSERT-only sink is compatible with the first and not the second.
 
 </details>
 

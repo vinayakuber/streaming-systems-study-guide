@@ -77,7 +77,7 @@ def history_of(log, k):
 # The three variations.
 
 def the_cache_that_must_not_go_stale(log, live, compacted_start=True):
-    """Variation 1, surface: web infrastructure.  Keep an in-memory copy current.
+    """Variation 2, surface: web infrastructure.  Keep an in-memory copy current.
 
     Non-obvious point: this is `fold` at start-up, and the compacted log is exactly
     the cheap "somewhere" to fold from -- 2 entries instead of 9.  The subtlety is
@@ -89,15 +89,17 @@ def the_cache_that_must_not_go_stale(log, live, compacted_start=True):
     """
     base = list(compact(log) if compacted_start else log)
     t = fold(base)
-    version = len(log)              # the fold consumed the whole log's history
+    handover = len(log)             # the fold consumed the whole log's history
+    version = handover
     for entry in live:              # then follow live entries from that version on
         base.append(entry)
         t = fold(base)              # the same fold, now over base + what arrived since
         version += 1
-    return t, len(base), version
+    assert version == handover + len(live)
+    return t, len(base), handover
 
 def the_audit_log_that_was_compacted(log, k, n):
-    """Variation 2, surface: compliance.  A regulator asks what a record held two
+    """Variation 3, surface: compliance.  A regulator asks what a record held two
     years ago; the log was compacted last year.
 
     Non-obvious point: the answer is that the question cannot be answered, and the
@@ -114,14 +116,15 @@ def the_audit_log_that_was_compacted(log, k, n):
     return value_after(state_log, k, n), value_after(audit_log, k, n)
 
 def the_counter_changelog(deltas):
-    """Variation 3, surface: metrics.  The entries say what CHANGED ("+5"), not what
+    """Variation 4, surface: metrics.  The entries say what CHANGED ("+5"), not what
     the key became.  Fold them, and compact them.
 
-    Non-obvious point: the fold still works with + in place of =, and compaction
-    BREAKS -- you cannot keep "the last +5" and drop the earlier ones, because every
-    entry contributes.  The repair is to convert deltas to absolute values first,
-    which is `fold` and `emit` composed, and it shows why the log's FORMAT was the
-    first thing stated.  A log of deltas cannot be compacted; a log of states can.
+    Non-obvious point: the fold still works with + in place of =, and keep-the-last
+    compaction BREAKS -- you cannot keep "the last +5" and drop the earlier ones,
+    because every entry contributes.  The repair is to convert deltas to absolute
+    values first, which is `fold` and `emit` composed, and it shows why the log's
+    FORMAT was the first thing stated.  A log of deltas cannot be compacted by
+    keeping the last entry; it must be summed or converted to states first.
 
     Returns (table, table_after_naive_compaction, table_after_converting_first).
     """
@@ -187,12 +190,12 @@ def main():
           f"resurrects b: {fold(dropped)}")
 
     # variations
-    t1, read, version = the_cache_that_must_not_go_stale(CHANGELOG, [("a", 30)])
+    t1, read, handover = the_cache_that_must_not_go_stale(CHANGELOG, [("a", 30)])
     t2, read_full, _ = the_cache_that_must_not_go_stale(CHANGELOG, [("a", 30)], compacted_start=False)
     assert t1 == t2 == {"a": 30, "b": 21}, (t1, t2)
     assert read == 3 and read_full == 10, (read, read_full)
-    assert version == N + 1, version
-    print(f"\n  cache: same table {t1} from {read} entries instead of {read_full}, handover at version {version}")
+    assert handover == N, handover
+    print(f"\n  cache: same table {t1} from {read} entries instead of {read_full}, handover at version {handover}")
 
     state_ans, audit_ans = the_audit_log_that_was_compacted(CHANGELOG, ASKED, mid)
     assert state_ans == UNANSWERABLE and audit_ans == 8, (state_ans, audit_ans)

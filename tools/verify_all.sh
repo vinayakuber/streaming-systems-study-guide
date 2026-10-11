@@ -78,6 +78,14 @@ for d in diagrams/anim/*/; do
 done
 run "static fallbacks"     python3 tools/verify_diagram.py "${PAIRS[@]}" --fallback
 
+echo; echo "THE DECKS"
+# Each chapter rendered as a narrated deck. Built AFTER to_markdown, because every slide's
+# source link is resolved against the published doc's headings. deck_facts holds a deck to
+# the numbers its chapter prints; deck_gate walks every step headless (template section 10).
+run "decks build"          node tools/build_decks.js
+run "decks quote chapter"  node tools/deck_facts.js
+run "decks render"         python3 tools/deck_gate.py
+
 echo; echo "THEY ALL AGREE"
 run "band honesty"         node tools/check_band_honesty.js
 run "block shape"          node tools/check_block_shape.js diagrams/anim/*/embed.md

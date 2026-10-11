@@ -58,7 +58,7 @@ VALUES = 0:5  1:3  2:7  3:2  4:6  5:1  6:9  7:4  8:8    W = 3
   process that never crashed -- the checkpoint is also a re-grounding.
 
   300 random streams x every crash point: the window checkpoint and the replay
-  recover exactly, and the total-only checkpoint's final answer is high by exactly
+  recover exactly, and the total-only checkpoint's final answer is off by exactly
   the restored total over W -- so it is right only when that total happens to be
   zero, which negative values do occasionally arrange.
 

@@ -23,7 +23,8 @@
   GIVEN A CRASH POINT AND A WRITE ORDERING, WHAT WOULD A RESTORE READ AFTERWARDS?
 
   Worked, on the nine chunks above -- which between them define crash points 0..9 only:
-    rename, no crash          -> COMPLETE    all 45 bytes, and the record agrees
+    rename, no crash          -> COMPLETE    all 45 bytes, and no record is kept: the file is
+                                             the record
     rename, crash at 0        -> ABSENT      the earliest crash: nothing was written
     rename, crash at 1        -> ABSENT      5 bytes are in the staging slot, and a restore
                                              still sees nothing, because nothing reads it
@@ -62,8 +63,9 @@ You can often manufacture an atomic step instead of needing a transaction.  What
 where it stops working, are both measured below.
 
 WORKED EXAMPLES: the EXAMPLES table below holds 19 input/output pairs -- both sides of the
-commit boundary for all three orderings (killed before the last chunk, killed with every byte
-uploaded but the rename not yet run, and not killed at all), a crash point past the end of the
+commit boundary for the rename (killed before the last chunk, killed with every byte uploaded
+but the rename not yet run, and not killed at all) and the matching crash rows for direct and
+record_first, a crash point past the end of the
 stream that never fires, a zero-chunk backup, a one-chunk backup, and a 5,000-chunk file at
 scale; each row prints what a restart costs with and without resuming the staging file.  Every
 row is ASSERTED, so the table cannot drift from the code.
@@ -315,15 +317,16 @@ def main():
         assert ok is False, "the rename policy keeps no record at all; the file is the record"
     assert rows[None]["rename"][0] == COMPLETE
     assert all(rows[c]["rename"][0] is None for c in range(N + 1))
-    print(f"\n  rename: at all {N + 2} crash points the visible file is absent or the full {SIZE} bytes.")
-    print(f"  Nothing is ever half visible, and there is no record to disagree with it.")
+    print(f"\n  rename: at all {N + 1} crash points and on the uninterrupted run, the visible file is")
+    print(f"  absent or the full {SIZE} bytes.  Nothing is ever half visible, and there is no record")
+    print(f"  to disagree with it.")
 
     # the direct write: partials ARE visible, and the count is every chunk after the first
     partial = [c for c in rows if rows[c]["direct"][0] not in (None, COMPLETE)]
     assert partial == list(range(1, N)), partial
     assert rows[0]["direct"] == (None, False)
     assert rows[N]["direct"] == (COMPLETE, False), rows[N]["direct"]
-    print(f"\n  direct: {len(partial)} of the {N + 2} crash points leave a partial file under the real")
+    print(f"\n  direct: {len(partial)} of the {N + 1} crash points leave a partial file under the real")
     print(f"  name -- a restore from it silently produces a truncated database.  And crashing")
     print(f"  after the last chunk leaves a COMPLETE file with the record still saying failed,")
     print(f"  which is the harmless half of the same split.")
@@ -336,7 +339,7 @@ def main():
     # that matters, because the upload is where all the time goes.
     assert lying == list(range(N)), lying
     assert rows[N]["record_first"] == (COMPLETE, True), rows[N]["record_first"]
-    print(f"\n  record_first: {len(lying)} of the {N + 2} crash points leave the record saying SUCCESS with")
+    print(f"\n  record_first: {len(lying)} of the {N + 1} crash points leave the record saying SUCCESS with")
     print(f"  no complete file behind it -- every point during the upload, which is where all")
     print(f"  the time goes.  Nobody finds out until a restore is attempted, which is why this")
     print(f"  ordering is the one that loses data rather than merely wasting work.")

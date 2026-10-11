@@ -76,7 +76,7 @@ def worker(items, order, crash_at, commit_first=False):
 # The three variations.
 
 def the_file_that_is_half_uploaded(size, crash_after):
-    """Variation 1, surface: backups.  Upload a large file, then record success.
+    """Variation 2, surface: backups.  Upload a large file, then record success.
 
     Non-obvious point: the transaction is unavailable (the file store and the record
     are different systems), but the destination NAME is under your control -- so
@@ -97,7 +97,7 @@ def the_file_that_is_half_uploaded(size, crash_after):
     return with_rename, direct["backup"]
 
 def the_counter_in_two_places(values, crash_at):
-    """Variation 2, surface: analytics.  A fast counter and a warehouse row, both
+    """Variation 3, surface: analytics.  A fast counter and a warehouse row, both
     of which must agree.
 
     Non-obvious point: two OUTPUTS, not one output and a position, so there is no
@@ -118,7 +118,7 @@ def the_counter_in_two_places(values, crash_at):
     return (counter, warehouse), (derived, warehouse)
 
 def the_retry_that_must_not_re_send(values, crash_at):
-    """Variation 3, surface: notifications.  One push per item, no transaction at the
+    """Variation 4, surface: notifications.  One push per item, no transaction at the
     far end and no idempotency key.
 
     Non-obvious point: every tool is gone, and the effect is visible to a human so a

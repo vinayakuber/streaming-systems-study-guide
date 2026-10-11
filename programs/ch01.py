@@ -63,8 +63,8 @@ def running(xs, w=W):
     average of w values before w values exist.
 
     Returns (answers, trace, adds, subs).  The subtraction reads xs[i - w], which
-    is why the SPACE is O(w) even though the TIME is O(1): the departing value
-    must still be reachable.
+    is why the memory is w values even though each arrival costs two operations:
+    the departing value must still be reachable.
     """
     total = 0
     answers, trace = [], []
@@ -98,7 +98,7 @@ def drift_at(xs, i, w=W):
 # The three variations.
 
 def the_rolling_maximum(xs, w=W):
-    """Variation 1, surface: risk.  The same window, but the MAXIMUM.
+    """Variation 2, surface: risk.  The same window, but the MAXIMUM.
 
     Non-obvious point: the trick does not transfer.  `running`'s subtraction is
     the line that cannot be written -- addition is invertible and max is not, so
@@ -118,13 +118,16 @@ def the_rolling_maximum(xs, w=W):
     return out
 
 def the_time_based_window(stamped, span):
-    """Variation 2, surface: monitoring.  Average everything from the last `span`.
+    """Variation 3, surface: monitoring.  Average everything from the last `span`.
 
     Non-obvious point: "exactly one leaves when one arrives" becomes false -- zero
     or many expire -- so the COUNT must be maintained beside the total and the
     divisor changes every arrival.  Subtler: the answer changes with no arrival at
     all, as values age out while the stream is quiet, so a real implementation
     needs a timer-driven recompute as well as an input-driven one.
+
+    The window at arrival t is the half-open (t - span, t]: a sample exactly span
+    seconds old has just left, the same definition the standalone variation uses.
 
     `stamped` is [(t, v), ...] in time order.  Returns [(t, avg, count), ...].
     """
@@ -135,13 +138,13 @@ def the_time_based_window(stamped, span):
     for t, v in stamped:
         win.append((t, v))
         total += v
-        while win and win[0][0] < t - span:   # zero, one or many expire
+        while win and win[0][0] <= t - span:  # zero, one or many expire
             total -= win.popleft()[1]
         out.append((t, total / len(win), len(win)))
     return out
 
 def the_average_that_must_survive_a_restart(xs, crash_after, w=W):
-    """Variation 3, surface: reliability.  The process restarts mid-stream.
+    """Variation 4, surface: reliability.  The process restarts mid-stream.
 
     Non-obvious point: the total is one number and looks trivially
     checkpointable, and that is the trap -- restoring the total WITHOUT the last w
@@ -150,8 +153,11 @@ def the_average_that_must_survive_a_restart(xs, crash_after, w=W):
     reported.
 
     Returns (answers_from_full_checkpoint, answers_from_total_only_checkpoint).
-    The second is what a checkpoint of the accumulator alone produces: it has to
-    guess the departing value, and guessing zero leaves the total too high.
+    The second is what a checkpoint of the accumulator alone produces: the window
+    restarts empty, refills, and subtraction resumes once it holds more than w
+    values -- but the restored total has no window entries behind it, so it is
+    never taken out, and the final answer is off by exactly the restored total
+    over w (high here, where every value is positive).
     """
     total, window, out_good = 0, [], []
     for i in range(crash_after):            # before the crash
@@ -161,14 +167,17 @@ def the_average_that_must_survive_a_restart(xs, crash_after, w=W):
             total -= window.pop(0)
         if i >= w - 1:
             out_good.append(total / w)
-    out_bad, bad_total = list(out_good), total   # the crash: only `total` was saved
+    out_bad, bad_total, bad_window = list(out_good), total, []   # the crash: only `total` was saved
     for i in range(crash_after, len(xs)):
         total += xs[i]                      # restored WITH the window: can subtract
         window.append(xs[i])
         if len(window) > w:
             total -= window.pop(0)
         out_good.append(total / w)
-        bad_total += xs[i]                  # restored without it: nothing to subtract
+        bad_total += xs[i]                  # restored without it: the window refills
+        bad_window.append(xs[i])
+        if len(bad_window) > w:
+            bad_total -= bad_window.pop(0)
         out_bad.append(bad_total / w)
     return out_good, out_bad
 
@@ -231,12 +240,14 @@ def main():
     stamped = [(0, 10.0), (10, 20.0), (70, 30.0), (71, 40.0), (200, 50.0)]
     tb = the_time_based_window(stamped, 60)
     print(f"\n  time-based window (span 60): {[(t, round(a, 3), c) for t, a, c in tb]}")
-    # MEASURED, and not what a first reading expects: the count is 1,2,2,2,1 -- at
-    # t=71 one value arrives and one expires (so the count holds), and at t=200 TWO
-    # expire at once and none would have expired on a timer tick at t=140 either.
-    # So "exactly one leaves when one arrives" is false in both directions here.
-    assert [c for _, _, c in tb] == [1, 2, 2, 2, 1], f"measured counts {[c for *_, c in tb]}"
-    assert tb[2][1] == 25.0, "the divisor did not follow the count"
+    # MEASURED, and not what a first reading expects: the count is 1,2,1,2,1 -- at
+    # t=70 one value arrives and TWO expire (the one at 10 is exactly 60 old, and the
+    # window is (t-60, t]), at t=71 one arrives and none expire, and at t=200 TWO
+    # expire at once on the arrival path -- a timer would have retired them one by one
+    # at t=130 and t=131, which is why the arrival-driven count is stale between 71
+    # and 200.  So "exactly one leaves when one arrives" is false in both directions.
+    assert [c for _, _, c in tb] == [1, 2, 1, 2, 1], f"measured counts {[c for *_, c in tb]}"
+    assert tb[2][1] == 30.0, "the divisor did not follow the count"
     assert tb[4][1] == 50.0, "two values expiring at once left the total too high"
     assert min(c for *_, c in tb) < max(c for *_, c in tb), "the count must rise AND fall"
     good, bad = the_average_that_must_survive_a_restart(VALUES, crash_after=5)
@@ -244,7 +255,10 @@ def main():
     print(f"  restart, total only          : {[round(v, 4) for v in bad]}")
     assert good == exact, "a full checkpoint must continue exactly"
     assert bad != exact, "a total-only checkpoint must NOT come out right"
+    restored = sum(VALUES[5 - W:5])         # the total the crash left behind
     assert bad[-1] > exact[-1], "the un-subtracted total has to read too high"
+    assert abs((bad[-1] - exact[-1]) - restored / W) < 1e-12, (
+        f"the error must be exactly the restored total {restored} over {W}")
 
     # ---- brute force over many inputs, not just the one example
     rng = random.Random(20260303)

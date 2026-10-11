@@ -41,7 +41,7 @@ Standalone and runnable.
     'a', day 500  -> 16             its surviving edge: from here on it can still answer
   And on a 5,000-change audit log over 50 records and ten years:
     'r0',  day 1825 -> 2500         mid-history, five years in
-    'r49', day 3650 -> 4999         the last day of the log
+    'r49', day 3650 -> 4999         today, the day after the log's last entry (day 3649)
 
   Every line above is a row in the EXAMPLES table below, and every row is asserted twice --
   against a maximum over the surviving entries and, wherever it is affordable, against a

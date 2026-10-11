@@ -48,7 +48,7 @@
     "// function: touching(runs, t) — every run this time could join: one whose end is within",
     "//   G after t, or whose start is within G before it. There may be SEVERAL.",
     "//   touching(runs, 50) = 1..3 and 90..130  <- two of them",
-    "//   touching(runs, 3) = 1..1",
+    "//   touching(runs, 130) = 90..90",
     "fun touching(runs, t) {",
     "    var hit = []",
     "    for (r in runs) {",
@@ -94,7 +94,7 @@
     "    runs = absorb(runs, 220)      // extend -> 1..3  90..130  220..260",
     "    runs = absorb(runs, 50 )      // MERGE  -> 1..130  220..260",
     "    runs = absorb(runs, 540)      // new    -> 1..130  220..260  540..540",
-    "    // 6 run(s) had to be withdrawn along the way",
+    "    // 6 runs had to be withdrawn along the way",
     "}"
   ]
 }

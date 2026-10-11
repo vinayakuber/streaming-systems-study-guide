@@ -4,7 +4,7 @@
 
 **What is being answered.** The four lifecycle steps, as four functions over the same key's arrivals.
 
-The line to look at first is inside `sessionsUpto`: `if (last != NONE && e.et - last.end <= gap)`. It performs **assign and merge at once** — the event joins the session and the session's bound moves in the same statement. That is why sessions have a merge step and the other shapes do not.
+The line to look at first is inside `sessionsUpto`: `if (last != NONE && e.et - last.end <= gap)`. It performs **assign and merge at once** — the event joins the session and the session's END moves in the same statement. A START moves only because the walk is re-sorted on every call: a late event that sorts in front opens the session earlier. That is why sessions have a merge step and the other shapes do not.
 
 `needsRetraction(key, gap)` then reduces the whole retraction question to one comparison: was the session collected at an index below the arrival index of one of its own members? At gap 120 that is 8 < 7 — false. At gap 40 it is 4 < 7 — true.
 
@@ -17,7 +17,7 @@ The animation steps through the code, holding each line long enough to read the 
 
 <img src="../diagrams/anim/ch04-lifecycle-memory/frames/step-01.svg" alt="Step 1: ASSIGN and MERGE are the same line, read twice" width="980">
 
-This one line does both jobs: if the arriving event is within `gap` of `last.end`, it is ASSIGNED to that session and the session is simultaneously MERGED — `last.end` moves. For id 6 (et 220) the session's bound changes, which is a window boundary moving after the window existed.
+This one line does both jobs: if an event is within `gap` of `last.end`, it is ASSIGNED to that session and the session is simultaneously MERGED — `last.end` moves. Walking at i = 6, it is true for id 5 (et 260): `last` is [220-220] and 260 − 220 = 40 ≤ 120, so the end moves to 260. The event that just arrived, id 6 (et 220), never takes this branch: it sorts in front of id 5 and opens the session, so a session that was [260-260] now starts at 220. The START moved backwards through the re-sort, which this line alone cannot do — a window boundary moving after the window existed.
 
 </details>
 <details>
@@ -25,7 +25,7 @@ This one line does both jobs: if the arriving event is within `gap` of `last.end
 
 <img src="../diagrams/anim/ch04-lifecycle-memory/frames/step-02.svg" alt="Step 2: so 2 out-of-order arrivals each absorb a session" width="980">
 
-`merged` returns true when the arriving event ended up in a session with more than one member. Compare the two heap rows: `afterFirst` has 2 session(s) and `afterAll` has 2, with starts pulled BACKWARDS by ids 6 and 7.
+`merged` returns true when the arriving event ended up in a session with more than one member. Compare the two heap rows: `afterFirst` starts at 90 and 260 and `afterAll` at 50 and 220 — the same 2 sessions, with both starts pulled BACKWARDS by ids 6 and 7.
 
 </details>
 <details>

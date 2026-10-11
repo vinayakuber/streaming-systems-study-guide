@@ -2,7 +2,33 @@
   "name": "ch02-when-memory",
   "steps": [
     {
-      "t": "the watermark has not passed 12:02, so nothing fires",
+      "t": "the clock fires before the watermark: an EARLY pane of 8",
+      "line": [
+        44,
+        45
+      ],
+      "stack": [
+        {
+          "name": "main",
+          "locals": [
+            "st = @0x100",
+            "i = 2",
+            "t = 60",
+            "final = ...",
+            "fired = ..."
+          ]
+        },
+        {
+          "name": "early",
+          "locals": [
+            "st = @0x100",
+            "t = 60"
+          ]
+        }
+      ]
+    },
+    {
+      "t": "the watermark has not passed 12:02, so no on-time pane",
       "line": [
         29,
         30
@@ -13,6 +39,7 @@
           "locals": [
             "st = @0x100",
             "i = 3",
+            "t = ...",
             "final = ...",
             "fired = ..."
           ]
@@ -36,7 +63,7 @@
     {
       "t": "it passes, and the ON-TIME pane is published",
       "line": [
-        49
+        58
       ],
       "stack": [
         {
@@ -44,6 +71,7 @@
           "locals": [
             "st = @0x100",
             "i = 4",
+            "t = ...",
             "final = ...",
             "fired = ..."
           ]
@@ -70,6 +98,7 @@
           "locals": [
             "st = @0x100",
             "i = 7",
+            "t = ...",
             "final = ...",
             "fired = ..."
           ]
@@ -91,9 +120,9 @@
       ]
     },
     {
-      "t": "so one window published twice, and the second one is right",
+      "t": "so one window published 6 times, and the last one is right",
       "line": [
-        62
+        78
       ],
       "stack": [
         {
@@ -101,8 +130,9 @@
           "locals": [
             "st = @0x100",
             "i = 8",
+            "t = ...",
             "final = 19",
-            "fired = 2"
+            "fired = 6"
           ]
         }
       ]

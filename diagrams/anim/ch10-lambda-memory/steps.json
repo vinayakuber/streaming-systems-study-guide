@@ -76,8 +76,8 @@
             "batch = @0x100",
             "speed = @0x200",
             "apart = 26",
-            "lam = Fix(2, 2)",
-            "kap = Fix(1, 1)",
+            "lam = ...",
+            "kap = ...",
             "before = ...",
             "after = ..."
           ]
@@ -106,7 +106,7 @@
             "lam = Fix(2, 2)",
             "kap = Fix(1, 1)",
             "before = 32",
-            "after = 45"
+            "after = ..."
           ]
         },
         {

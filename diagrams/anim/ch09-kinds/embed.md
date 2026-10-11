@@ -8,16 +8,16 @@ Worth noticing early: **one click matches 2 impressions**, so a windowed join is
 
 **The temporal (stream-table) join** enriches each row with the version of a table that was current *at that row's event time*. Here each click probes the impression side as of its own `et`: click 3 → 11, click 4 → 20, and 2 clicks get NULL because no impression existed yet at that time.
 
-No window, no buffer, no wait — all 5 rows are enriched immediately. The price is that it needs a **versioned** table: "as of 12:02:10" is not the same question as "now", and a table holding only current values cannot answer it.
+No window, no buffer, no wait on the other side's watermark — each of the 5 rows is looked up as it arrives. The price is that it needs a **versioned** table that is **complete** for that time: "as of 12:02:10" is not the same question as "now", and a table holding only current values cannot answer it. These impressions are not complete in time: looked up on arrival, click 3 reads 7 instead of 11 and click 4 reads 7 instead of 20, because impressions 6 and 7 arrive after the clicks they precede.
 
 **So the two are bounded by entirely different things:**
 
 - what bounds it — windowed: the 60s window · temporal: the table, finite per key
 - what it buffers — windowed: up to 5 rows · temporal: nothing
-- when it emits — windowed: when both watermarks pass · temporal: immediately
+- when it emits — windowed: when both watermarks pass · temporal: on arrival, trusting the table to be settled
 - what it needs — windowed: watermarks on both sides · temporal: a versioned table
 
-The third row is the substantive difference: a windowed join waits because a counterpart may still arrive, and a temporal join does not because the table's state at that event time is already settled. On this data that is 2 click never emitting versus all 5 emitting at once.
+The third row is the substantive difference: a windowed join waits because a counterpart may still arrive, and a temporal join does not because it trusts the table's state at that event time to be settled. On this data that is 2 clicks never emitting versus all 5 answered on arrival, 2 of them short — the trust holds for a dimension table, not for a stream of impressions.
 
 **And mistaking one for the other is the common bug.** The symptom is results arriving late or not at all; the cause is a windowed join against what is really a slowly-changing table; the cost here would be 2 of 5 rows never emitting and 2 matches withheld.
 
@@ -52,7 +52,7 @@ The join predicate is one subtraction, and it produces 5 matches from 20 candida
 
 <img src="../diagrams/anim/ch09-kinds/frames/step-02.svg" alt="Step 2: the temporal join: look up the table AS OF the row&#39;s time" width="1040">
 
-A temporal join is a lookup, and it behaves completely differently: all 5 clicks are enriched immediately, with no buffer and no wait. The price is in the note — it needs the table's **history**, because "as of 12:02:10" is not the same question as "now", and a table that only holds current values cannot answer it.
+A temporal join is a lookup, and it behaves completely differently: no buffer, and no wait on a second watermark. The price is in the note — it needs the table's **history**, because "as of 12:02:10" is not the same question as "now", and it needs that history to be **complete**. The values above are the as-of answers; looked up the moment each click arrives, click 3 reads 7 instead of 11 and click 4 reads 7 instead of 20, because impressions 6 and 7 have not arrived yet.
 
 </details>
 <details>
@@ -60,7 +60,7 @@ A temporal join is a lookup, and it behaves completely differently: all 5 clicks
 
 <img src="../diagrams/anim/ch09-kinds/frames/step-03.svg" alt="Step 3: so the two joins are bounded by entirely different things" width="1040">
 
-The row that matters is the third. A windowed join waits because a counterpart may still arrive; a temporal join does not, because the table's state at that event time is already settled. On this data that is the difference between 2 click never emitting and all 5 emitting at once.
+The row that matters is the third. A windowed join waits because a counterpart may still arrive; a temporal join does not, because it trusts the table's state at that event time to be settled. On this data that is the difference between 2 clicks never emitting and all 5 answered on arrival — and the trust is misplaced for 2 of them, because impressions 6 and 7 arrive after the clicks they precede. A temporal join is for a side that is already settled.
 
 </details>
 <details>

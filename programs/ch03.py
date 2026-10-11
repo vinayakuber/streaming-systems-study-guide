@@ -83,7 +83,7 @@ def slide_max(xs, w=W):
     """One pass.  The deque holds INDEXES, kept decreasing, so its front is the
     answer in one read -- indexes rather than values, because only an index says
     whether an entry has left the window.  Each index is pushed exactly once and
-    removed at most once, which is why the cost is amortised O(1) and independent
+    removed at most once, which is why the total is at most 2 steps per tick on average and independent
     of w.  Returns (answers, pushes, pops, fronts, biggest_evict, cheap_ticks)."""
     dq, out = [], []
     pushes = pops = fronts = 0
@@ -150,7 +150,7 @@ def watermark_bounded(ets, w=W, lag=LAG):
 # The three variations.
 
 def the_shortest_spike(counts, k):
-    """Variation 1, surface: load testing.  Shortest run whose total reaches K.
+    """Variation 2, surface: load testing.  Shortest run whose total reaches K.
 
     Non-obvious point: the window is no longer a fixed size, so `expire` disappears
     entirely and `evict_smaller` is reversed and applied to running TOTALS -- a later
@@ -171,7 +171,7 @@ def the_shortest_spike(counts, k):
     return best
 
 def the_next_warmer_day(temps):
-    """Variation 2, surface: weather.  Days until the next warmer day, else 0.
+    """Variation 3, surface: weather.  Days until the next warmer day, else 0.
 
     Non-obvious point: there is no window at all, so `expire` is gone and only the
     eviction remains -- and the evicted entries PRODUCE answers rather than being
@@ -186,7 +186,7 @@ def the_next_warmer_day(temps):
     return out
 
 def the_longest_steady_stretch(xs, limit):
-    """Variation 3, surface: manufacturing.  Longest run whose max-min <= limit.
+    """Variation 4, surface: manufacturing.  Longest run whose max-min <= limit.
 
     Non-obvious point: the window size becomes the ANSWER rather than an input, so both
     deques must expire by the actual left edge instead of by `i - W`.  Get that wrong

@@ -48,7 +48,8 @@
                                                the two writes both landed
   And on 3,000 events of 7 each (21,000 in all):
     counter first, crash at 1500 -> (10507, 10500)   off by one event out of three thousand
-    derived@500, crash at 1700   -> (10500, 11900)   200 events of lag, which is its bound
+    derived@500, crash at 1700   -> (10500, 11900)   200 events of lag, inside its bound of
+                                                      499 (the interval minus one)
 
   Every line above is a row in the EXAMPLES table below, and every row is asserted twice --
   against the program and against an independent formula for the same pair -- so these
@@ -226,11 +227,15 @@ def show_examples():
     is cheaper for it.  `dual` counts durable writes (two per event, one for the event the
     crash straddles).  `derv` counts the one write per event PLUS the rows each rebuild has to
     re-read, because rebuild() sums the whole warehouse every time.  That is why the derived
-    design LOSES on most of these rows: its correctness is free and its freshness is not, and
-    a short rebuild interval on a long stream is the expensive corner.
+    design LOSES on every row that runs to the end with a rebuild, on the every-event rebuild
+    and on the long-stream rows: its correctness is free and its freshness is not, and a short
+    rebuild interval on a long stream is the expensive corner.  Where it wins, few or no
+    rebuilds had been paid for yet -- an early crash, or an interval longer than the stream.
+    The tally of the `cheaper` column is printed under the table rather than asserted here.
     """
     print(f"{'what it exercises':40s} {'events':>6} {'design':>15} {'crash':>5} "
           f"{'counter':>8} {'wh':>8} {'lag':>4} {'dual':>6} {'derv':>7} {'cheaper':>8}")
+    tally = {'derived': 0, 'dual': 0, 'tie': 0}
     for label, items, design, crash_at, want in EXAMPLES:
         vals = [v for _, v in items]
         n = len(items)
@@ -261,10 +266,14 @@ def show_examples():
         r = m // every
         derv = m + every * r * (r + 1) // 2
         cheaper = 'derived' if derv < dual else 'dual' if dual < derv else 'tie'
+        tally[cheaper] += 1
         crash = 'none' if crash_at is None else str(crash_at)
         print(f"{label:40s} {n:>6} {design:>15} {crash:>5} "
               f"{counter:>8} {wh:>8} {lag:>4} {dual:>6} {derv:>7} {cheaper:>8}")
     print(f"all {len(EXAMPLES)} examples agree with the prefix sums of their own stream")
+    assert sum(tally.values()) == len(EXAMPLES), tally
+    print(f"cheaper: derived on {tally['derived']} rows, dual on {tally['dual']}, "
+          f"tie on {tally['tie']}")
     print()
 
 
@@ -308,8 +317,9 @@ def main():
         assert cnt <= wh, (c, cnt, wh)
         assert legal.index(cnt) == legal.index(wh) - lag, (c, cnt, wh, lag)
         lags.append(lag)
-    print(f"  of the {N + 1} derived crash states, ALL are a legal total paired with an earlier legal")
-    print(f"  total -- the counter is behind by {min(lags)} to {max(lags)} events and never wrong.")
+    print(f"  of the {N} derived crash states and the uninterrupted run, ALL are a legal total")
+    print(f"  paired with an earlier legal total -- the counter is behind by {min(lags)} to {max(lags)}")
+    print(f"  events and never wrong.")
     assert max(lags) == REBUILD_EVERY - 1, (lags, REBUILD_EVERY)
     assert min(lags) == 0, lags
     print(f"  the lag is bounded by the rebuild interval ({REBUILD_EVERY}), so it is a number you choose,")

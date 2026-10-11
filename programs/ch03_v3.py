@@ -119,9 +119,11 @@ def show_examples():
     Each row is checked against the stack and against the forward scan, which is run on every
     input here (and cached, since several rows share a series).  The two cost columns are the
     point of the table: `fwd` is the forward scan's measured comparisons and `steps` is the
-    stack's pushes plus pops.  The stack LOSES on every short series in the table, because it
+    stack's pushes plus pops.  The stack LOSES on the short series whose temperatures turn
+    over quickly (the nine-day series, the ties, the single day, the warming run), because it
     pays a push per day whether or not that day does any work, and the forward scan stops at
-    the first warmer day.  Its win is asymptotic, and the 20,000-day rows are where it shows.
+    the first warmer day.  It wins on the cooling and flat runs and the late-record series,
+    where no warmer day comes soon and the forward scan runs to the end for every day.  Its win is asymptotic, and the 20,000-day rows are where it shows.
 
     On the small series each row additionally pins the bounded lookahead from BOTH sides: a
     lookahead equal to the true wait gives the true answer, and one day shorter gives 0 --
@@ -314,7 +316,7 @@ def main():
     assert w2 == [1, 1, 1, 1, 0] and len(wun) == 1 and wpop == 4, (w2, wun)
     assert cbig == 0 and wbig == 1, (cbig, wbig)
     print(f"\n  a cooling run {cooling} -> {c}: nothing is ever resolved and the stack holds all 5,")
-    print(f"  which is where the stack costs O(n) space (a flat run does the same).  A warming run -> {w2}:")
+    print(f"  which is where the stack holds one entry per day (a flat run does the same).  A warming run -> {w2}:")
     print(f"  every day is resolved by the next, one at a time, and the stack never exceeds 1.")
     flat = [4, 4, 4, 4]
     assert next_warmer(flat)[0] == [0] * 4 and len(next_warmer(flat)[4]) == 4
@@ -352,7 +354,7 @@ def main():
     assert bbig > 1, "no group eviction at scale, so the interesting path was not exercised"
     assert len(bun) == len([i for i in range(BIG) if bgot[i] == 0])
     # the descending tail is exactly the unresolved set, and it must be the record highs
-    # CORRECTED: `>` is the wrong test here.  With 200,000 days drawn from 1,000 values ties
+    # CORRECTED: `>` is the wrong test here.  With 100,000 days drawn from 1,000 values ties
     # are certain, and a day equal to the warmest day after it is still unresolved, because
     # "warmer" is strict.  So the unresolved set is the days that MATCH OR BEAT every later
     # day, which is a weaker condition than being a strict suffix record.

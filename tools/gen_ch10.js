@@ -32,6 +32,7 @@ const BUGGY_TOTAL = EVENTS.reduce((s, e) => s + buggy(e), 0);
 const BUGGY_PER_KEY = Object.fromEntries(KEYS.map(k => [k, EVENTS.filter(e => e.key === k).reduce((s, e) => s + buggy(e), 0)]));
 const TRUE_PER_KEY = Object.fromEntries(KEYS.map(k => [k, EVENTS.filter(e => e.key === k).reduce((s, e) => s + e.v, 0)]));
 const REPLAY_READS = EVENTS.length;
+const HALVING = EVENTS.filter(e => e.key === BUG_KEY).map(e => `${e.v}→${buggy(e)}`).join(', ');
 // Lambda would need the fix applied twice; Kappa once. Count the places.
 const LAMBDA_FIXES = 2, KAPPA_FIXES = 1;
 const fail = (m) => { throw new Error(`gen_ch10: ${m}`); };
@@ -55,10 +56,10 @@ const C1 = [
         [`what it never needed`, `a watermark, a trigger, or an accumulation mode`],
       ], { w: 1040, rh: 36, hot: 2, label: 'correct, scalable, fault-tolerant — and it requires the input to stop' })
       + c.note('m1', c.P.main.x + 24, c.P.main.y + 212, 1040, [
-        `Three of the Beam model's four questions are answered by accident here: WHERE is the input file, WHEN is end of input, HOW has no panes to relate.`,
-        `Remove the ending and all three defaults stop existing at once. That is the whole difficulty, and it is not about latency.`,
+        `Two of the Beam model's four questions are answered by accident here: WHEN is end of input, HOW has no panes to relate. WHERE is not — it is the same ${ET_KEYS.length} windows of ${WIN}s streaming uses.`,
+        `Remove the ending and both defaults stop existing at once. That is the whole difficulty, and it is not about latency.`,
       ], c.C.good, c.C.goodFill),
-    cap: `Start from what batch actually gives you: ${ET_KEYS.length} window results, all final at event ${batchFinalAt}, with no watermark and no triggers needed. It is not that batch lacks these mechanisms — it is that the end of the input answers three of the four questions for free. Take the ending away and all three answers disappear together.` },
+    cap: `Start from what batch actually gives you: ${ET_KEYS.length} window results, all final at event ${batchFinalAt}, with no watermark and no triggers needed. It is not that batch lacks these mechanisms — it is that the end of the input answers two of the four questions, WHEN and HOW, for free. WHERE is the same ${ET_KEYS.length} windows either way. Take the ending away and both free answers disappear together.` },
   { t: 'early streaming got latency and lost correctness', draw: (c) =>
       c.panel('A PROCESSING-TIME PIPELINE, WHICH IS WHAT EARLY SYSTEMS OFFERED', 'a')
       + c.mapRows('es', c.P.main.x + 24, c.P.main.y + 52, ET_KEYS.map(k =>
@@ -73,15 +74,15 @@ const C1 = [
       c.panel('THE SAME FOUR QUESTIONS, BOTH MODES', 'a')
       + c.mapRows('u4', c.P.main.x + 24, c.P.main.y + 52, [
         [`WHAT`, `batch: the map/reduce · streaming: the aggregation — the SAME`],
-        [`WHERE`, `batch: the input file (one implicit window) · streaming: ${ET_KEYS.length} explicit windows`],
+        [`WHERE`, `both: ${ET_KEYS.length} windows of ${WIN}s — the SAME`],
         [`WHEN`, `batch: end of input · streaming: when the watermark passes`],
         [`HOW`, `batch: one pane, nothing to relate · streaming: accumulating or retracting`],
-      ], { w: 1040, rh: 36, hot: 2, label: 'batch answers all four; it just answers three of them implicitly' })
+      ], { w: 1040, rh: 36, hot: 2, label: 'batch answers all four; it just answers WHEN and HOW implicitly' })
       + c.note('u1', c.P.main.x + 24, c.P.main.y + 212, 1040, [
-        `Read the WHAT row: it is identical. The computation was never the difference between batch and streaming.`,
-        `The other three rows are all about TIME — which slice, which moment, and how successive answers relate. Those are the questions an ending used to answer for you.`,
+        `Read the WHAT and WHERE rows: they are identical. The computation and the windows were never the difference between batch and streaming.`,
+        `The two rows that differ are both about TIME — which moment a result is final, and how successive answers relate. Those are the questions an ending used to answer for you.`,
       ], c.C.good, c.C.goodFill),
-    cap: `The unification is visible in the first row: WHAT is the same in both modes, and always was. The remaining three rows are all about time, and in batch all three are answered by the input ending. So the model does not add machinery to batch — it names the three answers batch was getting for free, so that a pipeline without an ending can supply them explicitly.` },
+    cap: `The unification is visible in the first two rows: WHAT and WHERE are the same in both modes, and always were. The remaining two rows are about time, and in batch both are answered by the input ending. So the model does not add machinery to batch — it names the two answers batch was getting for free, so that a pipeline without an ending can supply them explicitly.` },
   { t: 'so one pipeline can run in both modes', draw: (c) =>
       c.panel('THE SAME PIPELINE, BOUNDED AND UNBOUNDED INPUT', 'p')
       + c.mapRows('bm', c.P.main.x + 24, c.P.main.y + 52, [
@@ -131,7 +132,7 @@ const C2 = [
   { t: 'Kappa: one pipeline, and replay instead of a second layer', draw: (c) =>
       c.panel('THE SAME CORRECTION, UNDER BOTH ARCHITECTURES', 'a')
       + c.mapRows('kp', c.P.main.x + 24, c.P.main.y + 52, [
-        [`the bug`, `key "${BUG_KEY}" halved · its total reads ${BUGGY_PER_KEY[BUG_KEY]} instead of ${TRUE_PER_KEY[BUG_KEY]}`],
+        [`the bug`, `key "${BUG_KEY}" halved, rounded down · its total reads ${BUGGY_PER_KEY[BUG_KEY]} instead of ${TRUE_PER_KEY[BUG_KEY]}`],
         [`under Lambda`, `fix it in ${LAMBDA_FIXES} places — batch and speed — and verify both`],
         [`under Kappa`, `fix it in ${KAPPA_FIXES} place, then replay ${REPLAY_READS} events`],
         [`after the replay`, `key "${BUG_KEY}" reads ${TRUE_PER_KEY[BUG_KEY]} · total ${TOTAL}`],
@@ -266,18 +267,18 @@ const DIAGRAMS = [
   { name: 'ch10-history', steps: C1,
     title: 'From MapReduce to streaming — what an ending was answering',
     subtitle: `batch: ${ET_KEYS.length} windows all final at event ${batchFinalAt} · arrival-time pipeline: ${LAMBDA_DIFFER.length} of ${ET_KEYS.length} wrong by ${LAMBDA_DRIFT}`,
-    heading: 'Why the end of the input was answering three of the four questions',
+    heading: 'Why the end of the input was answering two of the four questions',
     why: [
       `**MapReduce made batch tractable, and it assumed an ending.** Over this dataset a batch job reads all ${EVENTS.length} events, computes ${ET_KEYS.length} windows (${ET_KEYS.map(k => SUM(BY_ET[k])).join(', ')}, total ${TOTAL}), and every result is final at event ${batchFinalAt} — all at once. It needs no watermark, no trigger and no accumulation mode.`, '',
-      `Not because it lacks them, but because **the ending answers three of the four questions for free**: WHERE is the input file (one implicit window), WHEN is end of input, HOW has no panes to relate. Remove the ending and all three defaults stop existing simultaneously. That is the difficulty, and it has nothing to do with latency.`, '',
+      `Not because it lacks them, but because **the ending answers the time questions for free**: WHEN is end of input and HOW has no panes to relate, while WHERE is the same ${ET_KEYS.length} windows of ${WIN}s in both modes. Remove the ending and both defaults stop existing simultaneously. That is the difficulty, and it has nothing to do with latency.`, '',
       `**Early streaming systems got latency and lost correctness** — and it is worth being precise about why. They had no vocabulary for event time, so they bucketed by arrival. On this data that is **${LAMBDA_DIFFER.length} of the ${ET_KEYS.length} windows wrong, by ${LAMBDA_DRIFT} in total**: window [${mm(LAMBDA_DIFFER[0])}, ${mm(LAMBDA_DIFFER[0] + WIN)}) reads ${SUM(BY_ET[LAMBDA_DIFFER[0]])} by event time and ${SUM(BY_PT[LAMBDA_DIFFER[0]] || [])} by arrival. A missing feature, not an inherent limit — which is why a model could fix it.`, '',
-      `**The four questions unified them.** Read the WHAT row: batch's map/reduce and streaming's aggregation are the **same**. The computation was never the difference. The other three questions are all about time — which slice, which moment, how successive answers relate — and those are exactly the three an ending used to answer.`, '',
+      `**The four questions unified them.** Read the WHAT and WHERE rows: batch's map/reduce and streaming's aggregation are the **same**, over the same ${ET_KEYS.length} windows. The computation was never the difference. The two questions that differ — WHEN a result is final and HOW successive answers relate — are both about time, and those are exactly the two an ending used to answer.`, '',
       `**So one pipeline can run in both modes.** The grouping is identical: ${ET_KEYS.length} windows with values ${ET_KEYS.map(k => SUM(BY_ET[k])).join(', ')}, bounded or unbounded. The only difference is **when each result is final** — batch closes all ${ET_KEYS.length} at event ${batchFinalAt}, while in streaming ${NEVER_FINAL.length} is never final at all.`],
     whenHeading: 'When the unification pays, and what it does not remove',
     when: [
       `**It pays whenever the same logic serves history and live traffic** — a backfill, a re-derivation after a schema change, a new consumer over old data. One codebase, with the mode chosen by whether the input ends.`, '',
       `**Reach for a bounded run when the input genuinely ends,** and take the free answers. A nightly job over yesterday needs no watermark reasoning, and introducing one buys nothing.`, '',
-      `**Do not read "batch is a special case" as "batch is obsolete".** The special case is the easy one: three of the four questions are answered for you and every window is final at once, which is why a bounded run is the right tool whenever the input allows it.`, '',
+      `**Do not read "batch is a special case" as "batch is obsolete".** The special case is the easy one: WHEN and HOW are answered for you and every window is final at once, which is why a bounded run is the right tool whenever the input allows it.`, '',
       `**What this does not settle:** what to do when you need both low latency AND correctness over an unbounded input. Historically the answer was to build two systems, which is the next concept — and the cost of that answer turns out to be measurable on this dataset.`],
     diagramHeading: 'Visual walkthrough — the free answers, the lost clock, the unification',
     sub: `The batch result, the arrival-time divergence and the finality comparison are computed from the seed and asserted.` },
@@ -289,7 +290,7 @@ const DIAGRAMS = [
       `**Lambda runs two layers computing the same logic:** a batch layer that re-reads all ${EVENTS.length} events (correct, slow), a speed layer that works incrementally over arrivals (fast, approximate), and a serving layer that merges them and prefers the batch answer once it lands.`, '',
       `The shape is sound — it genuinely delivers both low latency and eventual correctness. The cost is that **the same aggregation is written twice, in two systems, kept in agreement by discipline rather than by construction.**`, '',
       `**And the drift has a predictable direction**, which is what makes it more than a theoretical risk. The batch layer has the whole input, so event time is the obvious choice; the speed layer sees arrivals, so arrival time is the obvious choice. Follow that through and **${LAMBDA_DIFFER.length} of the ${ET_KEYS.length} windows disagree, by ${LAMBDA_DRIFT} in total** — with both layers internally consistent and neither containing a bug.`, '',
-      `**Kappa replaces the second layer with replay.** Take a concrete bug: key "${BUG_KEY}" is halved, so it reads ${BUGGY_PER_KEY[BUG_KEY]} instead of ${TRUE_PER_KEY[BUG_KEY]} and the total reads ${BUGGY_TOTAL} instead of ${TOTAL}. Under Lambda the fix must land in **${LAMBDA_FIXES} places** and both must be verified. Under Kappa it lands in **${KAPPA_FIXES}**, and replaying ${REPLAY_READS} events restores ${TRUE_PER_KEY[BUG_KEY]} and ${TOTAL}.`, '',
+      `**Kappa replaces the second layer with replay.** Take a concrete bug: each of key "${BUG_KEY}"'s values is halved and rounded down (${HALVING}), so it reads ${BUGGY_PER_KEY[BUG_KEY]} instead of ${TRUE_PER_KEY[BUG_KEY]} and the total reads ${BUGGY_TOTAL} instead of ${TOTAL}. Under Lambda the fix must land in **${LAMBDA_FIXES} places** and both must be verified. Under Kappa it lands in **${KAPPA_FIXES}**, and replaying ${REPLAY_READS} events restores ${TRUE_PER_KEY[BUG_KEY]} and ${TOTAL}.`, '',
       `Kappa does not make the fix cheaper to *write*. It makes it **impossible to apply inconsistently**, because there is only one place to apply it.`, '',
       `**What Kappa assumes, in exchange:** a replayable log, retained for longer than the history the new code must reprocess, and a deterministic pipeline so that the replay produces ${TOTAL} rather than merely something plausible.`],
     whenHeading: 'When to pick each, and which assumption expires quietly',
@@ -329,7 +330,7 @@ const DIAGRAMS = [
       `**The question.** Design a data-processing system that survives a bug fix: every input is kept in a replayable log, so the corrected pipeline is deployed once and the whole history is replayed through the same code to replace the wrong result.`, '',
       `**The pipeline:** log (replayable) → one streaming pipeline → speed result; and replay path → **the same pipeline** → corrected result.`, '',
       `The pipeline appears twice and is the same code both times. That is the design: **there is no second implementation to keep in agreement.** And the log is the only box that cannot be rebuilt from another box, which makes its retention policy the system's real correctness boundary.`, '',
-      `**The incident, with values.** A bug halves key "${BUG_KEY}": the pipeline produces ${KEYS.map(k => `"${k}" = ${BUGGY_PER_KEY[k]}`).join(', ')}, total ${BUGGY_TOTAL}, where the truth is ${KEYS.map(k => `"${k}" = ${TRUE_PER_KEY[k]}`).join(', ')}, total ${TOTAL}. One edit, replay ${REPLAY_READS} events, and the corrected result lands.`, '',
+      `**The incident, with values.** A bug halves each of key "${BUG_KEY}"'s values, rounding down (${HALVING}): the pipeline produces ${KEYS.map(k => `"${k}" = ${BUGGY_PER_KEY[k]}`).join(', ')}, total ${BUGGY_TOTAL}, where the truth is ${KEYS.map(k => `"${k}" = ${TRUE_PER_KEY[k]}`).join(', ')}, total ${TOTAL}. One edit, replay ${REPLAY_READS} events, and the corrected result lands.`, '',
       `**The verification is the part worth copying:** key "${KEYS[1]}" reads ${TRUE_PER_KEY[KEYS[1]]} before *and* after. An unaffected invariant is what distinguishes "the replay reproduced history" from "the replay computed something else".`, '',
       `**And what this buys over Lambda, counted.** Fix sites: ${LAMBDA_FIXES} against ${KAPPA_FIXES}. Implementations to verify: ${LAMBDA_FIXES} against ${KAPPA_FIXES}. Plausible pre-existing drift: ${LAMBDA_DIFFER.length} of ${ET_KEYS.length} windows by ${LAMBDA_DRIFT} units, against **none possible**. The third row is structural rather than a matter of effort — with one implementation, layer-to-layer divergence has nowhere to live.`, '',
       `You pay for that in retention and replay time, which is a cost you can budget rather than a failure you have to detect.`],
@@ -456,7 +457,7 @@ PROGRAMS.push({
         heap: [{ key: 'batch', hot: true }],
         cap: `\`floorTo(e[clock], WIN)\` is the whole of WHERE, and \`clock\` is an argument. Batch and streaming both call this with \`"et"\` and get the same ${ET_KEYS.length} buckets — the computation was never what distinguished them. Early streaming systems called it with \`"pt"\` because they had no other option.` },
       { t: 'batch\'s watermark is a constant: end of input', line: at('fun finalAtBounded(bucket)', 'return len(EVENTS)', 'if (mode == "bounded")   { fin = append(fin, finalAtBounded(b)) }'),
-        stack: [MAIN({ batch: '@0x100' }), { name: 'runAs', locals: ['mode = "bounded"', 'w = (a map)', `fin = (${ET_KEYS.length} values)`, `b = ${NF.k}`] },
+        stack: [MAIN({ batch: '@0x100' }), { name: 'runAs', locals: ['mode = "bounded"', 'w = (a map)', `fin = (${ET_KEYS.indexOf(NF.k)} values)`, `b = ${NF.k}`] },
                 { name: 'finalAtBounded', locals: [`bucket = ${NF.k}`] }],
         heap: [{ key: 'batch', hot: true }],
         cap: `It ignores \`bucket\` entirely and returns ${batchFinalAt}. That is batch's watermark — the simplest possible one, reaching "everything" at EOF so every window closes together. Batch does not lack a watermark; it has a trivial one, and that is the whole of what an ending buys you.` },
@@ -488,7 +489,7 @@ PROGRAMS.push({
     '',
     `// primitive: BUG_KEY — the key the bug halves.  BUG_KEY = "${BUG_KEY}"`,
     '// primitive: buggyV(e) — what the broken pipeline computes for an event.',
-    `//   buggyV(EVENTS[0]) = ${buggy(EVENTS[0])}   (key "${EVENTS[0].key}", halved)`,
+    `//   buggyV(EVENTS[0]) = ${buggy(EVENTS[0])}   (key "${EVENTS[0].key}": ${EVENTS[0].v} halved, rounded down)`,
     `//   buggyV(EVENTS[2]) = ${buggy(EVENTS[2])}   (key "${EVENTS[2].key}", untouched)`,
     '',
     '// function: layerFor(name) — each Lambda layer picks the clock its own context',
@@ -571,15 +572,15 @@ PROGRAMS.push({
         heap: [{ key: 'batch' }, { key: 'speed' }],
         cap: `\`total\` reaches ${LAMBDA_DRIFT} across ${LAMBDA_DIFFER.length} buckets. Read the two heap rows at bucket ${LAMBDA_DIFFER[0]}: ${SUM(BY_ET[LAMBDA_DIFFER[0]])} and ${SUM(BY_PT[LAMBDA_DIFFER[0]] || [])}. Both layers are internally consistent, both are defensible, and the serving layer has to choose between them.` },
       { t: 'the same fix lands in two places, or in one', line: at('fun applyFix(architecture)', 'if (architecture == "lambda") { return Fix(2, 2) }'),
-        stack: [MAIN({ batch: '@0x100', speed: '@0x200', apart: LAMBDA_DRIFT, lam: `Fix(${LAMBDA_FIXES}, ${LAMBDA_FIXES})`, kap: `Fix(${KAPPA_FIXES}, ${KAPPA_FIXES})` }),
+        stack: [MAIN({ batch: '@0x100', speed: '@0x200', apart: LAMBDA_DRIFT }),
                 { name: 'applyFix', locals: ['architecture = "lambda"'] }],
         heap: [{ key: 'batch' }, { key: 'speed' }],
-        cap: `\`lam\` is Fix(${LAMBDA_FIXES}, ${LAMBDA_FIXES}) and \`kap\` is Fix(${KAPPA_FIXES}, ${KAPPA_FIXES}). Kappa does not make the fix cheaper to write — it makes applying it inconsistently impossible, because \`sites\` is 1. That is a different kind of guarantee from "we will remember to update both".` },
+        cap: `This call returns Fix(${LAMBDA_FIXES}, ${LAMBDA_FIXES}) into \`lam\`, and the next one, with \`"kappa"\`, returns Fix(${KAPPA_FIXES}, ${KAPPA_FIXES}) into \`kap\`. Kappa does not make the fix cheaper to write — it makes applying it inconsistently impossible, because \`sites\` is 1. That is a different kind of guarantee from "we will remember to update both".` },
       { t: 'and the replay restores the correct total from the log', line: at('fun replay(fixed)', 'if (fixed)         { total = total + e.v }'),
-        stack: [MAIN({ batch: '@0x100', speed: '@0x200', apart: LAMBDA_DRIFT, lam: `Fix(${LAMBDA_FIXES}, ${LAMBDA_FIXES})`, kap: `Fix(${KAPPA_FIXES}, ${KAPPA_FIXES})`, before: BUGGY_TOTAL, after: TOTAL }),
+        stack: [MAIN({ batch: '@0x100', speed: '@0x200', apart: LAMBDA_DRIFT, lam: `Fix(${LAMBDA_FIXES}, ${LAMBDA_FIXES})`, kap: `Fix(${KAPPA_FIXES}, ${KAPPA_FIXES})`, before: BUGGY_TOTAL }),
                 { name: 'replay', locals: ['fixed = true', `total = ${TOTAL}`, `e = EVENTS[${EVENTS.length - 1}]`] }],
         heap: [{ key: 'batch' }],
-        cap: `\`before\` = ${BUGGY_TOTAL}, \`after\` = ${TOTAL}, from re-reading the same ${REPLAY_READS} events through corrected code. Nothing was migrated and no second implementation was touched — which is the operational content of "the log is the source of truth".` },
+        cap: `\`before\` = ${BUGGY_TOTAL}, and this call's \`total\` has reached ${TOTAL}, which it returns into \`after\` — from re-reading the same ${REPLAY_READS} events through corrected code. Nothing was migrated and no second implementation was touched — which is the operational content of "the log is the source of truth".` },
     ];
   },
   intro: [
@@ -771,9 +772,9 @@ PROGRAMS.push({
       { t: 'and a non-deterministic pipeline gives the right total for the wrong reason', line: at('if (pipe.deterministic == false) { return Outcome(t, false, "pipeline reads outside the log") }'),
         stack: [MAIN({ h: '@0x100', s: '@0x200', l: '@0x300' }), { name: 'verify', locals: [`log = Log(${EVENTS.length} events, retained ${EVENTS.length})`, 'pipe = Pipeline(true, false)', `t = ${TOTAL}`] }],
         heap: [{ key: 'short' }, { key: 'loose', hot: true }],
-        cap: `\`loose\` has \`total\` = ${TOTAL} and \`trustworthy\` false — the number is right and the guarantee is not. A pipeline that reads the wall clock happens to agree on this replay and will not on the next, and no amount of log completeness fixes it: the pipeline has stopped being a function of its input.` },
-      { t: 'so two assumptions carry the whole architecture', line: at('    return Outcome(t, true, "reproduces history")'),
-        stack: [MAIN({ h: '@0x100', s: '@0x200', l: '@0x300' }), { name: 'verify', locals: [`log = Log(${EVENTS.length} events, retained ${EVENTS.length})`, 'pipe = Pipeline(true, true)', `t = ${TOTAL}`] }],
+        cap: `\`loose\` has \`total\` = ${TOTAL} and \`trustworthy\` false — the number is right and the guarantee is not. This program models determinism only as a flag: \`replayThrough\` never calls \`nondeterministic\`, so \`loose\` makes exactly the additions \`healthy\` made and its ${TOTAL} is equal by construction. The point is what \`verify\` can certify — a real pipeline that reads the wall clock may agree on one replay and not the next, and no amount of log completeness fixes that.` },
+      { t: 'so two assumptions carry the whole architecture', line: at('val healthy = verify(', 'val short   = verify(', 'val loose   = verify('),
+        stack: [MAIN({ h: '@0x100', s: '@0x200', l: '@0x300' })],
         heap: [{ key: 'healthy' }, { key: 'short' }, { key: 'loose' }],
         cap: `Read the three heap rows: totals ${TOTAL}, ${EVENTS.slice(3).reduce((s, e) => s + e.v, 0)} and ${TOTAL}, with \`trustworthy\` true, false and false. The totals alone cannot tell you which replay to believe — which is why retention length and determinism belong in a test rather than in an assumption.` },
     ];
@@ -781,7 +782,7 @@ PROGRAMS.push({
   intro: [
     `**What is being answered.** The two assumptions Kappa rests on, made into checks rather than hopes.`, '',
     `\`replayThrough\` is the architecture's only recovery mechanism, and it works: ${TOTAL} from ${EVENTS.length} retained events through the fixed pipeline.`, '',
-    `\`verify\` then names what that result depends on. Step 2: ${EVENTS.length - 3} retained events give ${EVENTS.slice(3).reduce((s, e) => s + e.v, 0)} — a confident wrong answer with no error. Step 3: a non-deterministic pipeline gives ${TOTAL}, the **right** total with \`trustworthy\` false. The totals alone cannot tell you which replay to believe.`],
+    `\`verify\` then names what that result depends on. Step 2: ${EVENTS.length - 3} retained events give ${EVENTS.slice(3).reduce((s, e) => s + e.v, 0)} — a confident wrong answer with no error. Step 3: a pipeline flagged non-deterministic gives ${TOTAL}, the **right** total with \`trustworthy\` false — the same additions as the healthy replay, since the program models determinism only as a flag, so only \`verify\`'s check can tell them apart. The totals alone cannot tell you which replay to believe.`],
   sub: `All three replay outcomes are computed from the seed and asserted.` });
 
 for (const g of PROGRAMS) {

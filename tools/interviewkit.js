@@ -34,6 +34,13 @@ const { buildMemoryWalkthrough } = require('./memkit.js');
 
 const attr = (s) => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
+// A sentence that is true of one chapter is false of the next: a shared default for the trap
+// printed "materialise a sequence you cannot afford" under problems that build no sequence.
+// So each chapter states its own, and a missing one is a build failure, not a fallback.
+function need(v, what) {
+  if (!v) throw new Error(`interviewkit: missing ${what}`);
+  return v;
+}
 function buildInterviewSection(spec) {
   const { name, out, gen, title, subtitle, problem, model, variations, program } = spec;
   for (const [k, v] of Object.entries({ name, out, gen, title, problem, model, variations, program }))
@@ -68,7 +75,7 @@ function buildInterviewSection(spec) {
   md.push(`#### The same problem, asked ${variations.length} other ways`, '');
   md.push(`Each of these is the program below with different nouns. The reason to read them is not the`,
           `answer — it is the *recognition*. ${surfaces.length} surfaces (${surfaces.join(', ')}), one shape, and in every`,
-          `case the appealing first answer is to materialise a sequence you cannot afford.`, '');
+          `case the appealing first answer is ${need(problem.trap, 'problem.trap — the tempting first answer for THIS problem')}.`, '');
   variations.forEach((v, i) => {
     md.push('<details>');
     md.push(`<summary><b>Variation ${i + 2}</b> — ${v.name} <i>(looks like ${v.surface})</i></summary>`, '');

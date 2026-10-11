@@ -217,6 +217,7 @@ const r = buildInterviewSection({
   subtitle: `${N} changes → ${KEYS.length} entries · compaction drops ${LOST} and changes nothing present · ${DISTINCT_PAST} past values lost`,
   problem: {
     surface: 'ledger',
+    trap: 'to treat the log and the table as interchangeable — to assume the table can give the changes back, or that keeping only the last entry per key loses nothing — when that holds only for the present state, and only for a log that says what each key became',
     statement: [`**You have a sequence of changes, each saying what a key became.**`, '',
       `**Produce the current value of every key.** Then: **produce the changes back, from the table.**`, '',
       `Then: **the log is too long to keep. What may you discard, and what do you lose?**`],
@@ -233,7 +234,7 @@ const r = buildInterviewSection({
   variations: [
     { name: 'the cache that must not go stale', surface: 'web infrastructure',
       statement: [`A service keeps an in-memory copy of a table. **Keep it current** as changes happen.`],
-      whyHard: `Folding the changelog into memory is exactly the chapter's program, and the operational question is what happens at start-up: the service must fold from somewhere, and the compacted log is precisely the "somewhere" that makes that cheap — ${COMPACT.length} entries instead of ${N}. The subtlety is that it must then switch from reading history to following live changes without a gap, which is the read-then-watch race from another chapter arriving here as a start-up sequence. Recognising that compaction exists for restarts as much as for disk is the content.`,
+      whyHard: `Folding the changelog into memory is exactly the chapter's program, and the operational question is what happens at start-up: the service must fold from somewhere, and the compacted log is precisely the "somewhere" that makes that cheap — ${COMPACT.length} entries instead of ${N}. The subtlety is that it must then switch from reading history to following live changes without a gap, and that is where the work is: the fold reaches a version, and live reading has to begin at exactly that version — begin later and the changes in between are never applied, so the cache serves a stale value forever; begin earlier and they are read twice, which costs reads but is harmless only because each entry is an assignment. Recognising that compaction exists for restarts as much as for disk is the content.`,
       maps: `\`fold\` over the compacted log, then continuing over live entries — with the handover point being the version the fold reached.` },
 
     { name: 'the audit log that was compacted', surface: 'compliance',
@@ -243,8 +244,8 @@ const r = buildInterviewSection({
 
     { name: 'the counter changelog', surface: 'metrics',
       statement: [`The entries say **what changed** — "+5" — rather than what the key became. **Fold them, and compact them.**`],
-      whyHard: `The fold now needs addition rather than assignment, which still works, and compaction **breaks**: you cannot keep "the last +5" and drop the earlier ones, because every entry contributes. The repair is to convert the log to absolute values first — fold, then emit — which is exactly the chapter's two functions composed, and it reveals why the log's format mattered in the first frame. The general rule is that a log of *deltas* cannot be compacted and a log of *states* can, so the format is a decision about retention and not about convenience.`,
-      maps: `\`fold\` with \`+\` in place of \`=\`, and \`compact\` becoming invalid until \`fold\` and \`emit\` have converted the deltas to states.` },
+      whyHard: `The fold now needs addition rather than assignment, which still works, and the chapter's compaction **breaks**: you cannot keep "the last +5" and drop the earlier ones, because every entry contributes. One repair is to convert the log to absolute values first — fold, then emit — which is exactly the chapter's two functions composed, and it reveals why the log's format mattered in the first frame. The general rule is that a log of *states* can be compacted by keeping the last entry per key and a log of *deltas* cannot: it can only be compacted by summing per key, and that result is safe to apply once, to an empty state. So the format is a decision about retention and not about convenience.`,
+      maps: `\`fold\` with \`+\` in place of \`=\`, and keep-the-last \`compact\` becoming invalid; summing per key, or \`fold\` then \`emit\` to convert the deltas to states, compacts it correctly.` },
   ],
   program: {
     src: SRC, heap: HEAP, steps, rel: '../diagrams/anim/ch06-interview-memory',

@@ -26,7 +26,7 @@ _Also known as: SS Ch04 · Session Windows · Fixed Window · Sliding Window · 
 
 **Sliding (hopping) windows** are fixed-length but overlapping, defined by a size and a slide — here 120s wide starting every 60s. 6 of the 9 events land in 2 windows at once, so the results total **78** against a dataset of 45. Output volume scales as size / slide = 2×. They answer "what is the rolling 120s figure, refreshed every 60s".
 
-**Session windows** are data-driven: a session is a burst of activity separated from the next by a gap of inactivity — here 120s. At that gap key `a` gets 3 sessions and key `b` gets 2, over the same span of event time, because they were active at different moments. No session has the same length as another and none starts on a round boundary; both facts follow from the boundaries being set by the data.
+**Session windows** are data-driven: a session is a burst of activity separated from the next by a gap of inactivity — here 120s. At that gap key `a` gets 3 sessions and key `b` gets 2, over the same span of event time, because they were active at different moments. Their lengths are 2s, 115s, 0s, 40s, 40s and they start at 12:00:01, 12:02:10, 12:09:00, 12:00:50, 12:03:40 — wherever activity began and stopped, not where a clock ticks. That two are 40s long and that 12:09:00 falls on a whole minute are coincidences of the data, not boundaries the clock imposed.
 
 **And here is the part that is easy to miss.** Sweep the gap over the same stream and key `a`'s session count goes **4 → 3 → 2 → 1** at gaps of 40s, 120s, 130s, 300s. The events never change. Only the definition of "a visit" does.
 
@@ -227,7 +227,7 @@ The lifecycle ends where the memory does: a session's state is released when the
 
 **What is being answered.** The four lifecycle steps, as four functions over the same key's arrivals.
 
-The line to look at first is inside `sessionsUpto`: `if (last != NONE && e.et - last.end <= gap)`. It performs **assign and merge at once** — the event joins the session and the session's bound moves in the same statement. That is why sessions have a merge step and the other shapes do not.
+The line to look at first is inside `sessionsUpto`: `if (last != NONE && e.et - last.end <= gap)`. It performs **assign and merge at once** — the event joins the session and the session's END moves in the same statement. A START moves only because the walk is re-sorted on every call: a late event that sorts in front opens the session earlier. That is why sessions have a merge step and the other shapes do not.
 
 `needsRetraction(key, gap)` then reduces the whole retraction question to one comparison: was the session collected at an index below the arrival index of one of its own members? At gap 120 that is 8 < 7 — false. At gap 40 it is 4 < 7 — true.
 
@@ -240,7 +240,7 @@ The animation steps through the code, holding each line long enough to read the 
 
 <img src="../diagrams/anim/ch04-lifecycle-memory/frames/step-01.svg" alt="Step 1: ASSIGN and MERGE are the same line, read twice" width="980">
 
-This one line does both jobs: if the arriving event is within `gap` of `last.end`, it is ASSIGNED to that session and the session is simultaneously MERGED — `last.end` moves. For id 6 (et 220) the session's bound changes, which is a window boundary moving after the window existed.
+This one line does both jobs: if an event is within `gap` of `last.end`, it is ASSIGNED to that session and the session is simultaneously MERGED — `last.end` moves. Walking at i = 6, it is true for id 5 (et 260): `last` is [220-220] and 260 − 220 = 40 ≤ 120, so the end moves to 260. The event that just arrived, id 6 (et 220), never takes this branch: it sorts in front of id 5 and opens the session, so a session that was [260-260] now starts at 220. The START moved backwards through the re-sort, which this line alone cannot do — a window boundary moving after the window existed.
 
 </details>
 <details>
@@ -248,7 +248,7 @@ This one line does both jobs: if the arriving event is within `gap` of `last.end
 
 <img src="../diagrams/anim/ch04-lifecycle-memory/frames/step-02.svg" alt="Step 2: so 2 out-of-order arrivals each absorb a session" width="980">
 
-`merged` returns true when the arriving event ended up in a session with more than one member. Compare the two heap rows: `afterFirst` has 2 session(s) and `afterAll` has 2, with starts pulled BACKWARDS by ids 6 and 7.
+`merged` returns true when the arriving event ended up in a session with more than one member. Compare the two heap rows: `afterFirst` starts at 90 and 260 and `afterAll` at 50 and 220 — the same 2 sessions, with both starts pulled BACKWARDS by ids 6 and 7.
 
 </details>
 <details>
@@ -308,7 +308,7 @@ Drop the keying and the 5 keyed sessions collapse to **2**: users' activity fill
 
 **Match the shape to the question:** fixed for periodic aggregates (4 answers totalling 45), sliding for moving averages (2× output), sessions for behaviour. And note the question "how many visits did this user have?" has 4 different correct answers here (4, 3, 2, 1) — it is not answerable until the gap is fixed.
 
-**What this does not settle:** this stream's late event **extends** a session. A late event that **bridges** two already-emitted sessions would retract two panes and emit one — the same mechanism with twice the bookkeeping — and no event here does it, so nothing in this chapter demonstrates that case.
+**What this does not settle:** this stream's late event **extends** a session. A late event that **bridges** two already-emitted sessions would retract two panes and emit one — the same mechanism with twice the bookkeeping — and no event in this keyed stream does it at gap 120s or 40s. The Google Interview Question section shows it on the same event times with the keys dropped and G = 47s: arrival 50 withdraws 1..3 and 90..130 and replaces them with 1..130.
 
 #### Visual walkthrough — the retraction, the collection, and the near miss
 
@@ -440,7 +440,7 @@ Two consequences that the algorithm cannot fix, and they are what the question i
 
 Each of these is the program below with different nouns. The reason to read them is not the
 answer — it is the *recognition*. 4 surfaces (access logs, scheduling, puzzles, operations), one shape, and in every
-case the appealing first answer is to materialise a sequence you cannot afford.
+case the appealing first answer is to assume one new item touches at most one existing run, so a run once reported stays as reported — and what breaks it is the item that joins two runs (or, in the calendar, the cancellation that splits one).
 
 <details>
 <summary><b>Variation 2</b> — the calendar that will not double-book <i>(looks like scheduling)</i></summary>
@@ -449,7 +449,7 @@ case the appealing first answer is to materialise a sequence you cannot afford.
 
 **Why it is not obvious.** Insertion is the same shape with the gap set to zero, and the new operation is the hard one: **cancellation splits a run**, which nothing above can do. Merging is easy because the merged run is determined by its ends; splitting is not, because once two bookings have been merged into one span the information needed to separate them is gone. So the state cannot be the merged runs at all — it has to be the individual bookings, with the merge computed on read. Recognising that the chapter's state shape is only valid for an append-only stream is the whole answer.
 
-**Where it lands.** `touching` with G = 0 for the overlap test, and `absorb` kept — but the stored state changes from runs to members, which is a different program with the same lookup.
+**Where it lands.** `touching` with G = 0 and strict comparisons for the overlap test (bookings are half-open, so back-to-back meetings do not clash), and `absorb` kept — but the stored state changes from runs to members, which is a different program with the same lookup.
 
 
 <details>
@@ -552,7 +552,8 @@ CANCEL_START = 90
 
 # The chapter's nine requests as an operation stream, and the same stream with the cancel.
 # Below them: a single booking, the abutting pair and the one-minute-overlap pair, a tiny day,
-# a long day, and a generated stream of 600 bookings.  These are inputs for the examples
+# a long day, and a generated stream of 400 abutting bookings (and the same 400 requested
+# twice).  These are inputs for the examples
 # table, not alternative versions of the problem.
 REQUEST_OPS = [("book", r) for r in REQUESTS]
 REQUEST_OPS_CANCEL = REQUEST_OPS + [("cancel", CANCEL_START)]
@@ -809,7 +810,10 @@ def main():
     gaps_keep = [g for g in free_gaps([(r[0], r[1]) for r in runs_keep])]
     missing = [g for g in gaps_true if g not in gaps_keep]
     assert missing == [(80, 130)], missing
-    print(f"    keep never offers {missing} -- the freed 50 minutes are unbookable forever.")
+    cancelled = next(r for r in REQUESTS if r[0] == CANCEL_START)
+    freed = sum(e - s for s, e in gaps_true) - sum(e - s for s, e in gaps_keep)
+    assert freed == cancelled[1] - cancelled[0], (freed, cancelled)
+    print(f"    keep never offers {missing} as one gap -- the freed {freed} minutes are unbookable forever.")
     # and the consequence, as a booking anyone would try to make
     probe = (95, 125)
     assert run_member_calendar(full + [("book", probe)])[0][-1] is True
@@ -939,7 +943,7 @@ REQUESTS (minutes from 09:00, half-open):
     merged/keep -> busy [(1, 31), (50, 80), (90, 160), (245, 275), (540, 570)]
     drop loses [(130, 160)] from the busy view -- a meeting that was never cancelled is
     now bookable, so two parties are sent to one room.
-    keep never offers [(80, 130)] -- the freed 50 minutes are unbookable forever.
+    keep never offers [(80, 130)] as one gap -- the freed 40 minutes are unbookable forever.
     booking 95..125 afterwards: members ACCEPT, merged/keep REJECTS,
     merged/drop accepts -- and accepts it on top of the meeting it lost.
   before the cancellation all three states agree exactly, so it is the cancel --
@@ -966,7 +970,7 @@ all assertions passed
 
 > Positions on a line are turned on one at a time, in any order. **After each one, report how many contiguous stretches are on.**
 
-**Why it is not obvious.** It is this problem with G = 1 and only a count wanted, and dropping the detail makes a much better answer available: a new position can join at most **two** stretches, so the count changes by exactly +1, 0 or −1 and nothing has to be searched. The non-obvious part is that this is reachable with no interval structure at all — a map from each stretch's endpoints to its length, consulted at the two neighbours, which is O(1) per position against the chapter's O(log runs). Noticing that the question asked only for a count is where the saving comes from.
+**Why it is not obvious.** It is this problem with G = 1 and only a count wanted, and dropping the detail makes a much better answer available: a new position can join at most **two** stretches, so the count changes by exactly +1, 0 or −1 and nothing has to be searched. The non-obvious part is that this is reachable with no interval structure at all — a map from each stretch's endpoints to its length, consulted at the two neighbours: two lookups and two writes per position, however many stretches exist, against the chapter's structure, which compares the new position with every run. Noticing that the question asked only for a count is where the saving comes from.
 
 **Where it lands.** `touching` reduced to checking the two adjacent positions, and `absorb` to arithmetic on a count. The 2-run merge in the trace is the −1 case.
 
@@ -1027,7 +1031,8 @@ detail makes a much better answer available.  A new position can join at most TW
 the one ending at p-1 and the one starting at p+1 -- so the count changes by exactly +1, 0 or
 -1 and nothing has to be searched at all.  The non-obvious part is that this needs no interval
 structure whatsoever: a map from each stretch's ENDPOINTS to its length, consulted at the two
-neighbours, is O(1) per position against the chapter's O(log runs).  Noticing that the question
+neighbours: two lookups and two writes per position, however many stretches exist, against
+the chapter's structure, which compares the new position with every run.  Noticing that the question
 asked only for a count is where the saving comes from.
 
 WORKED EXAMPLES: the EXAMPLES table below holds 15 input/output pairs -- an empty stream with
@@ -1178,7 +1183,7 @@ def show_examples():
     two lookups and two writes per position, `rescan` is the reference's set reads, and `runs`
     is the chapter's run comparisons.  The endpoint map LOSES on short streams (4 ops for one
     position against the rescan's 1) and TIES at exactly seven positions, where 4n = n(n+1)/2;
-    only past that does it win, and at 10,000 it wins by four orders of magnitude.  A rescan
+    only past that does it win, and at 10,000 it wins by a factor of (n+1)/8, about 1,250.  A rescan
     count marked * was not run -- the identity main() asserts, n(n+1)/2, is reported instead,
     because actually running it at 10,000 would take longer than everything else here.
     """
@@ -1250,7 +1255,10 @@ def main():
     assert count_by_runs(SPARSE)[0] == sparse_counts
     print(f"\n  SPARSE = {SPARSE} (the chapter's arrival times, G = 1):")
     print(f"    {sparse_counts} -- no two are within 1, so every position is its own island and")
-    print(f"    the count only ever rises.  The same data merged four runs at the chapter's G = 47.")
+    ordered = sorted(SPARSE)
+    runs_at_47 = 1 + sum(1 for a, b in zip(ordered, ordered[1:]) if b - a > 47)
+    assert runs_at_47 == 3, runs_at_47
+    print(f"    the count only ever rises.  At the chapter's G = 47 the same {len(SPARSE)} times collapse into {runs_at_47} runs.")
     # the opposite outcome is forbidden: a DENSE sequence must end at one island
     dense = list(range(20))
     assert count_by_endpoints(dense)[0] == [1] * 20, "consecutive positions must never add an island"
@@ -1301,8 +1309,8 @@ def main():
     # for the new position, -1 for the neighbour it absorbs), and a repeat also gives 0,
     # which is why the two cannot be told apart from the count alone.  The second
     # expectation was that 0 would then dominate.  Measured, the three deltas each occur
-    # close to n/3 times on a shuffle, because each of the two neighbours is already on with
-    # probability about a half and the three outcomes are the three ways that can land.
+    # close to n/3 times on a shuffle, because among p-1, p and p+1 each is equally likely to
+    # arrive first: p first gives +1, p last gives -1, p in the middle gives 0.
     thirds = [deltas_big.count(d) / BIG for d in (1, 0, -1)]
     assert all(abs(f - 1 / 3) < 0.02 for f in thirds), thirds
     assert sum(deltas_big) == 1, sum(deltas_big)
@@ -1388,7 +1396,7 @@ POSITIONS = [5, 7, 6, 1, 2, 3, 4, 4]
 
   SPARSE = [1, 3, 90, 130, 245, 260, 220, 50, 540] (the chapter's arrival times, G = 1):
     [1, 2, 3, 4, 5, 6, 7, 8, 9] -- no two are within 1, so every position is its own island and
-    the count only ever rises.  The same data merged four runs at the chapter's G = 47.
+    the count only ever rises.  At the chapter's G = 47 the same 9 times collapse into 3 runs.
     0..19 in order -> all ones; 0,2,4,..,38 -> 1..20.  The two extremes bracket it.
 
   150 shuffles of the same 15 positions: the final count is always 3
@@ -1495,8 +1503,10 @@ later firing within G must not page again.  So the retraction from the chapter's
 a paging problem: when two already-paged incidents merge, somebody was paged twice for what
 turned out to be one.  The useful answer is that G is now TWO decisions and not one -- how long
 to wait before paging, and how long before declaring the incident over -- and they need not be
-the same number.  Measured below: at this data no single pair of numbers gives both zero double
-pages and a page for every incident.
+the same number.  Measured below: on this arrival order only 3 of 4,961 pairs -- CLOSE_AFTER
+87..89 with PAGE_AFTER 0 -- give both zero double pages and a page for every incident, and
+reordering the same nine firings breaks them, so no pair gives both for arrival orders you do
+not control.
 
 WORKED EXAMPLES: the EXAMPLES table below holds 16 input/output pairs -- an empty stream, a
 single firing that nobody is ever paged for, both sides of the quiet period (a gap of exactly
@@ -1524,8 +1534,9 @@ CLOSE_AFTER = 47
 WIDE = 120
 
 # PAGE_AFTER = 2 minutes: how long the monitor must have been firing before a human is woken.
-# Chosen because the 1..3 firings span exactly 2, so this is the smallest value at which that
-# pair pages -- and therefore the smallest value at which the double page happens.
+# Chosen because the 1..3 firings span exactly 2, so this is the LARGEST value at which that
+# pair still pages -- and therefore the largest at which the double page happens; at 3 it
+# disappears.
 PAGE_AFTER = 2
 
 # A single firing, the two pairs that straddle the quiet period, a repeated firing, the same
@@ -1988,7 +1999,7 @@ def ascending(times):
 
 def sweep(times, g=G):
     """The batch answer: sort, then walk.  Each time extends the last run or starts
-    a new one, decided by one comparison.  O(n log n) + O(n) -- and correct only
+    a new one, decided by one comparison.  One sort, then one comparison per time -- and correct only
     once every time has arrived, which the question says will not happen."""
     out = []
     for t in ascending(times):
@@ -2038,7 +2049,7 @@ def incremental(times, g=G):
 # The three variations.
 
 def the_calendar_that_will_not_double_book(ops):
-    """Variation 1, surface: scheduling.  Reject bookings that overlap; report gaps.
+    """Variation 2, surface: scheduling.  Reject bookings that overlap; report gaps.
 
     Non-obvious point: insertion is `touching` with g = 0, and CANCELLATION is the
     operation nothing above can do -- merging is easy because a merged run is
@@ -2047,31 +2058,35 @@ def the_calendar_that_will_not_double_book(ops):
     merged runs at all: it must be the individual bookings, with the merge
     computed on read.
 
-    `ops` is [("book"|"cancel", (start, end)), ...].  Returns (accepted, members).
+    Bookings are HALF-OPEN, [start, end), so back-to-back meetings do not clash.
+    `ops` is [("book", (start, end)) | ("cancel", start), ...]: a cancel names the
+    booking by its start and is accepted only if it removed one.
+    Returns (accepted, members).
     """
     members, accepted = [], []
     for kind, span in ops:
         if kind == "book":
-            clash = [m for m in members if span[0] <= m[1] and m[0] <= span[1]]
+            clash = [m for m in members if span[0] < m[1] and m[0] < span[1]]
             if clash:
                 accepted.append(False)
                 continue
             members.append(span)
             accepted.append(True)
         else:
-            members = [m for m in members if m != span]
-            accepted.append(True)
+            before = len(members)
+            members = [m for m in members if m[0] != span]
+            accepted.append(len(members) < before)
     return accepted, sorted(members)
 
 def the_island_count(positions):
-    """Variation 2, surface: puzzles.  Positions turn on in any order; after each,
+    """Variation 3, surface: puzzles.  Positions turn on in any order; after each,
     how many contiguous stretches are on?
 
     Non-obvious point: the question asked only for a COUNT, and that buys a much
     better answer -- a new position can join at most TWO stretches, so the count
     moves by exactly +1, 0 or -1 and nothing has to be searched.  A map from a
-    stretch's endpoints to its length is enough: O(1) per position, with no
-    interval structure at all.  The two-run merge in the main trace is the -1 case.
+    stretch's endpoints to its length is enough: two lookups and two writes per
+    position, with no interval structure at all.  The two-run merge in the main trace is the -1 case.
     """
     length, count, out = {}, 0, []
     on = set()
@@ -2090,7 +2105,7 @@ def the_island_count(positions):
     return out
 
 def the_deduplicated_alert(firings, page_after, close_after):
-    """Variation 3, surface: operations.  Group firings into incidents and page once.
+    """Variation 4, surface: operations.  Group firings into incidents and page once.
 
     Non-obvious point: you must page while an incident is still OPEN -- acting on a
     run before knowing it is finished -- so the withdrawal in the main trace becomes
@@ -2172,12 +2187,22 @@ def main():
     # variations
     ok, members = the_calendar_that_will_not_double_book(
         [("book", (0, 10)), ("book", (5, 15)), ("book", (11, 20)),
-         ("cancel", (0, 10)), ("book", (5, 9))])
+         ("cancel", 0), ("book", (5, 9))])
     assert ok == [True, False, True, True, True], ok
     assert members == [(5, 9), (11, 20)], members
-    # and the point: a merged-run state could not have produced that last booking,
-    # because cancelling 0..10 out of a merged 0..20 is not expressible
-    assert sweep([0, 10, 11, 20], 1) == [(0, 0), (10, 11), (20, 20)]
+    # and the point: a merged-run state could not have produced that result.  The two
+    # bookings held before the cancel abut within 1, so a gap-1 merge keeps them as ONE
+    # run 0..20, which no longer records where 0..10 ended -- cancelling the booking
+    # that starts at 0 then removes 11..20 as well, which the member state keeps.
+    held = [(0, 10), (11, 20)]
+    assert held[1][0] - held[0][1] <= 1
+    merged_state = [(held[0][0], held[1][1])]
+    assert merged_state == [(0, 20)], merged_state
+    assert [r for r in merged_state if r[0] != 0] == [], "the merged run survived the cancel"
+    assert [m for m in held if m[0] != 0] == [(11, 20)]
+    assert the_calendar_that_will_not_double_book(
+        [("book", (90, 130)), ("book", (130, 160))])[0] == [True, True], "back-to-back must not clash"
+    assert the_calendar_that_will_not_double_book([("cancel", 7)])[0] == [False], "a cancel of nothing"
     print(f"\n  calendar: accepted {ok}, members {members}")
 
     islands = the_island_count([5, 7, 6, 1, 2, 3])
@@ -2257,7 +2282,7 @@ all assertions passed
 
 The reframe above is six paragraphs; this is the batch answer and then the same thing built one arrival at a time, with the two things a whiteboard cannot show — **what is allocated, and when**.
 
-Measured on [1, 3, 90, 130, 245, 260, 220, 50, 540] with G = 47: the sorted sweep gives 1..130  220..260  540..540, and 9 arrivals processed in order give 1..130  220..260  540..540 — asserted equal. Along the way one arrival **starts** a run, one **extends** one, and arrival 50 **joins 2** of them into 1..130. 6 runs that were already reported stop existing, and one run later acquires an earlier start — which is what rules out keying the output on it.
+Measured on [1, 3, 90, 130, 245, 260, 220, 50, 540] with G = 47: the sorted sweep gives 1..130  220..260  540..540, and 9 arrivals processed in order give 1..130  220..260  540..540 — asserted equal. Along the way 4 arrivals **start** a run, 4 **extend** one, and arrival 50 **joins 2** of them into 1..130. 6 runs that were already reported stop existing, and 2 runs later acquire an earlier start — which is what rules out keying the output on it.
 
 The animation steps through the code, holding each line long enough to read the STACK (call frames and their locals) and the HEAP (allocated arrays and objects) as they are AT THAT MOMENT. Expand any step to study it on its own.
 
@@ -2276,7 +2301,7 @@ The animation steps through the code, holding each line long enough to read the 
 
 <img src="../diagrams/anim/ch04-interview-memory/frames/step-02.svg" alt="Step 2: the batch answer: sort, then walk" width="980">
 
-Sorted, each time either extends the current run or starts a new one, and one comparison decides which: 1..130  220..260  540..540. O(n log n) for the sort and O(n) for the walk — and it is only correct **once every time has arrived**, which the question says will not happen.
+Sorted, each time either extends the current run or starts a new one, and one comparison decides which: 1..130  220..260  540..540. One sort of all 9 times, then one comparison per time — and it is only correct **once every time has arrived**, which the question says will not happen.
 
 </details>
 <details>
@@ -2296,11 +2321,11 @@ A time joins a run if it is within G of either end — so the test is two compar
 
 </details>
 <details>
-<summary><b>Step 5 of 12</b> — arrival 3: extends one run</summary>
+<summary><b>Step 5 of 12</b> — arrival 130: extends one run</summary>
 
-<img src="../diagrams/anim/ch04-interview-memory/frames/step-05.svg" alt="Step 5: arrival 3: extends one run" width="980">
+<img src="../diagrams/anim/ch04-interview-memory/frames/step-05.svg" alt="Step 5: arrival 130: extends one run" width="980">
 
-3 touches exactly one run, 1..1, so that run's ends widen to cover it: 1..3. This is the case everyone implements, and it is why the next frame is the question — one touched run is the easy half.
+130 touches exactly one run, 90..90, so that run's ends widen to cover it: 1..3  90..130. This is the case everyone implements, and it is why the next frame is the question — one touched run is the easy half.
 
 </details>
 <details>
@@ -2348,7 +2373,7 @@ Run 245..260 later acquires an **earlier** start, because a time arrived before 
 
 <img src="../diagrams/anim/ch04-interview-memory/frames/step-11.svg" alt="Step 11: what each arrival costs" width="980">
 
-`touching` as written looks at every run, which is fine at 3 and not at 1,000,000 entries spread over thousands of runs. The runs are kept ordered by start and never overlap, so the touched ones are a **contiguous slice** — findable by bisection and then walked, giving log plus the number actually merged. The ordering is already maintained, so this costs nothing to add and is the difference between O(runs) and O(log runs) per arrival.
+`touching` as written looks at every run, which is fine at 3 and not at 1,000,000 entries spread over thousands of runs. The runs are kept ordered by start and never overlap, so the touched ones are a **contiguous slice** — findable by bisection and then walked, giving log plus the number actually merged. The ordering is already maintained, so this costs nothing to add and is the difference between comparing every run and about 20 comparisons per arrival — even if all 1,000,000 entries were separate runs.
 
 </details>
 <details>
@@ -2370,13 +2395,13 @@ State grows with the number of open runs and nothing above ever removes one — 
 Concepts this chapter mentions but does not fully unpack are linked below — each pointer names the chapter where the concept is covered in depth and gives a concrete example that ties the two chapters together.
 
 - **[Chapter 2: The What, Where, When, and How of Data Processing → What and Where — transformations and windowing](ch02-the-what-where-when-and-how-of-data-processing.md#what-and-where--transformations-and-windowing)** — the window is the "where" axis of the four-question model; ch02 fixes that axis against the other three (what/when/how).
-  - _Example:_ ch04's fixed vs sliding vs session shapes are the "where" choice; ch02 shows the same click 12:04:00 answering 1 fixed, 3 sliding, or 1 session result, with the trigger deciding when each emits.
+  - _Example:_ ch04's fixed vs sliding vs session shapes are the "where" choice; ch02 shows the same seed giving 4 fixed sums totalling 45 and sliding (120s every 60s) sums totalling 78, because an event falls in up to 2 sliding windows, with the trigger deciding when each emits.
 - **[Chapter 3: Watermarks → Propagation and correctness](ch03-watermarks.md#propagation-and-correctness)** — a window's lifecycle ends with garbage collection, and the watermark is what decides when a window is done — ch03 defines the signal that drives it.
-  - _Example:_ ch04's "session done when watermark passes end + lateness" is ch03's watermark 12:06:30 closing [12:00,12:05); the skew formula (max_seen 12:08:30 − 120 s) is what produced that watermark.
+  - _Example:_ ch04's "session done when watermark passes end + gap" runs on ch03's watermark (max seen − 60 s): after id 4 it is 12:04:05 − 60 s = 12:03:05, which closes [12:00, 12:02) holding 15 of its true 19; after id 8 it is 12:09:00 − 60 s = 12:08:00, which passes 12:03:30, the end + gap of key "b"'s session [12:00:50, 12:01:30], so that session is collected.
 - **[Chapter 8: Streaming SQL → Windows in SQL](ch08-streaming-sql.md#windows-in-sql)** — TUMBLE/HOP/SESSION are the SQL spellings of this chapter's fixed/sliding/session shapes, with the watermark driving emission.
-  - _Example:_ ch04's session [12:00,12:50) after a 12:20:00 bridge event is what Flink SQL's SESSION(gap) computes; ch04's sliding 10-min/2-min is ch08's HOP(10 min, 2 min).
+  - _Example:_ ch04's sliding window (120 s wide, every 60 s) is ch08's HOP(60 s, 120 s) — HOP(slide, size) — giving 7 rows totalling 78; ch04's per-key sessions at the 120 s gap are ch08's SESSION(gap): key "a" gets 3 rows and key "b" 2, 5 sessions for 9 events.
 - **[Chapter 7: The Practicalities of Persistent State → Checkpoints and state stores](ch07-the-practicalities-of-persistent-state.md#checkpoints-and-state-stores)** — window state is exactly the state that a stateful processor must persist; ch07 covers how that per-window state is snapshotted and recovered.
-  - _Example:_ ch04's per-window counts and session sets live in keyed state; ch07 shows that same state as { 42: 13 } being checkpointed with its offset so a restart resumes without recomputing the windows.
+  - _Example:_ ch04's per-window sums live in keyed state; ch07 checkpoints exactly those (key, 120 s window) entries after event 4 — { a@0:8, b@0:7, a@120:2, a@240:6 }, 4 entries holding 23, with offset 4 — so a restart replays only the 4 events after offset 4 instead of recomputing every window.
 
 ## System Design Interview
 
@@ -2390,33 +2415,33 @@ Concepts this chapter mentions but does not fully unpack are linked below — ea
 
 _Role: event source — emits events with event time and a key_
 
-- a click {user: 42, event_time: "12:20:00"} arrives
-- the key is user 42, so sessions are per-user
-- a late event may arrive with event_time earlier than the watermark
+- a click {id: 7, event_time: "12:00:50", v: 4} arrives — the seed's late event, with the keys dropped so all 9 seed events are one user's, as in the interview section
+- with one user, the gap is measured across the whole stream; keyed, id 7 would only ever meet key "b"'s sessions
+- it arrives after clicks at 12:01:30 and 12:02:10, so its event time is behind the watermark (12:03:20)
 
 ### window assigner
 
 _Role: window assigner — assigns events to session windows_
 
-- the event is assigned to a new or existing session for user 42
-- the gap threshold is 30 min of inactivity
+- the event is assigned to a new or existing session for that one user
+- the gap threshold is 47 s of inactivity (the interview section's G; at the book's 120 s no event bridges)
 - sessions are data-driven, not clock-aligned
 
 ### session merger
 
 _Role: session merger — merges sessions that a bridging event connects_
 
-- s1 [12:00,12:10) and s2 [12:40,12:50) both sit within 30 min of the event
-- the merger collapses them into sMerged [12:00, 12:50)
-- the merged count folds s1 + s2 + the bridging event
+- s1 [12:00:01, 12:00:03] (sum 8) and s2 [12:01:30, 12:02:10] (sum 9) are 87 s apart, more than the gap, so they were two sessions
+- the event is 47 s after s1 and 40 s before s2, so it bridges them: the merger collapses all three into sMerged [12:00:01, 12:02:10]
+- the merged sum folds s1 + s2 + the bridging event: 8 + 9 + 4 = 21
 
 ### trigger/retraction emitter
 
 _Role: trigger/retraction emitter — emits and corrects panes_
 
 - the on-time trigger fires when the watermark passes a session end
-- a late merge retracts the two earlier panes
-- the merged pane is emitted so the store shows one session, not three
+- a late merge retracts the two earlier panes (8 and 9), both already emitted when the watermark passed end + 47 s
+- the merged pane (21) is emitted so the store shows one session, not three
 
 
 <!-- ch04-system:begin — generated by tools/gen_ch04.js; do not hand-edit -->
@@ -2447,8 +2472,8 @@ Note what makes this harder than a fixed window's correction: the retraction nam
 
 1. **Session state is data-dependent.** 5 entries for 9 events here, and nothing bounds it for a burstier stream or a larger key space. Fixed windows can be sized in advance; this cannot.
 2. **One session is never collected**, because the watermark never reaches 12:11:00. Its state is held for the life of the job regardless of allowed lateness — a low-traffic key is a permanent allocation.
-3. **The bridge case is not demonstrated.** This stream's late event extends a session; one that merged two already-published sessions would retract two panes and emit one. Same mechanism, twice the bookkeeping, and no number here proves it works.
-4. **The gap is unverifiable.** Every session count in this chapter is correct for 120s and for no other definition, and nothing in the data can tell you whether 120s is the right definition of a visit.
+3. **The bridge case is not demonstrated in this keyed stream.** This stream's late event extends a session; one that merged two already-published sessions would retract two panes and emit one. Same mechanism, twice the bookkeeping, and no event in this keyed stream does it at gap 120s or 40s. The Google Interview Question section shows it on the same event times with the keys dropped and G = 47s: arrival 50 withdraws 1..3 and 90..130 and replaces them with 1..130.
+4. **The gap is unverifiable.** Every session count stated for the book's gap is correct for 120s and for no other definition — the same stream gives 4, 3, 2, 1 sessions for key a at 40s, 120s, 130s, 300s — and nothing in the data can tell you whether 120s is the right definition of a visit.
 
 #### Visual walkthrough — six stages, one retraction, two coupled settings
 
@@ -2485,7 +2510,7 @@ The coupling in the note is the thing to take away. Shrinking the gap from 120s 
 
 <img src="../diagrams/anim/ch04-system/frames/step-04.svg" alt="Step 4: and what this design does NOT settle" width="1040">
 
-The third note is worth stating plainly rather than implying: this dataset's straggler extends one session, so the bridge case — one event merging two already-published sessions — is not demonstrated here. It is the same retraction mechanism applied twice, and a design that handles the extension handles it, but no number in this chapter proves that.
+The third note is worth stating plainly rather than implying: this dataset's straggler extends one session, so the bridge case — one event merging two already-published sessions — is not demonstrated in this keyed stream. It is the same retraction mechanism applied twice. The Google Interview Question section shows it on the same event times with the keys dropped and G = 47s: arrival 50 withdraws 1..3 and 90..130 and replaces them with 1..130.
 
 </details>
 
@@ -2561,10 +2586,11 @@ An analytics pipeline reports 'sessions per user', but a user who pauses for 20 
 - Retraction — cancel the earlier panes
 
 ```java
-// s1 [12:00,12:10), s2 [12:40,12:50)
-//   late event @ 12:20 -> bridges gap -> merge
-//   retract s1 (3), retract s2 (2)
-//   emit sMerged [12:00,12:50) count = 3+2+1 = 6
+// seed times as one user, gap 47 s:
+// s1 [12:00:01,12:00:03] sum 8, s2 [12:01:30,12:02:10] sum 9 -- 87 s apart
+//   late event @ 12:00:50 (v 4): 47 s after s1, 40 s before s2 -> bridges -> merge
+//   retract s1 (8), retract s2 (9)
+//   emit sMerged [12:00:01,12:02:10] sum = 8+9+4 = 21
 ```
 
 _This is exactly the session merging and retraction material in this chapter._
@@ -2587,9 +2613,10 @@ A dashboard needs both an hourly total and a rolling 10-minute average, but the 
 - Window size + slide — defines the overlap
 
 ```java
-// fixed   : event @ 12:04 belongs to [12:00,12:05) only
-// sliding : event @ 12:04 belongs to [11:55,12:05), [11:56,12:06), ... [12:04,12:14)
-//   -> count once vs count many
+// at seed scale: fixed 120 s stands in for the hour, sliding 120 s every 60 s for the rolling window
+// fixed   : id 4 @ 12:04:05 belongs to [12:04,12:06) only
+// sliding : id 4 @ 12:04:05 belongs to [12:03,12:05) and [12:04,12:06)
+//   -> 4 fixed sums total 45 (each event once); 7 sliding sums total 78 (up to twice)
 ```
 
 _This is exactly the fixed vs sliding window material in this chapter._
@@ -2610,10 +2637,10 @@ _From the 28 problems:_ 20-metrics-monitoring
 Fixed windows partition time into equal, non-overlapping, contiguous spans; each event belongs to exactly one window.
 
 ```java
-// s1 [12:00,12:10), s2 [12:40,12:50)
-//   late event @ 12:20 -> bridges gap -> merge
-//   retract s1 (3), retract s2 (2)
-//   emit sMerged [12:00,12:50) count = 3+2+1 = 6
+// at seed scale: fixed 120 s stands in for the hour, sliding 120 s every 60 s for the rolling window
+// fixed   : id 4 @ 12:04:05 belongs to [12:04,12:06) only
+// sliding : id 4 @ 12:04:05 belongs to [12:03,12:05) and [12:04,12:06)
+//   -> 4 fixed sums total 45 (each event once); 7 sliding sums total 78 (up to twice)
 ```
 
 

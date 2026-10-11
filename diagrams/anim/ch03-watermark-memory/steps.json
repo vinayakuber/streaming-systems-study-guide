@@ -74,7 +74,7 @@
           "locals": [
             "events = EVENTS",
             "out = (6 values so far)",
-            "i = 5",
+            "i = 6",
             "smallest = 50",
             "j = 7"
           ]

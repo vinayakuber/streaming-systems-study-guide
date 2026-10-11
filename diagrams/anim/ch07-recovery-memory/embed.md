@@ -41,7 +41,7 @@ Read the two heap rows together: 68 DOUBLE COUNTED and 22 LOST THE PREFIX, again
 
 <img src="../diagrams/anim/ch07-recovery-memory/frames/step-04.svg" alt="Step 4: so the checkpoint interval IS the at-least-once error bound" width="980">
 
-`errorBound` sums the v of the events since the last checkpoint and keeps the largest — 12 at k = 3. Note what it takes as its only argument: `k`. The interval chosen in the previous concept for I/O and recovery time also sets how wrong an at-least-once answer can be.
+`errorBound` sums the v of the events since the last checkpoint and keeps the largest — 13 at k = 3. Note what it takes as its only argument: `k`. The interval chosen in the previous concept for I/O and recovery time also sets how wrong an at-least-once answer can be.
 
 </details>
 

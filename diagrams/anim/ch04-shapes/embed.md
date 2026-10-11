@@ -6,7 +6,7 @@
 
 **Sliding (hopping) windows** are fixed-length but overlapping, defined by a size and a slide — here 120s wide starting every 60s. 6 of the 9 events land in 2 windows at once, so the results total **78** against a dataset of 45. Output volume scales as size / slide = 2×. They answer "what is the rolling 120s figure, refreshed every 60s".
 
-**Session windows** are data-driven: a session is a burst of activity separated from the next by a gap of inactivity — here 120s. At that gap key `a` gets 3 sessions and key `b` gets 2, over the same span of event time, because they were active at different moments. No session has the same length as another and none starts on a round boundary; both facts follow from the boundaries being set by the data.
+**Session windows** are data-driven: a session is a burst of activity separated from the next by a gap of inactivity — here 120s. At that gap key `a` gets 3 sessions and key `b` gets 2, over the same span of event time, because they were active at different moments. Their lengths are 2s, 115s, 0s, 40s, 40s and they start at 12:00:01, 12:02:10, 12:09:00, 12:00:50, 12:03:40 — wherever activity began and stopped, not where a clock ticks. That two are 40s long and that 12:09:00 falls on a whole minute are coincidences of the data, not boundaries the clock imposed.
 
 **And here is the part that is easy to miss.** Sweep the gap over the same stream and key `a`'s session count goes **4 → 3 → 2 → 1** at gaps of 40s, 120s, 130s, 300s. The events never change. Only the definition of "a visit" does.
 

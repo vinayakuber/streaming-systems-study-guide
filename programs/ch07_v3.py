@@ -23,7 +23,7 @@
   7 at hour 90; a adds a 2 at hour 130; b adds a 9 at hour 220; a adds a 6 at hour 245; b
   adds a 1 at hour 260; and a adds an 8 at hour 540.  The true carts are a = 5+3+2+6+8 = 24
   and b = 4+7+9+1 = 21, so 45 of value in all.  Shopper 'a' goes quiet from hour 245 to hour
-  540 -- 295 hours, which is over ten days -- and then comes back expecting their cart.
+  540 -- 295 hours, which is just over twelve days -- and then comes back expecting their cart.
 
   GIVEN AN ALLOWANCE AND AN HOUR TO LOOK AT, HOW MUCH CART VALUE SURVIVES, AND HOW MANY
   CARTS HAS MEMORY BEEN SPARED?
@@ -81,7 +81,7 @@ import random
 
 # The chapter's nine seed events, read as cart additions: (shopper, item_price, hour).  The
 # prices are the chapter's values, so the true cart totals are its 24 and 21.  Shopper 'a' is
-# silent from hour 245 to hour 540 -- the chapter's longest gap, 295 hours, which is ten days
+# silent from hour 245 to hour 540 -- the chapter's longest gap, 295 hours, which is 12 days 7 hours
 # and is exactly the shopper the product requirement is about.
 ADDITIONS = [("a", 5, 1), ("a", 3, 3), ("b", 4, 50), ("b", 7, 90), ("a", 2, 130),
              ("b", 9, 220), ("a", 6, 245), ("b", 1, 260), ("a", 8, 540)]
@@ -145,8 +145,9 @@ def show_examples():
     Each row is checked against `truth_of` -- the brute-force cart, which cannot be wrong --
     and against the store, which must reproduce it exactly on every row.  The two cost
     columns are printed per row so the reader can see where the bound is worth anything: at
-    the chapter's scale the allowance saves 0 carts and loses up to 37 of the 45 units of cart
-    value, and the saving only turns positive at the asymptotic scale on the last two rows.
+    the chapter's scale the allowance saves at most 2 carts, and only by dropping carts whose
+    value is then lost -- up to 37 of the 45 units of cart value; the saving only becomes large
+    (1,899 and 2,000) at the asymptotic scale on the last two rows.
     """
     print(f"{'what it exercises':37s} {'events':>7} {'ttl':>6} {'hour':>6} {'true':>6} "
           f"{'kept':>6} {'held':>6} {'+ttl':>6} {'saved':>6} {'reloads':>8}")
@@ -378,7 +379,7 @@ def main():
     print(f"  at the chapter's 294-hour allowance the saving is 0 for every hour up to the last")
     print(f"  addition -- the chapter's own figure -- so the correctness cost arrives before any")
     print(f"  memory benefit.  At the week-long allowance it is 2, reached at hour {h}, and the hour")
-    print(f"  is the whole story: shopper 'a' expired at {245 + WEEK} and 'b' at {260 + WEEK}, so the two carts the")
+    print(f"  is the whole story: shopper 'a' expired at {245 + WEEK + 1} and 'b' at {260 + WEEK + 1}, so the two carts the")
     print(f"  bound has stopped holding are precisely the two the shoppers no longer have.  A")
     print(f"  saving visible only after the data is gone is the damage, measured from the other")
     print(f"  side.  The real case for the bound is asymptotic, and the honest thing is to go")

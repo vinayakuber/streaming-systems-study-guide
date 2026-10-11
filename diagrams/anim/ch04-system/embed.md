@@ -26,8 +26,8 @@ Note what makes this harder than a fixed window's correction: the retraction nam
 
 1. **Session state is data-dependent.** 5 entries for 9 events here, and nothing bounds it for a burstier stream or a larger key space. Fixed windows can be sized in advance; this cannot.
 2. **One session is never collected**, because the watermark never reaches 12:11:00. Its state is held for the life of the job regardless of allowed lateness — a low-traffic key is a permanent allocation.
-3. **The bridge case is not demonstrated.** This stream's late event extends a session; one that merged two already-published sessions would retract two panes and emit one. Same mechanism, twice the bookkeeping, and no number here proves it works.
-4. **The gap is unverifiable.** Every session count in this chapter is correct for 120s and for no other definition, and nothing in the data can tell you whether 120s is the right definition of a visit.
+3. **The bridge case is not demonstrated in this keyed stream.** This stream's late event extends a session; one that merged two already-published sessions would retract two panes and emit one. Same mechanism, twice the bookkeeping, and no event in this keyed stream does it at gap 120s or 40s. The Google Interview Question section shows it on the same event times with the keys dropped and G = 47s: arrival 50 withdraws 1..3 and 90..130 and replaces them with 1..130.
+4. **The gap is unverifiable.** Every session count stated for the book's gap is correct for 120s and for no other definition — the same stream gives 4, 3, 2, 1 sessions for key a at 40s, 120s, 130s, 300s — and nothing in the data can tell you whether 120s is the right definition of a visit.
 
 #### Visual walkthrough — six stages, one retraction, two coupled settings
 
@@ -64,7 +64,7 @@ The coupling in the note is the thing to take away. Shrinking the gap from 120s 
 
 <img src="../diagrams/anim/ch04-system/frames/step-04.svg" alt="Step 4: and what this design does NOT settle" width="1040">
 
-The third note is worth stating plainly rather than implying: this dataset's straggler extends one session, so the bridge case — one event merging two already-published sessions — is not demonstrated here. It is the same retraction mechanism applied twice, and a design that handles the extension handles it, but no number in this chapter proves that.
+The third note is worth stating plainly rather than implying: this dataset's straggler extends one session, so the bridge case — one event merging two already-published sessions — is not demonstrated in this keyed stream. It is the same retraction mechanism applied twice. The Google Interview Question section shows it on the same event times with the keys dropped and G = 47s: arrival 50 withdraws 1..3 and 90..130 and replaces them with 1..130.
 
 </details>
 

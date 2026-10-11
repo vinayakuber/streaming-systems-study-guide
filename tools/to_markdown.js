@@ -175,11 +175,20 @@ function conceptsMd(ch) {
   }
   if (solutions.length) {
     out += '\n### The Solution\n\n';
-    out += `${claim(solutions[0])}\n\n`;
-    const iq = (ch.interview && ch.interview[0]);
+    // "The Solution" must state a solution. The first card tagged 'solution' is sometimes a
+    // definition, which printed a definition under this heading. Take the first solution card
+    // unless it is a definition; failing that, the solution the chapter gives its first question.
+    const first = solutions[0];
+    const iq0 = (ch.interview && ch.interview[0]);
+    out += `${first.tagLabel !== 'Definition' || !(iq0 && iq0.solution) ? claim(first) : htmlToMd(iq0.solution).trim()}\n\n`;
+    // The code under the solution must illustrate THAT solution. Pairing it with the first
+    // interview's code whatever it was about put session-merge code under "fixed windows".
+    const iq = (ch.interview || []).find(q => (q.refs || []).includes(first.title));
     if (iq && iq.code) out += `\`\`\`java\n${ent(iq.code)}\n\`\`\`\n\n`;
   }
-  const factCards = [...solutions, ...tradeoffs];
+  // Rows follow the concepts' own numbering; grouped by tag, card 9 printed between 6 and 7.
+  const num = c => { const m = String(c.title).match(/^(\d+)\./); return m ? +m[1] : Infinity; };
+  const factCards = [...solutions, ...tradeoffs].sort((a, b) => num(a) - num(b));
   if (factCards.length) {
     out += '\n### Key Facts\n\n| Fact | Detail | In the wild |\n|---|---|---|\n';
     factCards.forEach(c => {
@@ -281,6 +290,11 @@ function seeAlsoMd(ch) {
   for (const e of list) {
     const target = byNum.get(e.to);
     if (!target) continue;
+    // A link names its target section by heading text. A name that is not one of the target's
+    // sections renders as a dead anchor that nothing reports, so it is a build failure, not a
+    // link (R36: address by content, and no match is an error).
+    if (e.section && !(target.flow || []).some(f => f.section === e.section))
+      throw new Error(`ch${String(ch.num).padStart(2, '0')} links to chapter ${target.num} section "${e.section}", which is not one of its sections: ${(target.flow || []).map(f => f.section).join(' | ')}`);
     const fname = `ch${String(target.num).padStart(2, '0')}-${slug(target.title)}.md`;
     const anchor = e.section ? '#' + anchorSlug(e.section) : '';
     const label = `Chapter ${target.num}: ${ent(target.title)}${e.section ? ' → ' + ent(e.section) : ''}`;
@@ -301,8 +315,32 @@ function sourcesMd(ch) {
   }
   return md + '\n';
 }
+// A chapter that has a narrated deck (tools/build_decks.js) links to it from the top. The
+// deck is a self-contained HTML page; GitHub shows .html as source rather than running it,
+// so the link says how to open it instead of pretending it plays in place.
+function chapterFile(ch) { return `ch${String(ch.num).padStart(2, '0')}-${slug(ch.title)}`; }
+// A chapter is either one deck (chNN-slug.html) or several part decks (chNN-slug-partP.html);
+// parts win, because they are the explained-from-scratch rewrite of the whole-chapter deck.
+function chapterDecks(ch) {
+  const stem = chapterFile(ch);
+  const parts = fs.existsSync('decks') ? fs.readdirSync('decks')
+    .filter(f => f.startsWith(stem + '-part') && f.endsWith('.html'))
+    .sort((a, b) => parseInt(a.slice(stem.length + 5), 10) - parseInt(b.slice(stem.length + 5), 10)) : [];
+  if (parts.length) return parts.map(f => path.join('decks', f));
+  const whole = path.join('decks', stem + '.html');
+  return fs.existsSync(whole) ? [whole] : [];
+}
+function deckMd(ch) {
+  const decks = chapterDecks(ch);
+  if (!decks.length) return '';
+  const links = decks.map((d, i) => decks.length > 1 ? `[part ${i + 1}](../${d})` : `[${d}](../${d})`).join(' · ');
+  return `> ▶ **Narrated deck${decks.length > 1 ? 's' : ''}:** ${links} — this chapter explained step by step, with voice-over and questions to answer. ` +
+    `GitHub shows HTML as source, so download the file and open it in Chrome.\n\n`;
+}
+
 function chapterMd(ch) {
   let md = `# Chapter ${ch.num}: ${ent(ch.title)}\n\n`;
+  md += deckMd(ch);
   if (ch.pattern) md += `> ${ent(ch.pattern)}\n\n`;
   if (ch.aka) md += `_Also known as: ${ent(ch.aka)}_\n\n`;
   const dm = diagramMd(ch);
@@ -320,9 +358,10 @@ function chapterMd(ch) {
 fs.mkdirSync('docs', { recursive: true });
 let toc = `# ${TITLE} — Read on GitHub\n\nEach chapter: flow, key concepts, and quiz (tap to reveal answers).\n\n`;
 for (const ch of CHAPTERS) {
-  const fname = `ch${String(ch.num).padStart(2, '0')}-${slug(ch.title)}.md`;
+  const fname = `${chapterFile(ch)}.md`;
   fs.writeFileSync(path.join('docs', fname), chapterMd(ch));
-  toc += `- [Chapter ${ch.num}: ${ent(ch.title)}](${fname})\n`;
+  const decks = chapterDecks(ch);
+  toc += `- [Chapter ${ch.num}: ${ent(ch.title)}](${fname})` + (decks.length ? ` · [▶ narrated deck${decks.length > 1 ? 's' : ''}](../${decks[0]})` : '') + `\n`;
 }
 fs.writeFileSync('docs/README.md', toc);
 console.log(`Wrote ${CHAPTERS.length} chapters to docs/ (TOC: docs/README.md). Title: ${TITLE}`);

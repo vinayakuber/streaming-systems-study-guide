@@ -25,7 +25,7 @@ Both operands are stream rows, so neither is authoritative — the pair exists o
 
 <img src="../diagrams/anim/ch09-kinds-memory/frames/step-02.svg" alt="Step 2: the temporal join probes a TABLE as of the row&#39;s own time" width="980">
 
-The `continue` skips table versions later than the row's own `et` — that is the "as of" semantics, and it is why the lookup needs the table's HISTORY rather than its current value. For click 3 the answer is 11, determined the moment the click arrives.
+The `continue` skips table versions later than the row's own `et` — that is the "as of" semantics, and it is why the lookup needs the table's HISTORY rather than its current value. For click 3 the as-of answer is 11 — but only once the history up to 12:02:10 is complete. In this seed it is not: looked up the moment the click arrives, the table yields 7, because impression 7 has not arrived yet.
 
 </details>
 <details>
@@ -41,7 +41,7 @@ Click 0 at 12:00:01 precedes every impression, so `any` stays false and the resu
 
 <img src="../diagrams/anim/ch09-kinds-memory/frames/step-04.svg" alt="Step 4: and that is the whole difference: one waits, one does not" width="980">
 
-`wWaits` is "both watermarks" and `tWaits` is "nothing". Read the heap rows: `pairs` holds 5 matches of which 2 are never published, while `enriched` holds all 5 rows, complete. Windowing a lookup imports the first column's problems for no benefit.
+`wWaits` is "both watermarks" and `tWaits` is "nothing". Read the heap rows: `pairs` holds 5 matches of which 2 are never published, while `enriched` holds all 5 rows with no buffer — 2 of them as-of values that a lookup on arrival could not yet have read. Windowing a genuine lookup imports the first column's problems for no benefit; using a lookup on a late stream imports a different one.
 
 </details>
 

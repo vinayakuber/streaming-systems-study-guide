@@ -12,18 +12,18 @@
     average -- the mean of the v's of the samples in that window.  A window holding no
                samples has no average at all, which is not the same as an average of 0.
 
-  A dashboard is fed nine samples: (1, 5), (3, 3), (50, 7), (90, 2), (130, 6), (220, 1),
-  (245, 9), (260, 4), (540, 8) -- so one at second 1 measuring 5ms, and so on.  Probes
+  A dashboard is fed nine samples: (1, 5), (3, 3), (50, 4), (90, 7), (130, 2), (220, 9),
+  (245, 6), (260, 1), (540, 8) -- so one at second 1 measuring 5ms, and so on.  Probes
   report whenever they feel like it, so the gaps are uneven: two land within two seconds of
-  each other, then nothing arrives for four and a half minutes.
+  each other, the rest are 15 to 90 seconds apart, and the last gap is 280 seconds.
 
   GIVEN AN INSTANT `now`, WHAT IS THE AVERAGE LATENCY OVER THE PRECEDING 60 SECONDS?
 
   Worked, on the nine samples above -- which between them run from second 1 to second 540:
     now = 0    -> None     the earliest instant: nothing has been reported yet
     now = 3    -> 4.0      (1,5) and (3,3) are both inside (-57, 3], so (5 + 3) / 2
-    now = 191  -> None     an instant with NO arrival, and the last sample (130, 6) has just
-                           aged out at 190.  The answer is "no average", not 6.0 and not 0.0
+    now = 191  -> None     an instant with NO arrival, and the last sample (130, 2) has just
+                           aged out at 190.  The answer is "no average", not 2.0 and not 0.0
     now = 540  -> 8.0      the last arrival of all; only (540, 8) is still in the window
     now = 10000 -> None    far past the end.  "Undefined", NOT the last value seen -- a
                            dashboard that shows 8.0 forever is reporting a latency nobody
@@ -46,7 +46,8 @@ is false in both directions -- zero, one or many may expire -- and the divisor t
 has to be maintained beside the total instead of being the constant W.  The subtler one is
 that the answer changes WITH NO ARRIVAL AT ALL: values age out while the stream is quiet,
 so a correct implementation must be able to recompute on a timer and not only on input.
-That is the same clock-versus-arrival split the batching problem turns on, and a dashboard
+That is the chapter's event-time vs processing-time split in miniature -- an arrival-driven
+answer is keyed to when data came in, a timer-driven one to the clock -- and a dashboard
 driven only by arrivals shows a number that was true minutes ago.
 
 WORKED EXAMPLES: the EXAMPLES table below holds 19 input/output pairs -- the instant before
@@ -64,12 +65,12 @@ Run it:  python3 programs/ch01_v3.py
 
 import random
 
-# The chapter's nine values, now carrying the seed's nine event TIMES (in event-time
-# order, which is what a time window needs) instead of positions.  Times in seconds,
+# The seed's nine events as (event time, value), sorted by event time, which is what a
+# time window needs -- each value stays with its own event's time (tools/stream_seed.js).  Times in seconds,
 # values in milliseconds.  The gaps are the seed's own and they are what makes this
 # worth running: between 3 and 50 nothing expires, at 90 two expire at once, and at 540
 # three do, so every case the statement names appears in one trace.
-SAMPLES = [(1, 5), (3, 3), (50, 7), (90, 2), (130, 6), (220, 1), (245, 9), (260, 4), (540, 8)]
+SAMPLES = [(1, 5), (3, 3), (50, 4), (90, 7), (130, 2), (220, 9), (245, 6), (260, 1), (540, 8)]
 
 # SPAN = 60 seconds: the statement's own number.  It also happens to be the chapter's
 # watermark lag, which is not a coincidence -- both are "how far back do I still care".
@@ -109,9 +110,9 @@ EXAMPLES = [
     ("before anything arrives -> None",      SAMPLES,      0,      60,     (None, 0)),
     ("the first sample's own instant",       SAMPLES,      1,      60,     (5.0, 1)),
     ("ordinary arrival, two in window",      SAMPLES,      3,      60,     (4.0, 2)),
-    ("three samples in the window",          SAMPLES,      50,     60,     (5.0, 3)),
-    ("the arrival that retires TWO",         SAMPLES,      90,     60,     (4.5, 2)),
-    ("quiet stream, one survivor",           SAMPLES,      180,    60,     (6.0, 1)),
+    ("three samples in the window",          SAMPLES,      50,     60,     (4.0, 3)),
+    ("the arrival that retires TWO",         SAMPLES,      90,     60,     (5.5, 2)),
+    ("quiet stream, one survivor",           SAMPLES,      180,    60,     (2.0, 1)),
     ("quiet stream, window EMPTY -> None",   SAMPLES,      191,    60,     (None, 0)),
     ("the last arrival of all",              SAMPLES,      540,    60,     (8.0, 1)),
     ("far future -> None, not the last v",   SAMPLES,      10_000, 60,     (None, 0)),
@@ -334,12 +335,12 @@ def main():
     # including 130 and 245 where only one sample was due to leave.  The reason is that the
     # error does not heal: once an arrival retires one of the two it owed, each later
     # arrival adds one and retires one, so the backlog is carried forever and the count
-    # pins at 3.  The second wrong expectation was the DIRECTION -- stale samples do not
-    # reliably drag the average up: at t=90 it reads 4.000 against 4.500 and at t=130 it
-    # reads 5.000 against 4.000.  Whether the error is high or low depends on the stale
-    # values, so there is no safe side to err on.
+    # pins at 3.  The second point is the DIRECTION: on these nine every wrong answer reads
+    # LOW, because every stale sample it keeps (3, 4, 7, 2, 6, 1) is below the true average
+    # at the instant it is wrongly counted.  That is a property of these values, not of the bug -- the random
+    # streams below measure the error going HIGH as well, so there is no safe side to err on.
     assert [t for t, _, _ in bad_one] == [90, 130, 220, 245, 540], bad_one
-    assert one[3][1] < fast[3][1] and one[4][1] > fast[4][1], "the error must go BOTH ways"
+    assert all(one[i][1] < fast[i][1] for i in (3, 4, 5, 6, 8)), "on the seed every error reads low"
     assert [c for _, _, c in one[3:]] == [3, 3, 3, 3, 3, 3], (
         "once behind, the count must pin at the first stale size and never recover")
     assert all(g <= 1 for g in expiries[4:5]) and abs(one[4][1] - fast[4][1]) > 1e-12, (
@@ -368,8 +369,8 @@ def main():
         assert timed[now] == (truth, tc), (now, timed[now])
     assert average_at(SAMPLES, 130)[1] == 2 and average_at(SAMPLES, 180)[1] == 1
     assert average_at(SAMPLES, 191) == (None, 0), average_at(SAMPLES, 191)
-    assert quiet(191) == quiet(130) == (4.0, 2), (quiet(191), quiet(130))
-    assert average_at(SAMPLES, 180)[0] == 6.0, "the single surviving sample is the 6ms one"
+    assert quiet(191) == quiet(130) == (4.5, 2), (quiet(191), quiet(130))
+    assert average_at(SAMPLES, 180)[0] == 2.0, "the single surviving sample is the 2ms one"
     # the last arrival is the worst case: the dashboard holds 8.0 forever
     assert quiet(10_000) == (8.0, 1) and average_at(SAMPLES, 10_000) == (None, 0)
     assert timed[10_000] == (None, 0), timed[10_000]
@@ -402,7 +403,7 @@ def main():
 
     # ---- many irregular streams, against the rescan
     rng = random.Random(20260303)
-    disagreements = 0
+    disagreements = reads_high = reads_low = 0
     for _ in range(600):
         n = rng.randint(1, 18)
         t = 0
@@ -422,13 +423,19 @@ def main():
             got_a, got_c = scan[now]
             assert got_c == rc and ((got_a is None and ra is None)
                                     or abs(got_a - ra) < 1e-9), (samples, span, now)
-        if any(abs(a - ra) > 1e-9 for (_, a, _), (_, ra, _, _) in
-               zip(expire_one_per_arrival(samples, span), got)):
+        errs = [a - ra for (_, a, _), (_, ra, _, _) in
+                zip(expire_one_per_arrival(samples, span), got) if abs(a - ra) > 1e-9]
+        if errs:
             disagreements += 1
+        reads_high += any(e > 0 for e in errs)
+        reads_low += any(e < 0 for e in errs)
     print(f"\n  600 irregular streams x 4 spans: the incremental total+count equals the rescan at")
     print(f"  every arrival and at every probed clock instant; the one-expiry version differs on")
     print(f"  {disagreements} of 600, which is how often a stream has a gap big enough to retire two.")
+    print(f"  Of those, {reads_high} streams have a wrong answer reading HIGH and {reads_low} one reading LOW,")
+    print(f"  so the all-low errors on the nine samples above are a property of their values.")
     assert disagreements > 100, f"only {disagreements} streams exposed the one-expiry bug"
+    assert reads_high > 0 and reads_low > 0, (reads_high, reads_low, "the error must go BOTH ways")
 
     print("\nall assertions passed")
 

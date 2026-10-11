@@ -14,9 +14,9 @@ The common heuristic is one line: **watermark = max event time seen so far − s
 
 **Too fast means real events look late.** At skew 0s the pipeline calls 2 events late; at 141s it calls 0 late. Nothing about the data changed between those rows. **"Late" is a verdict the watermark passes, not a property of an event** — an over-eager watermark does not detect lateness, it creates it.
 
-**Too slow means correct and slow.** The threshold is exactly **141s**: at 140s the window still publishes 15, at 141s it publishes 19. The cost is **296s** of added latency on every window.
+**Too slow means correct and slow.** The threshold is exactly **141s**: at 140s the window still publishes 15, at 141s it publishes 19. The cost is **296s** of added latency on this window — and only on this one: [12:02, 12:04), [12:04, 12:06) close at 12:09:02 under both bounds, and [12:08, 12:10) closes under neither.
 
-And note the threshold is **not** id 7's 230s of skew, which is the number most readers would reach for. It is `12:04:20 − 12:02 + 1` — the highest event time seen before the straggler, minus the **window's end**. The watermark only has to stay below the window boundary until the straggler lands; it never has to reach back to 12:00:50. Tuning skew to your worst observed delay over-pays by 89s per window.
+And note the threshold is **not** id 7's 230s of skew, which is the number most readers would reach for. It is `12:04:20 − 12:02 + 1` — the highest event time seen before the straggler, minus the **window's end**. The watermark only has to stay below the window boundary until the straggler lands; it never has to reach back to 12:00:50. Tuning skew to your worst observed delay holds every watermark 89s further back than this window needs.
 
 #### When to tune skew up, when to track per source, and what neither fixes
 
@@ -24,7 +24,7 @@ And note the threshold is **not** id 7's 230s of skew, which is the number most 
 
 **Tune skew down when a stale answer is worse than an incomplete one** — an ops dashboard, an autoscaler. Accept that some events will be classified late and make sure something downstream can absorb a correction.
 
-**Track per source when sources have different idleness patterns.** Source "a" reaches 12:08:00 by the end of this stream while "b" stops at 12:03:20. A single global watermark would claim 12:08:00 — **280s more completeness than source "b" can back.** Taking the minimum is correct and costs 2 window's output (11, 7).
+**Track per source when sources have different idleness patterns.** Source "a" reaches 12:08:00 by the end of this stream while "b" stops at 12:03:20. A single global watermark would claim 12:08:00 — **280s more completeness than source "b" can back.** Taking the minimum is correct and costs 2 windows' output (11, 7).
 
 **What none of this fixes:** the skew bound is unverifiable from inside the pipeline. A run with zero late events is indistinguishable from a run whose late events were silently discarded, so you cannot tell a well-tuned skew from an over-eager one by looking at the output. And per-source tracking introduces its own failure: a source that goes permanently quiet pins the watermark at 12:03:20 forever unless an idleness timeout declares it finished — which is a decision, not a measurement.
 
@@ -55,7 +55,7 @@ Read the last column down the table: 2, 1, 1, 0, then 0. The same 9 events, the 
 
 <img src="../diagrams/anim/ch03-skew/frames/step-03.svg" alt="Step 3: too SLOW: correct, and the answer arrives much later" width="1040">
 
-The number a reader expects here is 230s — the straggler's skew. The actual threshold is 141s, and the derivation is in the note: the watermark only needs to stay below the window's END, not below the late event's event time. Worth knowing, because tuning skew to your worst observed delay over-pays by 89s on every window.
+The number a reader expects here is 230s — the straggler's skew. The actual threshold is 141s, and the derivation is in the note: the watermark only needs to stay below the window's END, not below the late event's event time. Worth knowing, because tuning skew to your worst observed delay holds every watermark 89s further back than this window needs.
 
 </details>
 <details>
@@ -63,7 +63,7 @@ The number a reader expects here is 230s — the straggler's skew. The actual th
 
 <img src="../diagrams/anim/ch03-skew/frames/step-04.svg" alt="Step 4: and per-source tracking beats one global guess" width="1040">
 
-Tracking per source means one idle source holds the whole stage back — source "b" stops at 12:03:20 while "a" reaches 12:08:00, and the stage must claim the lower. That is correct and it costs 2 window's output (11, 7). Real systems add idleness detection precisely to escape this, and that is a decision to declare a source finished.
+Tracking per source means one idle source holds the whole stage back — source "b" stops at 12:03:20 while "a" reaches 12:08:00, and the stage must claim the lower. That is correct and it costs 2 windows' output (11, 7). Real systems add idleness detection precisely to escape this, and that is a decision to declare a source finished.
 
 </details>
 

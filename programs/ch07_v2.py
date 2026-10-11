@@ -39,7 +39,8 @@
                                       an expiry OVERSTATES a distinct count
     the nine views, ttl = 0   -> 9    every view its own visitor, which is the view count
     the nine views, ttl = a whole day -> 2   right again, and it saved nothing at all: at
-                                      this size the expiry frees 0 slots in every row above
+                                      this size only ttl = 0 frees any slots (2), and it
+                                      overstates the count to 9 to do it
   And at the sketch's own boundary, and at scale:
     255 distinct visitors   -> 255     below K = 256, so the sketch is exact
     256 distinct visitors   -> 257     at K, the estimator takes over and is 1 high
@@ -217,7 +218,7 @@ BIGGER_STREAM = stream_of(12_000, 1)
 EXAMPLES = [
     ("the chapter's 9 views, 2 visitors",    VIEWS,         None,     2,  None,     2, None),
     ("ttl = 295, the longest silence",       VIEWS,          295,     2,     2,     2,    0),
-    ("ttl = 294, one hour tighter",          VIEWS,          294,     2,     3,     2,    0),
+    ("ttl = 294, one second tighter",        VIEWS,          294,     2,     3,     2,    0),
     ("ttl = a whole day: saves nothing",     VIEWS,          DAY,     2,     2,     2,    0),
     ("ttl = 0: saves 2, overstates to 9",    VIEWS,            0,     2,     9,     2,    2),
     ("an empty day -> 0, not an error",      EMPTY_DAY,     None,     0,  None,     0, None),
@@ -342,7 +343,7 @@ def main():
     # rather than inside a threshold picked to make them pass.
     se = K ** -0.5
     assert max(r[4] for r in big) < 3 * se, (max(r[4] for r in big), se)
-    print(f"    the exact state grows {rows[-1][1] // rows[1][1]}x across these rows and the sketch state does not")
+    print(f"    from the {big[0][0]:,} row to the {rows[-1][0]:,} row the exact state grows {rows[-1][1] // big[0][1]}x and the sketch state does not")
     print(f"    grow at all; the worst error over the rows at or above k is "
           f"{max(r[4] for r in big):.1%}, against the")
     print(f"    sketch's own standard error of 1/sqrt({K}) = {se:.2%}.")

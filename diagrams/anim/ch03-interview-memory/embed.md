@@ -14,7 +14,7 @@
 
 #### How to model it
 
-Re-reading the window is O(W) per tick — 10⁵ reads a tick, 10¹² in a day. The next thought is a max-heap of the window, and it fails on the operation nobody looks at first: **each tick, the value leaving the window must be removed**, and a heap can only remove its top. The departing value is almost never the top. Most attempts stall here.
+Re-reading the window costs W reads per tick — 10⁵ reads a tick, 10¹² in a day. The next thought is a max-heap of the window, and it fails on the operation nobody looks at first: **each tick, the value leaving the window must be removed**, and a heap can only remove its top. The departing value is almost never the top. Most attempts stall here.
 
 The reframe is to stop storing the window and store only the values that **could still become the maximum**. Keep a list of **indexes** — indexes, not values, because only an index says whether an entry has expired — and keep it **decreasing**, so its front is the maximum and the answer is one read.
 
@@ -22,7 +22,7 @@ Maintaining it needs one argument, and it is the whole problem: when a value arr
 
 Two consequences follow. The list holds exactly the window's **suffix maxima**, so nothing has to be recomputed when the front expires — the next entry is already the right answer. And **at most one entry can expire per tick**, because the window moves by one, so that step is an `if` rather than a loop.
 
-The cost argument is worth stating precisely, because "O(1)" is not quite true. A single tick can evict many entries. But **each index is pushed exactly once and removed at most once**, so the total over `n` ticks is bounded by 2`n` regardless of the values — amortised constant per tick, and **independent of W entirely**.
+The cost argument is worth stating precisely, because "one step per tick" is not quite true. A single tick can evict many entries. But **each index is pushed exactly once and removed at most once**, so the total over `n` ticks is bounded by 2`n` regardless of the values — amortised constant per tick, and **independent of W entirely**.
 
 The second half is the same machine with every comparison reversed: a second list kept *increasing* gives the minimum, the two are advanced together, and the spread is the difference of the two fronts. The limit is worth naming too: this works for max and min and **nothing else**. A sliding median has no equivalent, because no value can be ruled out by a single comparison with a newer one — which is precisely the property the eviction argument rests on.
 
@@ -30,7 +30,7 @@ The second half is the same machine with every comparison reversed: a second lis
 
 Each of these is the program below with different nouns. The reason to read them is not the
 answer — it is the *recognition*. 4 surfaces (trading, load testing, weather, manufacturing), one shape, and in every
-case the appealing first answer is to materialise a sequence you cannot afford.
+case the appealing first answer is to re-scan every candidate for every position — re-read the window, or walk forward over every later day — instead of discarding the entries a newer, better value has already ruled out.
 
 <details>
 <summary><b>Variation 2</b> — the shortest spike <i>(looks like load testing)</i></summary>
@@ -623,9 +623,11 @@ def show_examples():
     Each row is checked against the stack and against the forward scan, which is run on every
     input here (and cached, since several rows share a series).  The two cost columns are the
     point of the table: `fwd` is the forward scan's measured comparisons and `steps` is the
-    stack's pushes plus pops.  The stack LOSES on every short series in the table, because it
+    stack's pushes plus pops.  The stack LOSES on the short series whose temperatures turn
+    over quickly (the nine-day series, the ties, the single day, the warming run), because it
     pays a push per day whether or not that day does any work, and the forward scan stops at
-    the first warmer day.  Its win is asymptotic, and the 20,000-day rows are where it shows.
+    the first warmer day.  It wins on the cooling and flat runs and the late-record series,
+    where no warmer day comes soon and the forward scan runs to the end for every day.  Its win is asymptotic, and the 20,000-day rows are where it shows.
 
     On the small series each row additionally pins the bounded lookahead from BOTH sides: a
     lookahead equal to the true wait gives the true answer, and one day shorter gives 0 --
@@ -818,7 +820,7 @@ def main():
     assert w2 == [1, 1, 1, 1, 0] and len(wun) == 1 and wpop == 4, (w2, wun)
     assert cbig == 0 and wbig == 1, (cbig, wbig)
     print(f"\n  a cooling run {cooling} -> {c}: nothing is ever resolved and the stack holds all 5,")
-    print(f"  which is where the stack costs O(n) space (a flat run does the same).  A warming run -> {w2}:")
+    print(f"  which is where the stack holds one entry per day (a flat run does the same).  A warming run -> {w2}:")
     print(f"  every day is resolved by the next, one at a time, and the stack never exceeds 1.")
     flat = [4, 4, 4, 4]
     assert next_warmer(flat)[0] == [0] * 4 and len(next_warmer(flat)[4]) == 4
@@ -856,7 +858,7 @@ def main():
     assert bbig > 1, "no group eviction at scale, so the interesting path was not exercised"
     assert len(bun) == len([i for i in range(BIG) if bgot[i] == 0])
     # the descending tail is exactly the unresolved set, and it must be the record highs
-    # CORRECTED: `>` is the wrong test here.  With 200,000 days drawn from 1,000 values ties
+    # CORRECTED: `>` is the wrong test here.  With 100,000 days drawn from 1,000 values ties
     # are certain, and a day equal to the warmest day after it is still unresolved, because
     # "warmer" is strict.  So the unresolved set is the days that MATCH OR BEAT every later
     # day, which is a weaker condition than being a strict suffix record.
@@ -935,7 +937,7 @@ TEMPS = 0:5  1:3  2:7  3:2  4:6  5:1  6:9  7:4  8:8
   short of the whole series is safe -- the window size is a property of the data.
 
   a cooling run [9, 7, 5, 3, 1] -> [0, 0, 0, 0, 0]: nothing is ever resolved and the stack holds all 5,
-  which is where the stack costs O(n) space (a flat run does the same).  A warming run -> [1, 1, 1, 1, 0]:
+  which is where the stack holds one entry per day (a flat run does the same).  A warming run -> [1, 1, 1, 1, 0]:
   every day is resolved by the next, one at a time, and the stack never exceeds 1.
   a flat run [4, 4, 4, 4] -> all zeros, and all four stay unresolved: strictness again.
 
@@ -1095,7 +1097,8 @@ def show_examples():
     (pushes, back-pops, front-pops and left-edge steps).  They are counts of DIFFERENT units
     and the table says which is smaller, not which program is faster: a measured run costs
     time proportional to its length, because the scan takes the max and the min of a slice,
-    while every deque op is constant work.  So the deques come out with MORE ops on short logs
+    while every deque op is constant work.  So the deques usually come out with MORE ops on
+    short logs (all but the two loose-tolerance rows, where the scan measures every run)
     -- they pay two pushes a second whether or not anything happens -- and even at 20,000
     seconds with L = 20 their op count is the larger of the two, while the work behind each of
     those ops is not.  Printing both is the only honest way to show that.
@@ -1142,7 +1145,7 @@ def longest_naive(xs, limit):
     return best, bstart, ops
 
 
-def longest_steady(xs, limit):
+def longest_steady(xs, limit, kinds=None):
     """The answer: two deques and a left edge that is pushed forward only as far as needed.
 
     `hi` is kept decreasing and `lo` increasing, so the spread of the current run is one
@@ -1151,7 +1154,8 @@ def longest_steady(xs, limit):
     only when its index has actually fallen behind the left edge, which is why the two `if`s
     are separate and tested against `left` rather than against any fixed offset.
 
-    Returns (length, start, pushes, back_pops, front_pops, left_steps)."""
+    Returns (length, start, pushes, back_pops, front_pops, left_steps).  If `kinds` is a list,
+    each left-edge step appends how many fronts it dropped (0, 1 or 2)."""
     hi, lo, left, best, bstart = [], [], 0, 0, 0
     pushes = back = front = steps = 0
     for i, v in enumerate(xs):
@@ -1167,12 +1171,16 @@ def longest_steady(xs, limit):
         while xs[hi[0]] - xs[lo[0]] > limit:
             left += 1
             steps += 1
+            popped = 0
             if hi[0] < left:                # the maximum may or may not be the one leaving
                 hi.pop(0)
-                front += 1
+                popped += 1
             if lo[0] < left:                # and the minimum independently may or may not
                 lo.pop(0)
-                front += 1
+                popped += 1
+            front += popped
+            if kinds is not None:
+                kinds.append(popped)
         if i - left + 1 > best:
             best, bstart = i - left + 1, left
     return best, bstart, pushes, back, front, steps
@@ -1228,12 +1236,13 @@ def main():
     show_examples()
     print("READINGS =", "  ".join(f"{i}:{v}" for i, v in enumerate(READINGS)), f"   L = {L}")
     want, wstart, ops = longest_naive(READINGS, L)
-    got, start, pushes, back, front, steps = longest_steady(READINGS, L)
+    kinds = []
+    got, start, pushes, back, front, steps = longest_steady(READINGS, L, kinds)
     run = READINGS[start:start + got]
     print(f"  naive  : {want} seconds from second {wstart}   ({ops} runs measured)")
     print(f"  deques : {got} seconds from second {start} -> {run}, spread "
           f"{spread(run)} <= {L}")
-    print(f"           ({pushes} pushes, {back} back-pops, {front} front-pops, "
+    print(f"           ({pushes} pushes, {back} back-pops, {front} front-pop{'' if front == 1 else 's'}, "
           f"{steps} left-edge steps)")
     assert (got, start) == (want, wstart), (got, start, want, wstart)
     assert got == 6 and start == 0, (got, start)
@@ -1249,8 +1258,13 @@ def main():
     assert front >= 1, "nothing ever expired from a front"
     assert front < 2 * steps, (
         "every left-edge step dropped from BOTH deques, so the separate `if`s are untested")
-    print(f"\n  {steps} left-edge steps produced only {front} front-pops: most steps drop from one")
-    print(f"  deque and not the other, which is precisely what a single shared `if` gets wrong.")
+    none, one, both = kinds.count(0), kinds.count(1), kinds.count(2)
+    assert none + one + both == steps and one + 2 * both == front, (kinds, steps, front)
+    assert one >= 1, "no step dropped from exactly one deque, so the separate `if`s are untested"
+    print(f"\n  {steps} left-edge steps produced only {front} front-pop{'' if front == 1 else 's'}: "
+          f"{none} dropped from neither deque, {one} from exactly one, {both} from both.")
+    print(f"  Each front leaves only when ITS index falls behind the left edge, and the two deques")
+    print(f"  do so independently -- which is precisely what a single shared `if` popping both gets wrong.")
 
     # ---- the two wrong answers, run
     bad_both = longest_popping_both(READINGS, L)
@@ -1351,12 +1365,13 @@ all 15 examples agree with the brute-force scan
 READINGS = 0:5  1:3  2:7  3:2  4:6  5:1  6:9  7:4  8:8    L = 6
   naive  : 6 seconds from second 0   (33 runs measured)
   deques : 6 seconds from second 0 -> [5, 3, 7, 2, 6, 1], spread 6 <= 6
-           (18 pushes, 13 back-pops, 1 front-pops, 6 left-edge steps)
+           (18 pushes, 13 back-pops, 1 front-pop, 6 left-edge steps)
   adding second 6 (9) takes the spread to 8, so the stretch
   ends exactly where it does -- the answer sits on the = in 'at most 6'.
 
-  6 left-edge steps produced only 1 front-pops: most steps drop from one
-  deque and not the other, which is precisely what a single shared `if` gets wrong.
+  6 left-edge steps produced only 1 front-pop: 5 dropped from neither deque, 1 from exactly one, 0 from both.
+  Each front leaves only when ITS index falls behind the left edge, and the two deques
+  do so independently -- which is precisely what a single shared `if` popping both gets wrong.
 
   popping both fronts   : 8 seconds (truth 6) -- over by 2
   expiring at i - best  : 7 seconds (truth 6) -- over by 1
@@ -1477,7 +1492,7 @@ def slide_max(xs, w=W):
     """One pass.  The deque holds INDEXES, kept decreasing, so its front is the
     answer in one read -- indexes rather than values, because only an index says
     whether an entry has left the window.  Each index is pushed exactly once and
-    removed at most once, which is why the cost is amortised O(1) and independent
+    removed at most once, which is why the total is at most 2 steps per tick on average and independent
     of w.  Returns (answers, pushes, pops, fronts, biggest_evict, cheap_ticks)."""
     dq, out = [], []
     pushes = pops = fronts = 0
@@ -1544,7 +1559,7 @@ def watermark_bounded(ets, w=W, lag=LAG):
 # The three variations.
 
 def the_shortest_spike(counts, k):
-    """Variation 1, surface: load testing.  Shortest run whose total reaches K.
+    """Variation 2, surface: load testing.  Shortest run whose total reaches K.
 
     Non-obvious point: the window is no longer a fixed size, so `expire` disappears
     entirely and `evict_smaller` is reversed and applied to running TOTALS -- a later
@@ -1565,7 +1580,7 @@ def the_shortest_spike(counts, k):
     return best
 
 def the_next_warmer_day(temps):
-    """Variation 2, surface: weather.  Days until the next warmer day, else 0.
+    """Variation 3, surface: weather.  Days until the next warmer day, else 0.
 
     Non-obvious point: there is no window at all, so `expire` is gone and only the
     eviction remains -- and the evicted entries PRODUCE answers rather than being
@@ -1580,7 +1595,7 @@ def the_next_warmer_day(temps):
     return out
 
 def the_longest_steady_stretch(xs, limit):
-    """Variation 3, surface: manufacturing.  Longest run whose max-min <= limit.
+    """Variation 4, surface: manufacturing.  Longest run whose max-min <= limit.
 
     Non-obvious point: the window size becomes the ANSWER rather than an input, so both
     deques must expire by the actual left edge instead of by `i - W`.  Get that wrong
@@ -1743,7 +1758,7 @@ all assertions passed
 
 The reframe above is six paragraphs; this is both answers running, with the two things a whiteboard cannot show — **what is allocated, and when**.
 
-Measured on 0:5  1:3  2:7  3:2  4:6  5:1  6:9  7:4  8:8 with W = 3: the scan costs **21 reads** (7 windows × 3); the deque costs **16 steps** — 9 pushes, 6 back-evictions, 1 front-expiries — and returns the same maxima, asserted window by window. One tick evicts **2** entries at once and another evicts none, which is the amortised argument happening rather than being claimed. The two-list version gives spreads [4, 5, 5, 5, 8, 8, 5], of which 2 exceed 6.
+Measured on 0:5  1:3  2:7  3:2  4:6  5:1  6:9  7:4  8:8 with W = 3: the scan costs **21 reads** (7 windows × 3); the deque costs **16 steps** — 9 pushes, 6 back-evictions, 1 front-expiry — and returns the same maxima, asserted window by window. One tick evicts **2** entries at once and another evicts none, which is the amortised argument happening rather than being claimed. The two-list version gives spreads [4, 5, 5, 5, 8, 8, 5], of which 2 exceed 6.
 
 The animation steps through the code, holding each line long enough to read the STACK (call frames and their locals) and the HEAP (allocated arrays and objects) as they are AT THAT MOMENT. Expand any step to study it on its own.
 
@@ -1826,7 +1841,7 @@ The first 2 ticks produce no answer — the window is not full — and from tick
 
 <img src="../diagrams/anim/ch03-interview-memory/frames/step-10.svg" alt="Step 10: 16 steps against 21 reads" width="980">
 
-[7, 7, 7, 6, 9, 9, 9] — asserted equal to the scan, window by window. The cost: 9 pushes, 6 back-evictions, 1 front-expiries = 16 steps. **Each index is pushed exactly once and removed at most once**, which caps the total at 29 however the values are arranged — so the per-tick cost is amortised constant and does not depend on W at all. At W = 100,000 that is the difference between 2 steps a tick and 100,000.
+[7, 7, 7, 6, 9, 9, 9] — asserted equal to the scan, window by window. The cost: 9 pushes, 6 back-evictions, 1 front-expiry = 16 steps. **Each index is pushed exactly once and removed at most once**, which caps the total at 18 however the values are arranged — so the per-tick cost is amortised constant and does not depend on W at all. At W = 100,000 that is the difference between 2 steps a tick and 100,000.
 
 </details>
 <details>

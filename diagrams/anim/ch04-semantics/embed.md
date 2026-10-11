@@ -22,7 +22,7 @@ Drop the keying and the 5 keyed sessions collapse to **2**: users' activity fill
 
 **Match the shape to the question:** fixed for periodic aggregates (4 answers totalling 45), sliding for moving averages (2× output), sessions for behaviour. And note the question "how many visits did this user have?" has 4 different correct answers here (4, 3, 2, 1) — it is not answerable until the gap is fixed.
 
-**What this does not settle:** this stream's late event **extends** a session. A late event that **bridges** two already-emitted sessions would retract two panes and emit one — the same mechanism with twice the bookkeeping — and no event here does it, so nothing in this chapter demonstrates that case.
+**What this does not settle:** this stream's late event **extends** a session. A late event that **bridges** two already-emitted sessions would retract two panes and emit one — the same mechanism with twice the bookkeeping — and no event in this keyed stream does it at gap 120s or 40s. The Google Interview Question section shows it on the same event times with the keys dropped and G = 47s: arrival 50 withdraws 1..3 and 90..130 and replaces them with 1..130.
 
 #### Visual walkthrough — the retraction, the collection, and the near miss
 

@@ -50,8 +50,8 @@
 The chapter had two lists and leaned on a promise about each one: within a list, spans never
 overlap.  Here there is one list and it overlaps ITSELF, so "the span that ends first is
 finished" is simply false and the two-pointer rule does not apply at all -- the version that
-pairs the list with itself is written out below and gets the wrong answer, which is more
-convincing than being told.  The move is to stop thinking in spans and think in EVENTS: every
+pairs the list with itself is written out below; it survives the chapter's five bookings by
+luck and misses a pair once a third booking overlaps, which is more convincing than being told.  The move is to stop thinking in spans and think in EVENTS: every
 booking becomes a start and an end, all of them sorted together, and a running count rises
 and falls.  The busiest moment is that count's maximum and an overlap exists wherever it
 exceeds one.  The span-pair framing was the obstacle, not the solution -- and the event sweep
@@ -149,8 +149,9 @@ def two_pointer_against_itself(bookings):
 
     It is here to be run rather than dismissed.  The rule was licensed by a promise -- the
     other list does not overlap itself, so everything remaining in it starts later than the
-    span just compared -- and that promise is now false by construction.  What comes out is
-    every span matched with itself and the real double-bookings missed.
+    span just compared -- and that promise is now false by construction.  On the chapter's own
+    data it still gets the right answer, because each booking overlaps only its neighbour; with
+    three bookings live at once it skips a real double-booking, and it never reports a false one.
     """
     out, i, j = [], 0, 0
     while i < len(bookings) and j < len(bookings):

@@ -22,7 +22,7 @@
             "useDedup = false",
             "useKey = true",
             "n = 0",
-            "p = \"after the charge, before the offset commit\"",
+            "p = \"crash after the charge, before the offset commit\"",
             "o = ..."
           ]
         },
@@ -30,11 +30,11 @@
           "name": "attempt",
           "locals": [
             "proc = @0x100",
-            "crashAt = \"after the charge, before the offset commit\"",
+            "crashAt = \"crash after the charge, before the offset commit\"",
             "useDedup = false",
             "useKey = true",
             "seen = []",
-            "pass = 2"
+            "viaShuffle = true"
           ]
         },
         {
@@ -66,11 +66,11 @@
           "name": "attempt",
           "locals": [
             "proc = @0x200",
-            "crashAt = \"after the charge, before the offset commit\"",
+            "crashAt = \"crash after the charge, before the offset commit\"",
             "useDedup = false",
             "useKey = false",
             "seen = []",
-            "pass = 2"
+            "viaShuffle = true"
           ]
         },
         {
@@ -85,7 +85,7 @@
     {
       "t": "dedup covers 1 crash point, and misses the other 2",
       "line": [
-        54
+        55
       ],
       "stack": [
         {
@@ -102,7 +102,7 @@
             "useDedup = true",
             "useKey = false",
             "n = 1",
-            "p = \"after the shuffle, before the charge\"",
+            "p = \"charge timeout, retried by the sink\"",
             "o = ..."
           ]
         },
@@ -110,11 +110,11 @@
           "name": "attempt",
           "locals": [
             "proc = @0x200",
-            "crashAt = \"after the shuffle, before the charge\"",
+            "crashAt = \"charge timeout, retried by the sink\"",
             "useDedup = true",
             "useKey = false",
-            "seen = []",
-            "pass = 1"
+            "seen = [4]",
+            "viaShuffle = false"
           ]
         }
       ]
@@ -140,7 +140,7 @@
             "useDedup = false",
             "useKey = true",
             "n = 3",
-            "p = \"after the charge, before the offset commit\"",
+            "p = \"crash after the charge, before the offset commit\"",
             "o = ..."
           ]
         }

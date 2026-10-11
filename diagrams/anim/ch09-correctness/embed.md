@@ -16,7 +16,7 @@ So the join must retract and re-emit. And note which result is being retracted: 
 
 1 + 2 + 2 = 5. Only 20% of the true matches are published correctly the first time, and 40% are never published. **Nothing is broken** — this is what a correct windowed join does on out-of-order data.
 
-**And the state must be collected, or the join grows without bound.** The same watermark drives both: it decides when a match may be emitted and when its inputs may be dropped. So the 2 clicks that never emits is also 2 buffered rows that is never freed — a stalled input is a liveness problem *and* a memory leak, silently.
+**And the state must be collected, or the join grows without bound.** The same watermark drives both: it decides when a match may be emitted and when its inputs may be dropped. So the 2 clicks that never emit are also 2 buffered rows that are never freed — a stalled input is a liveness problem *and* a memory leak, silently.
 
 #### When to accept this, and what to do about the undelivered matches
 
@@ -57,7 +57,7 @@ The worst version of this is visible in the first row: the join emits **no match
 
 <img src="../diagrams/anim/ch09-correctness/frames/step-03.svg" alt="Step 3: so the accounting is: on time, late, or never" width="1040">
 
-The accounting is the chapter's central result and it is not comfortable: of 5 true matches, **1** is published correctly on the first attempt, **2** requires a retraction, and **2** are computed, held in state and never published at all. Nothing is broken — this is what a correct windowed join does on this data.
+The accounting is the chapter's central result and it is not comfortable: of 5 true matches, **1** is published correctly on the first attempt, **2** require a retraction, and **2** are computed, held in state and never published at all. Nothing is broken — this is what a correct windowed join does on this data.
 
 </details>
 <details>
@@ -65,7 +65,7 @@ The accounting is the chapter's central result and it is not comfortable: of 5 t
 
 <img src="../diagrams/anim/ch09-correctness/frames/step-04.svg" alt="Step 4: and the state must be collected, or the join grows forever" width="1040">
 
-The coupling is worth stating explicitly: the same watermark decides emission and collection, so a stalled input is simultaneously a liveness problem and a memory leak. The 2 clicks here that never emits is also never collected, and neither symptom raises an error.
+The coupling is worth stating explicitly: the same watermark decides emission and collection, so a stalled input is simultaneously a liveness problem and a memory leak. The 2 clicks here that never emit are also never collected, and neither symptom raises an error.
 
 </details>
 

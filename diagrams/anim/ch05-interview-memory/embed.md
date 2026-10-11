@@ -30,7 +30,7 @@ And the assumption that carries it, which is the part worth volunteering: the po
 
 Each of these is the program below with different nouns. The reason to read them is not the
 answer — it is the *recognition*. 4 surfaces (order fulfilment, backups, analytics, notifications), one shape, and in every
-case the appealing first answer is to materialise a sequence you cannot afford.
+case the appealing first answer is to get the order of the two writes right — do the work, then record that it was done — when every ordering of two separate writes leaves an instant a crash can land in.
 
 <details>
 <summary><b>Variation 2</b> — the file that is half uploaded <i>(looks like backups)</i></summary>
@@ -73,7 +73,8 @@ This is **the file that is half uploaded** solved on its own: a complete file, e
   GIVEN A CRASH POINT AND A WRITE ORDERING, WHAT WOULD A RESTORE READ AFTERWARDS?
 
   Worked, on the nine chunks above -- which between them define crash points 0..9 only:
-    rename, no crash          -> COMPLETE    all 45 bytes, and the record agrees
+    rename, no crash          -> COMPLETE    all 45 bytes, and no record is kept: the file is
+                                             the record
     rename, crash at 0        -> ABSENT      the earliest crash: nothing was written
     rename, crash at 1        -> ABSENT      5 bytes are in the staging slot, and a restore
                                              still sees nothing, because nothing reads it
@@ -112,8 +113,9 @@ You can often manufacture an atomic step instead of needing a transaction.  What
 where it stops working, are both measured below.
 
 WORKED EXAMPLES: the EXAMPLES table below holds 19 input/output pairs -- both sides of the
-commit boundary for all three orderings (killed before the last chunk, killed with every byte
-uploaded but the rename not yet run, and not killed at all), a crash point past the end of the
+commit boundary for the rename (killed before the last chunk, killed with every byte uploaded
+but the rename not yet run, and not killed at all) and the matching crash rows for direct and
+record_first, a crash point past the end of the
 stream that never fires, a zero-chunk backup, a one-chunk backup, and a 5,000-chunk file at
 scale; each row prints what a restart costs with and without resuming the staging file.  Every
 row is ASSERTED, so the table cannot drift from the code.
@@ -365,15 +367,16 @@ def main():
         assert ok is False, "the rename policy keeps no record at all; the file is the record"
     assert rows[None]["rename"][0] == COMPLETE
     assert all(rows[c]["rename"][0] is None for c in range(N + 1))
-    print(f"\n  rename: at all {N + 2} crash points the visible file is absent or the full {SIZE} bytes.")
-    print(f"  Nothing is ever half visible, and there is no record to disagree with it.")
+    print(f"\n  rename: at all {N + 1} crash points and on the uninterrupted run, the visible file is")
+    print(f"  absent or the full {SIZE} bytes.  Nothing is ever half visible, and there is no record")
+    print(f"  to disagree with it.")
 
     # the direct write: partials ARE visible, and the count is every chunk after the first
     partial = [c for c in rows if rows[c]["direct"][0] not in (None, COMPLETE)]
     assert partial == list(range(1, N)), partial
     assert rows[0]["direct"] == (None, False)
     assert rows[N]["direct"] == (COMPLETE, False), rows[N]["direct"]
-    print(f"\n  direct: {len(partial)} of the {N + 2} crash points leave a partial file under the real")
+    print(f"\n  direct: {len(partial)} of the {N + 1} crash points leave a partial file under the real")
     print(f"  name -- a restore from it silently produces a truncated database.  And crashing")
     print(f"  after the last chunk leaves a COMPLETE file with the record still saying failed,")
     print(f"  which is the harmless half of the same split.")
@@ -386,7 +389,7 @@ def main():
     # that matters, because the upload is where all the time goes.
     assert lying == list(range(N)), lying
     assert rows[N]["record_first"] == (COMPLETE, True), rows[N]["record_first"]
-    print(f"\n  record_first: {len(lying)} of the {N + 2} crash points leave the record saying SUCCESS with")
+    print(f"\n  record_first: {len(lying)} of the {N + 1} crash points leave the record saying SUCCESS with")
     print(f"  no complete file behind it -- every point during the upload, which is where all")
     print(f"  the time goes.  Nobody finds out until a restore is attempted, which is why this")
     print(f"  ordering is the one that loses data rather than merely wasting work.")
@@ -515,15 +518,16 @@ the finished file is 45 bytes: 'aaaaabbbcccccccddeeeeeefggggggggghhhhiiiiiiii'
   after all 9   absent, rec=False  COMPLETE, rec=False  COMPLETE, rec=True
      none  COMPLETE, rec=False  COMPLETE, rec=True  COMPLETE, rec=True
 
-  rename: at all 11 crash points the visible file is absent or the full 45 bytes.
-  Nothing is ever half visible, and there is no record to disagree with it.
+  rename: at all 10 crash points and on the uninterrupted run, the visible file is
+  absent or the full 45 bytes.  Nothing is ever half visible, and there is no record
+  to disagree with it.
 
-  direct: 8 of the 11 crash points leave a partial file under the real
+  direct: 8 of the 10 crash points leave a partial file under the real
   name -- a restore from it silently produces a truncated database.  And crashing
   after the last chunk leaves a COMPLETE file with the record still saying failed,
   which is the harmless half of the same split.
 
-  record_first: 9 of the 11 crash points leave the record saying SUCCESS with
+  record_first: 9 of the 10 crash points leave the record saying SUCCESS with
   no complete file behind it -- every point during the upload, which is where all
   the time goes.  Nobody finds out until a restore is attempted, which is why this
   ordering is the one that loses data rather than merely wasting work.
@@ -567,7 +571,7 @@ all assertions passed
 
 **Why it is not obvious.** Two outputs rather than one output and a position, so there is no single store the bookkeeping can live in and the transaction is genuinely unavailable. The honest answer is that it cannot be made exact, and the useful answer is to pick one store as the source of truth and **derive** the other from it — the fast counter becomes a cache rebuilt from the warehouse rather than a second authority, so disagreement becomes staleness instead of inconsistency. The skill is noticing that "both must agree" is a request to have two sources of truth, and declining it.
 
-**Where it lands.** No change to the program; the point is that `together` has no store to be together IN, which is the condition the model's last paragraph names.
+**Where it lands.** `together` has no store to be together IN, so the worker is replaced by one durable write (the warehouse row) and a counter rebuilt from it — `derived` in the variation program.
 
 
 <details>
@@ -626,7 +630,8 @@ This is **the counter in two places** solved on its own: a complete file, every 
                                                the two writes both landed
   And on 3,000 events of 7 each (21,000 in all):
     counter first, crash at 1500 -> (10507, 10500)   off by one event out of three thousand
-    derived@500, crash at 1700   -> (10500, 11900)   200 events of lag, which is its bound
+    derived@500, crash at 1700   -> (10500, 11900)   200 events of lag, inside its bound of
+                                                      499 (the interval minus one)
 
   Every line above is a row in the EXAMPLES table below, and every row is asserted twice --
   against the program and against an independent formula for the same pair -- so these
@@ -804,11 +809,15 @@ def show_examples():
     is cheaper for it.  `dual` counts durable writes (two per event, one for the event the
     crash straddles).  `derv` counts the one write per event PLUS the rows each rebuild has to
     re-read, because rebuild() sums the whole warehouse every time.  That is why the derived
-    design LOSES on most of these rows: its correctness is free and its freshness is not, and
-    a short rebuild interval on a long stream is the expensive corner.
+    design LOSES on every row that runs to the end with a rebuild, on the every-event rebuild
+    and on the long-stream rows: its correctness is free and its freshness is not, and a short
+    rebuild interval on a long stream is the expensive corner.  Where it wins, few or no
+    rebuilds had been paid for yet -- an early crash, or an interval longer than the stream.
+    The tally of the `cheaper` column is printed under the table rather than asserted here.
     """
     print(f"{'what it exercises':40s} {'events':>6} {'design':>15} {'crash':>5} "
           f"{'counter':>8} {'wh':>8} {'lag':>4} {'dual':>6} {'derv':>7} {'cheaper':>8}")
+    tally = {'derived': 0, 'dual': 0, 'tie': 0}
     for label, items, design, crash_at, want in EXAMPLES:
         vals = [v for _, v in items]
         n = len(items)
@@ -839,10 +848,14 @@ def show_examples():
         r = m // every
         derv = m + every * r * (r + 1) // 2
         cheaper = 'derived' if derv < dual else 'dual' if dual < derv else 'tie'
+        tally[cheaper] += 1
         crash = 'none' if crash_at is None else str(crash_at)
         print(f"{label:40s} {n:>6} {design:>15} {crash:>5} "
               f"{counter:>8} {wh:>8} {lag:>4} {dual:>6} {derv:>7} {cheaper:>8}")
     print(f"all {len(EXAMPLES)} examples agree with the prefix sums of their own stream")
+    assert sum(tally.values()) == len(EXAMPLES), tally
+    print(f"cheaper: derived on {tally['derived']} rows, dual on {tally['dual']}, "
+          f"tie on {tally['tie']}")
     print()
 
 
@@ -886,8 +899,9 @@ def main():
         assert cnt <= wh, (c, cnt, wh)
         assert legal.index(cnt) == legal.index(wh) - lag, (c, cnt, wh, lag)
         lags.append(lag)
-    print(f"  of the {N + 1} derived crash states, ALL are a legal total paired with an earlier legal")
-    print(f"  total -- the counter is behind by {min(lags)} to {max(lags)} events and never wrong.")
+    print(f"  of the {N} derived crash states and the uninterrupted run, ALL are a legal total")
+    print(f"  paired with an earlier legal total -- the counter is behind by {min(lags)} to {max(lags)}")
+    print(f"  events and never wrong.")
     assert max(lags) == REBUILD_EVERY - 1, (lags, REBUILD_EVERY)
     assert min(lags) == 0, lags
     print(f"  the lag is bounded by the rebuild interval ({REBUILD_EVERY}), so it is a number you choose,")
@@ -1005,6 +1019,7 @@ empty stream: nothing to split                0   counter_first     0        0  
 3,000 events, derived@500, lag 200         3000     derived@500  1700    10500    11900  200   3401    4700     dual
 3,000 events, derived@500, no crash        3000     derived@500  none    21000    21000    0   6000   13500     dual
 all 19 examples agree with the prefix sums of their own stream
+cheaper: derived on 8 rows, dual on 7, tie on 4
 
 ITEMS = 0:5  1:3  2:7  3:2  4:6  5:1  6:9  7:4  8:8   total 45
 the 10 totals the stream legitimately passes through: [0, 5, 8, 15, 17, 23, 24, 33, 37, 45]
@@ -1025,8 +1040,9 @@ the 10 totals the stream legitimately passes through: [0, 5, 8, 15, 17, 23, 24, 
 
   of the 9 dual-write crash states, 9 correspond to NO moment in the
   stream: the pair (counter, warehouse) is not (T, T) for any legal total T.
-  of the 10 derived crash states, ALL are a legal total paired with an earlier legal
-  total -- the counter is behind by 0 to 2 events and never wrong.
+  of the 9 derived crash states and the uninterrupted run, ALL are a legal total
+  paired with an earlier legal total -- the counter is behind by 0 to 2
+  events and never wrong.
   the lag is bounded by the rebuild interval (3), so it is a number you choose,
   not a number you discover after an incident.
   rebuild every 1,2,3,5,9,20 events -> worst lag 0,1,2,4,8,9 events: exactly the
@@ -1323,8 +1339,8 @@ def show_examples():
     The two cost columns price the SAME outcome for BOTH messages, which is the whole point of
     the variation: a duplicate is cheap for a parcel notice and expensive for a charge notice,
     so the identical row is acceptable under one message and not the other.  Rows that cost
-    nothing either way -- a clean run, or a crash under a far-end key -- are the ties, and
-    they are the only rows where the choice does not have to be made.
+    nothing either way -- a clean run, or an effect-first crash under a far-end key -- are the
+    ties, and they are the only rows where the choice does not have to be made.
     """
     parcel, charged = PROFILES["your parcel has arrived"], PROFILES["you have been charged"]
 
@@ -1435,7 +1451,8 @@ def main():
     print(f"\n  give the push service an idempotency key and effect-first becomes exact at all {N}")
     print(f"  crash points, and at every item at once.  The missing feature is the problem; no")
     print(f"  arrangement of the worker's two writes substitutes for it.")
-    # and with the key, the ORDER stops mattering at all -- which is the proof it was the fix
+    # with the key, effect-first becomes exact -- but the ORDER still matters: the key cannot
+    # recover an item position-first skipped
     assert run(ITEMS, "effect_then_position", {C}, far_end_key=True) == want
     assert tally(ITEMS, run(ITEMS, "position_then_effect", {C}, far_end_key=True)) == ([], [C])
     print(f"  note it only rescues the at-least-once side: a key cannot un-skip an item that was")
@@ -1463,9 +1480,12 @@ def main():
             if expected_cost(ITEMS, "effect_then_position", {"duplicate": d, "loss": 20})
             > expected_cost(ITEMS, "position_then_effect", {"duplicate": d, "loss": 20})]
     assert flip and min(flip) == 21, min(flip) if flip else None
-    print(f"  holding the cost of a loss at 20, at-least-once stops winning the moment a")
-    print(f"  duplicate costs {min(flip)} -- the crossover is exactly where the two costs cross,")
-    print(f"  because each design fails on exactly one item per crash.")
+    tie = min(flip) - 1
+    assert (expected_cost(ITEMS, "effect_then_position", {"duplicate": tie, "loss": 20})
+            == expected_cost(ITEMS, "position_then_effect", {"duplicate": tie, "loss": 20})), tie
+    print(f"  holding the cost of a loss at 20, the two designs tie when a duplicate costs {tie}")
+    print(f"  and at-least-once starts losing at {min(flip)} -- the crossover is exactly where the")
+    print(f"  two costs cross, because each design fails on exactly one item per crash.")
 
     # ---- boundaries
     assert run([], "effect_then_position", {0}) == []
@@ -1568,9 +1588,9 @@ ITEMS = [0, 1, 2, 3, 4, 5, 6, 7, 8], values [5, 3, 7, 2, 6, 1, 9, 4, 8]
   the same nine items, the same two programs, and the better design is opposite for
   the two messages.  Nothing in the code decides it, which is why the answer to this
   question is a question.
-  holding the cost of a loss at 20, at-least-once stops winning the moment a
-  duplicate costs 21 -- the crossover is exactly where the two costs cross,
-  because each design fails on exactly one item per crash.
+  holding the cost of a loss at 20, the two designs tie when a duplicate costs 20
+  and at-least-once starts losing at 21 -- the crossover is exactly where the
+  two costs cross, because each design fails on exactly one item per crash.
 
   boundaries: an empty queue sends nothing under either design; a one-item queue
   crashed on its only item sends it twice one way and never the other -- there is no
@@ -1670,7 +1690,7 @@ def worker(items, order, crash_at, commit_first=False):
 # The three variations.
 
 def the_file_that_is_half_uploaded(size, crash_after):
-    """Variation 1, surface: backups.  Upload a large file, then record success.
+    """Variation 2, surface: backups.  Upload a large file, then record success.
 
     Non-obvious point: the transaction is unavailable (the file store and the record
     are different systems), but the destination NAME is under your control -- so
@@ -1691,7 +1711,7 @@ def the_file_that_is_half_uploaded(size, crash_after):
     return with_rename, direct["backup"]
 
 def the_counter_in_two_places(values, crash_at):
-    """Variation 2, surface: analytics.  A fast counter and a warehouse row, both
+    """Variation 3, surface: analytics.  A fast counter and a warehouse row, both
     of which must agree.
 
     Non-obvious point: two OUTPUTS, not one output and a position, so there is no
@@ -1712,7 +1732,7 @@ def the_counter_in_two_places(values, crash_at):
     return (counter, warehouse), (derived, warehouse)
 
 def the_retry_that_must_not_re_send(values, crash_at):
-    """Variation 3, surface: notifications.  One push per item, no transaction at the
+    """Variation 4, surface: notifications.  One push per item, no transaction at the
     far end and no idempotency key.
 
     Non-obvious point: every tool is gone, and the effect is visible to a human so a

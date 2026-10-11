@@ -34,7 +34,7 @@ def ascending(times):
 
 def sweep(times, g=G):
     """The batch answer: sort, then walk.  Each time extends the last run or starts
-    a new one, decided by one comparison.  O(n log n) + O(n) -- and correct only
+    a new one, decided by one comparison.  One sort, then one comparison per time -- and correct only
     once every time has arrived, which the question says will not happen."""
     out = []
     for t in ascending(times):
@@ -84,7 +84,7 @@ def incremental(times, g=G):
 # The three variations.
 
 def the_calendar_that_will_not_double_book(ops):
-    """Variation 1, surface: scheduling.  Reject bookings that overlap; report gaps.
+    """Variation 2, surface: scheduling.  Reject bookings that overlap; report gaps.
 
     Non-obvious point: insertion is `touching` with g = 0, and CANCELLATION is the
     operation nothing above can do -- merging is easy because a merged run is
@@ -93,31 +93,35 @@ def the_calendar_that_will_not_double_book(ops):
     merged runs at all: it must be the individual bookings, with the merge
     computed on read.
 
-    `ops` is [("book"|"cancel", (start, end)), ...].  Returns (accepted, members).
+    Bookings are HALF-OPEN, [start, end), so back-to-back meetings do not clash.
+    `ops` is [("book", (start, end)) | ("cancel", start), ...]: a cancel names the
+    booking by its start and is accepted only if it removed one.
+    Returns (accepted, members).
     """
     members, accepted = [], []
     for kind, span in ops:
         if kind == "book":
-            clash = [m for m in members if span[0] <= m[1] and m[0] <= span[1]]
+            clash = [m for m in members if span[0] < m[1] and m[0] < span[1]]
             if clash:
                 accepted.append(False)
                 continue
             members.append(span)
             accepted.append(True)
         else:
-            members = [m for m in members if m != span]
-            accepted.append(True)
+            before = len(members)
+            members = [m for m in members if m[0] != span]
+            accepted.append(len(members) < before)
     return accepted, sorted(members)
 
 def the_island_count(positions):
-    """Variation 2, surface: puzzles.  Positions turn on in any order; after each,
+    """Variation 3, surface: puzzles.  Positions turn on in any order; after each,
     how many contiguous stretches are on?
 
     Non-obvious point: the question asked only for a COUNT, and that buys a much
     better answer -- a new position can join at most TWO stretches, so the count
     moves by exactly +1, 0 or -1 and nothing has to be searched.  A map from a
-    stretch's endpoints to its length is enough: O(1) per position, with no
-    interval structure at all.  The two-run merge in the main trace is the -1 case.
+    stretch's endpoints to its length is enough: two lookups and two writes per
+    position, with no interval structure at all.  The two-run merge in the main trace is the -1 case.
     """
     length, count, out = {}, 0, []
     on = set()
@@ -136,7 +140,7 @@ def the_island_count(positions):
     return out
 
 def the_deduplicated_alert(firings, page_after, close_after):
-    """Variation 3, surface: operations.  Group firings into incidents and page once.
+    """Variation 4, surface: operations.  Group firings into incidents and page once.
 
     Non-obvious point: you must page while an incident is still OPEN -- acting on a
     run before knowing it is finished -- so the withdrawal in the main trace becomes
@@ -218,12 +222,22 @@ def main():
     # variations
     ok, members = the_calendar_that_will_not_double_book(
         [("book", (0, 10)), ("book", (5, 15)), ("book", (11, 20)),
-         ("cancel", (0, 10)), ("book", (5, 9))])
+         ("cancel", 0), ("book", (5, 9))])
     assert ok == [True, False, True, True, True], ok
     assert members == [(5, 9), (11, 20)], members
-    # and the point: a merged-run state could not have produced that last booking,
-    # because cancelling 0..10 out of a merged 0..20 is not expressible
-    assert sweep([0, 10, 11, 20], 1) == [(0, 0), (10, 11), (20, 20)]
+    # and the point: a merged-run state could not have produced that result.  The two
+    # bookings held before the cancel abut within 1, so a gap-1 merge keeps them as ONE
+    # run 0..20, which no longer records where 0..10 ended -- cancelling the booking
+    # that starts at 0 then removes 11..20 as well, which the member state keeps.
+    held = [(0, 10), (11, 20)]
+    assert held[1][0] - held[0][1] <= 1
+    merged_state = [(held[0][0], held[1][1])]
+    assert merged_state == [(0, 20)], merged_state
+    assert [r for r in merged_state if r[0] != 0] == [], "the merged run survived the cancel"
+    assert [m for m in held if m[0] != 0] == [(11, 20)]
+    assert the_calendar_that_will_not_double_book(
+        [("book", (90, 130)), ("book", (130, 160))])[0] == [True, True], "back-to-back must not clash"
+    assert the_calendar_that_will_not_double_book([("cancel", 7)])[0] == [False], "a cancel of nothing"
     print(f"\n  calendar: accepted {ok}, members {members}")
 
     islands = the_island_count([5, 7, 6, 1, 2, 3])

@@ -117,8 +117,8 @@ FOREVER       = float("inf")                        # the offline wait: every im
 
 # ------------------------------------------------------------------- WORKED EXAMPLES
 # (what it exercises, impressions, clicks, W, wait, attributed, the most any rule could get).
-# The last column is None where max_matching() is too expensive to run -- it is O(clicks x
-# impressions) with backtracking and takes half a minute at 300 streams, which is itself a fact
+# The last column is None where max_matching() is too expensive to run -- it tries every
+# impression for every click, with backtracking, and takes half a minute at 300 streams, which is itself a fact
 # about the yardstick.  Every row is asserted by show_examples(), which is why the table is data
 # and not a comment: a comment can go stale silently, and this cannot.
 EXAMPLES = [

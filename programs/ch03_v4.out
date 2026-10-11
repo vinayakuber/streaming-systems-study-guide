@@ -19,12 +19,13 @@ all 15 examples agree with the brute-force scan
 READINGS = 0:5  1:3  2:7  3:2  4:6  5:1  6:9  7:4  8:8    L = 6
   naive  : 6 seconds from second 0   (33 runs measured)
   deques : 6 seconds from second 0 -> [5, 3, 7, 2, 6, 1], spread 6 <= 6
-           (18 pushes, 13 back-pops, 1 front-pops, 6 left-edge steps)
+           (18 pushes, 13 back-pops, 1 front-pop, 6 left-edge steps)
   adding second 6 (9) takes the spread to 8, so the stretch
   ends exactly where it does -- the answer sits on the = in 'at most 6'.
 
-  6 left-edge steps produced only 1 front-pops: most steps drop from one
-  deque and not the other, which is precisely what a single shared `if` gets wrong.
+  6 left-edge steps produced only 1 front-pop: 5 dropped from neither deque, 1 from exactly one, 0 from both.
+  Each front leaves only when ITS index falls behind the left edge, and the two deques
+  do so independently -- which is precisely what a single shared `if` popping both gets wrong.
 
   popping both fronts   : 8 seconds (truth 6) -- over by 2
   expiring at i - best  : 7 seconds (truth 6) -- over by 1

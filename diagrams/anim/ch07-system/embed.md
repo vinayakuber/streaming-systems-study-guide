@@ -17,7 +17,7 @@
 
 That is the design's entire claim, as one equation: **23 loaded + 22 replayed = 45**, the no-crash total. Every failed recovery earlier in this chapter failed that equation, and always because the state and the offset did not match.
 
-**Two settings, and one of them is free.** Incremental rather than full checkpointing is 8 uploads instead of 14 at k = 3, with identical recovery behaviour — no trade at all. The frequency trades in three directions at once: I/O, recovery time, and under at-least-once the error bound (up to 22 of 45 at a checkpoint every 3 events).
+**Two settings, and one of them is free.** Incremental rather than full checkpointing is 8 uploads instead of 14 at k = 3, with identical recovery behaviour — no trade at all. The frequency trades in three directions at once: I/O, recovery time, and under at-least-once the error bound (up to 13 of 45 at a checkpoint every 3 events).
 
 #### When this design is enough, and the four things it does not settle
 

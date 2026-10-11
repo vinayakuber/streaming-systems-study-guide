@@ -442,14 +442,14 @@ Two things to volunteer. A **deletion must be an entry** saying "gone", not an a
 
 Each of these is the program below with different nouns. The reason to read them is not the
 answer — it is the *recognition*. 4 surfaces (ledger, web infrastructure, compliance, metrics), one shape, and in every
-case the appealing first answer is to materialise a sequence you cannot afford.
+case the appealing first answer is to treat the log and the table as interchangeable — to assume the table can give the changes back, or that keeping only the last entry per key loses nothing — when that holds only for the present state, and only for a log that says what each key became.
 
 <details>
 <summary><b>Variation 2</b> — the cache that must not go stale <i>(looks like web infrastructure)</i></summary>
 
 > A service keeps an in-memory copy of a table. **Keep it current** as changes happen.
 
-**Why it is not obvious.** Folding the changelog into memory is exactly the chapter's program, and the operational question is what happens at start-up: the service must fold from somewhere, and the compacted log is precisely the "somewhere" that makes that cheap — 2 entries instead of 9. The subtlety is that it must then switch from reading history to following live changes without a gap, which is the read-then-watch race from another chapter arriving here as a start-up sequence. Recognising that compaction exists for restarts as much as for disk is the content.
+**Why it is not obvious.** Folding the changelog into memory is exactly the chapter's program, and the operational question is what happens at start-up: the service must fold from somewhere, and the compacted log is precisely the "somewhere" that makes that cheap — 2 entries instead of 9. The subtlety is that it must then switch from reading history to following live changes without a gap, and that is where the work is: the fold reaches a version, and live reading has to begin at exactly that version — begin later and the changes in between are never applied, so the cache serves a stale value forever; begin earlier and they are read twice, which costs reads but is harmless only because each entry is an assignment. Recognising that compaction exists for restarts as much as for disk is the content.
 
 **Where it lands.** `fold` over the compacted log, then continuing over live entries — with the handover point being the version the fold reached.
 
@@ -943,7 +943,7 @@ Standalone and runnable.
     'a', day 500  -> 16             its surviving edge: from here on it can still answer
   And on a 5,000-change audit log over 50 records and ten years:
     'r0',  day 1825 -> 2500         mid-history, five years in
-    'r49', day 3650 -> 4999         the last day of the log
+    'r49', day 3650 -> 4999         today, the day after the log's last entry (day 3649)
 
   Every line above is a row in the EXAMPLES table below, and every row is asserted twice --
   against a maximum over the surviving entries and, wherever it is affordable, against a
@@ -1378,9 +1378,9 @@ all assertions passed
 
 > The entries say **what changed** — "+5" — rather than what the key became. **Fold them, and compact them.**
 
-**Why it is not obvious.** The fold now needs addition rather than assignment, which still works, and compaction **breaks**: you cannot keep "the last +5" and drop the earlier ones, because every entry contributes. The repair is to convert the log to absolute values first — fold, then emit — which is exactly the chapter's two functions composed, and it reveals why the log's format mattered in the first frame. The general rule is that a log of *deltas* cannot be compacted and a log of *states* can, so the format is a decision about retention and not about convenience.
+**Why it is not obvious.** The fold now needs addition rather than assignment, which still works, and the chapter's compaction **breaks**: you cannot keep "the last +5" and drop the earlier ones, because every entry contributes. One repair is to convert the log to absolute values first — fold, then emit — which is exactly the chapter's two functions composed, and it reveals why the log's format mattered in the first frame. The general rule is that a log of *states* can be compacted by keeping the last entry per key and a log of *deltas* cannot: it can only be compacted by summing per key, and that result is safe to apply once, to an empty state. So the format is a decision about retention and not about convenience.
 
-**Where it lands.** `fold` with `+` in place of `=`, and `compact` becoming invalid until `fold` and `emit` have converted the deltas to states.
+**Where it lands.** `fold` with `+` in place of `=`, and keep-the-last `compact` becoming invalid; summing per key, or `fold` then `emit` to convert the deltas to states, compacts it correctly.
 
 
 <details>
@@ -1443,11 +1443,13 @@ This is **the counter changelog** solved on its own: a complete file, every help
   answers cannot drift from what the program returns.
 
 The fold needs addition where the chapter's needed assignment, which still works and is
-barely a change.  Compaction BREAKS: you cannot keep "the last +5" and drop the earlier
-ones, because every entry contributes.  The repair is to turn the log into absolute values
+barely a change.  The chapter's compaction BREAKS: you cannot keep "the last +5" and drop
+the earlier ones, because every entry contributes.  The repair is to turn the log into absolute values
 first -- fold, then emit -- which is the chapter's two functions composed, and it shows that
 the log's FORMAT was the first thing stated for a reason.  A log of states can be compacted
-and replayed; a log of deltas can be neither, and both failures are the same fact: an
+by keeping the last entry and replayed; a log of deltas cannot be compacted by keeping the
+last entry, and cannot be replayed twice -- it can only be compacted by summing per key, and
+that result is safe to apply once, to an empty state.  Both failures are the same fact: an
 assignment is idempotent and an addition is not.
 
 WORKED EXAMPLES: the EXAMPLES table below holds 12 input/output pairs -- an empty log and a
@@ -1758,8 +1760,8 @@ def main():
     # the scale that makes compaction worth doing at all
     BIG_KEYS, BIG_ENTRIES = 50, 20_000
     # increments are positive here, as a counter's are: the first attempt used increments
-    # cycling through -3..3, and at 400 entries per counter they summed to exactly zero, so
-    # compact_last came out EXACT at scale and the comparison said nothing.  An accidental
+    # cycling through -3..3, and at 400 entries per counter the first 399 cancelled exactly, so
+    # the last increment equalled the total and compact_last came out EXACT at scale and the comparison said nothing.  An accidental
     # cancellation is the one case where the wrong compaction looks right, and it is easier
     # to build by accident than it sounds.
     big = [(f"m{i % BIG_KEYS}", 1 + (i % 3)) for i in range(BIG_ENTRIES)]
@@ -1934,7 +1936,7 @@ def history_of(log, k):
 # The three variations.
 
 def the_cache_that_must_not_go_stale(log, live, compacted_start=True):
-    """Variation 1, surface: web infrastructure.  Keep an in-memory copy current.
+    """Variation 2, surface: web infrastructure.  Keep an in-memory copy current.
 
     Non-obvious point: this is `fold` at start-up, and the compacted log is exactly
     the cheap "somewhere" to fold from -- 2 entries instead of 9.  The subtlety is
@@ -1946,15 +1948,17 @@ def the_cache_that_must_not_go_stale(log, live, compacted_start=True):
     """
     base = list(compact(log) if compacted_start else log)
     t = fold(base)
-    version = len(log)              # the fold consumed the whole log's history
+    handover = len(log)             # the fold consumed the whole log's history
+    version = handover
     for entry in live:              # then follow live entries from that version on
         base.append(entry)
         t = fold(base)              # the same fold, now over base + what arrived since
         version += 1
-    return t, len(base), version
+    assert version == handover + len(live)
+    return t, len(base), handover
 
 def the_audit_log_that_was_compacted(log, k, n):
-    """Variation 2, surface: compliance.  A regulator asks what a record held two
+    """Variation 3, surface: compliance.  A regulator asks what a record held two
     years ago; the log was compacted last year.
 
     Non-obvious point: the answer is that the question cannot be answered, and the
@@ -1971,14 +1975,15 @@ def the_audit_log_that_was_compacted(log, k, n):
     return value_after(state_log, k, n), value_after(audit_log, k, n)
 
 def the_counter_changelog(deltas):
-    """Variation 3, surface: metrics.  The entries say what CHANGED ("+5"), not what
+    """Variation 4, surface: metrics.  The entries say what CHANGED ("+5"), not what
     the key became.  Fold them, and compact them.
 
-    Non-obvious point: the fold still works with + in place of =, and compaction
-    BREAKS -- you cannot keep "the last +5" and drop the earlier ones, because every
-    entry contributes.  The repair is to convert deltas to absolute values first,
-    which is `fold` and `emit` composed, and it shows why the log's FORMAT was the
-    first thing stated.  A log of deltas cannot be compacted; a log of states can.
+    Non-obvious point: the fold still works with + in place of =, and keep-the-last
+    compaction BREAKS -- you cannot keep "the last +5" and drop the earlier ones,
+    because every entry contributes.  The repair is to convert deltas to absolute
+    values first, which is `fold` and `emit` composed, and it shows why the log's
+    FORMAT was the first thing stated.  A log of deltas cannot be compacted by
+    keeping the last entry; it must be summed or converted to states first.
 
     Returns (table, table_after_naive_compaction, table_after_converting_first).
     """
@@ -2044,12 +2049,12 @@ def main():
           f"resurrects b: {fold(dropped)}")
 
     # variations
-    t1, read, version = the_cache_that_must_not_go_stale(CHANGELOG, [("a", 30)])
+    t1, read, handover = the_cache_that_must_not_go_stale(CHANGELOG, [("a", 30)])
     t2, read_full, _ = the_cache_that_must_not_go_stale(CHANGELOG, [("a", 30)], compacted_start=False)
     assert t1 == t2 == {"a": 30, "b": 21}, (t1, t2)
     assert read == 3 and read_full == 10, (read, read_full)
-    assert version == N + 1, version
-    print(f"\n  cache: same table {t1} from {read} entries instead of {read_full}, handover at version {version}")
+    assert handover == N, handover
+    print(f"\n  cache: same table {t1} from {read} entries instead of {read_full}, handover at version {handover}")
 
     state_ans, audit_ans = the_audit_log_that_was_compacted(CHANGELOG, ASKED, mid)
     assert state_ans == UNANSWERABLE and audit_ans == 8, (state_ans, audit_ans)
@@ -2101,7 +2106,7 @@ CHANGELOG = a=5  a=8  b=7  a=10  a=16  b=8  b=17  b=21  a=24
   value_after(compacted, 'a', 2)     = UNANSWERABLE
   with a tombstone for 'b': {'a': 24};  compacting the tombstone away resurrects b: {'a': 24, 'b': 21}
 
-  cache: same table {'a': 30, 'b': 21} from 3 entries instead of 10, handover at version 10
+  cache: same table {'a': 30, 'b': 21} from 3 entries instead of 10, handover at version 9
   audit: the state log says UNANSWERABLE, an uncompacted audit log says 8
   deltas: fold {'a': 10, 'b': 8}, compacting the deltas gives {'a': 2, 'b': 1} (wrong), converted first {'a': 10, 'b': 8}
 
@@ -2229,15 +2234,15 @@ Folding is one pass and one assignment per entry; the table is 2 entries against
 Concepts this chapter mentions but does not fully unpack are linked below — each pointer names the chapter where the concept is covered in depth and gives a concrete example that ties the two chapters together.
 
 - **[Chapter 1: Streaming 101 → Three shapes of data](ch01-streaming-101.md#three-shapes-of-data)** — the bounded/unbounded distinction is the raw material of the duality — a bounded dataset is a table, an unbounded feed is a stream.
-  - _Example:_ ch06's "table is the fold of the stream" is ch01's "bounded dataset processed to completion"; ch06's changelog [ +10, -3, +5 ] folds to a table of 12, the same shape ch01 names as streaming.
+  - _Example:_ ch06's "table is the fold of the stream" is ch01's bounded case: the 9-entry changelog a=5  a=8  b=7  a=10  a=16  b=8  b=17  b=21  a=24 is a finite file, and folding it to completion gives the table a:24 b:21; read as an unbounded feed, the same fold is ch01's streaming shape and only ever holds the table so far.
 - **[Chapter 2: The What, Where, When, and How of Data Processing → How — accumulation](ch02-the-what-where-when-and-how-of-data-processing.md#how--accumulation)** — accumulation mode is the "how" that relates successive stream panes — i.e. how a stream becomes a table over time.
-  - _Example:_ ch06's changelog fold 10 − 3 + 5 = 12 is ch02's accumulating mode; ch06's (old, new) retraction pair is ch02's accumulating-and-retracting (3 − 3 + 4 = 4).
-- **[Chapter 5: Exactly-Once and Side Effects → Side effects — the hard part](ch05-exactly-once-and-side-effects.md#side-effects--the-hard-part)** — a changelog that carries retractions is what lets a downstream sink apply an effect exactly once — ch05 connects the duality to the exactly-once guarantee.
-  - _Example:_ ch06's changelog record (7,12) retracts 7 before setting 12; ch05's idempotent sink SET 42 -> 10 uses that same retract-then-set so a retry leaves one value.
+  - _Example:_ ch06's changelog record (16 → 24) is ch02's accumulating-and-retracting pane pair: ch02 emits 15, −15, 19 for window [12:00, 12:02); ch06 carries old 16 and new 24, so a summing consumer computes 16 − 16 + 24 = 24, not 40.
+- **[Chapter 5: Exactly-Once and Side Effects → Idempotency and deduplication](ch05-exactly-once-and-side-effects.md#idempotency-and-deduplication)** — a changelog record that names the value a key became is a SET, not an ADD — ch05 shows why that is what makes a retried write safe, and why a log of deltas is not.
+  - _Example:_ ch06's changelog record (16,24) names the value key "a" became, so applying it is ch05's SET: like ch05's SET window [12:08, 12:10) = 8, writing a = 24 twice still reads 24, while re-applying the delta +8 that produced it is ch05's ADD and reads 32.
 - **[Chapter 8: Streaming SQL → SQL as a stream language](ch08-streaming-sql.md#sql-as-a-stream-language)** — append-only vs updating results is the SQL vocabulary for the duality — an updating query emits retractions, an append-only one emits new facts.
-  - _Example:_ ch06's table update (7,12) is ch08's "updating result" that retracts (C1, 3) before adding (C1, 4); ch06's append-only changelog is ch08's append-only query mode.
+  - _Example:_ ch06's table update (16,24) is ch08's updating result, where window [12:00, 12:02) emits 15 and later becomes 19, so the sink needs the old value as well as the new; ch06's append-only stream of events is ch08's append-only WHERE v > 5, 4 rows that can never be revised.
 - **[Chapter 10: The Evolution of Large-Scale Data Processing → Lambda and Kappa](ch10-the-evolution-of-large-scale-data-processing.md#lambda-and-kappa)** — the stream as source of truth is the premise of the Kappa architecture — keep the log, derive tables, replay to reprocess.
-  - _Example:_ ch06's "any past table is a fold of the stream" is ch10's Kappa replay: rewind the log to offset 0 and fold r1, r2, r3 through the new pipeline to rebuild the corrected table.
+  - _Example:_ ch06's "any past table is a fold of the stream" is ch10's Kappa replay: rewind the log to offset 0 and fold all 9 events through the corrected pipeline, and key "a" goes from 11 to 24 and the total from 32 to 45, while key "b" reads 21 before and after.
 
 ## System Design Interview
 
@@ -2251,7 +2256,7 @@ Concepts this chapter mentions but does not fully unpack are linked below — ea
 
 _Role: database — holds the source table_
 
-- account 42 balance is 7, then updates to 12
+- key "a" balance is 16, then updates to 24
 - the database is table-centric state
 - the update is the event that CDC will capture
 
@@ -2259,7 +2264,7 @@ _Role: database — holds the source table_
 
 _Role: change capture — turns table writes into a changelog_
 
-- the update 7 -> 12 emits the changelog record (7,12)
+- the update 16 -> 24 emits the changelog record (16,24)
 - the record carries the old value for retraction
 - the changelog is append-only and ordered
 
@@ -2267,7 +2272,7 @@ _Role: change capture — turns table writes into a changelog_
 
 _Role: changelog stream — the stream view of the data_
 
-- the stream is [ (0,10), (10,7), (7,12) ]
+- the stream for "a" is [ (0,5), (5,8), (8,10), (10,16), (16,24) ]
 - it is the source of truth — history is retained
 - any past table is a fold up to that point
 
@@ -2276,7 +2281,7 @@ _Role: changelog stream — the stream view of the data_
 _Role: stream processor — derives tables from the stream_
 
 - the fold applies each (old, new) pair
-- after (7,12) the materialized balance is 12
+- after (16,24) the materialized balance is 24, and the table reads a:24 b:21
 - the derived table matches the source database
 
 
@@ -2422,9 +2427,9 @@ A service stores account balances in a database but also needs a real-time feed 
 - Retraction — (old, new) pairs
 
 ```java
-// table balance 7 -> 12
-//   CDC emits (7,12) to the changelog
-//   consumer folds -> table 12 (matches source)
+// table balance for "a" 16 -> 24
+//   CDC emits (16,24) to the changelog
+//   consumer folds -> table a:24 b:21 (matches source)
 //   stream = source of truth, table = derived view
 ```
 
@@ -2448,8 +2453,8 @@ An ad-click pipeline needs both a per-minute event feed and a per-campaign runni
 - Aggregation — stream -> table
 
 ```java
-// clicks [ +1, +1, +1 ] campaign C
-//   stream: 3 events, table: total 3
+// events a+5 a+3 b+7 a+2 a+6 b+1 b+9 b+4 a+8
+//   stream: 9 events, table: a:24 b:21 (total 45)
 //   both from the same source -> cannot disagree
 ```
 
@@ -2469,13 +2474,6 @@ _From the 28 problems:_ 21-ad-click-aggregation
 ### The Solution
 
 A stream is a sequence of events over time — an append-only change log.
-
-```java
-// table balance 7 -> 12
-//   CDC emits (7,12) to the changelog
-//   consumer folds -> table 12 (matches source)
-//   stream = source of truth, table = derived view
-```
 
 
 ### Key Facts
@@ -2568,7 +2566,7 @@ A stream is a sequence of events over time — an append-only change log.
 
 **Claim.** Aggregating the change log reproduces the table; capturing the table's changes reproduces the change log.
 
-**Grounding.** The round-trip is lossless for a changelog that carries old and new values.
+**Grounding.** Changelog → table is lossless under any aggregate; changelog → events is lossless only for an invertible aggregate (sum, count). For a running max of key "a", 36 different event sequences give the same old → new log.
 
 **In the wild.** This is the theoretical basis for stream-table systems.
 

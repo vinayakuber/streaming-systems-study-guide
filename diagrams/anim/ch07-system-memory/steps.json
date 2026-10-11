@@ -71,7 +71,7 @@
             "store = @0x100",
             "i = 4",
             "cpGood = @0x200",
-            "cpTorn = offset 0",
+            "cpTorn = offset -1",
             "good = @0x300",
             "torn = ..."
           ]
@@ -100,7 +100,7 @@
             "store = @0x100",
             "i = 4",
             "cpGood = @0x200",
-            "cpTorn = offset 0",
+            "cpTorn = offset -1",
             "good = @0x300",
             "torn = @0x400"
           ]
@@ -111,7 +111,7 @@
             "store = @0x100",
             "offset = 4",
             "atomic = false",
-            "cp = (offset 0)"
+            "cp = (offset -1)"
           ]
         }
       ]

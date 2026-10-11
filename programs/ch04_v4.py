@@ -61,8 +61,10 @@ later firing within G must not page again.  So the retraction from the chapter's
 a paging problem: when two already-paged incidents merge, somebody was paged twice for what
 turned out to be one.  The useful answer is that G is now TWO decisions and not one -- how long
 to wait before paging, and how long before declaring the incident over -- and they need not be
-the same number.  Measured below: at this data no single pair of numbers gives both zero double
-pages and a page for every incident.
+the same number.  Measured below: on this arrival order only 3 of 4,961 pairs -- CLOSE_AFTER
+87..89 with PAGE_AFTER 0 -- give both zero double pages and a page for every incident, and
+reordering the same nine firings breaks them, so no pair gives both for arrival orders you do
+not control.
 
 WORKED EXAMPLES: the EXAMPLES table below holds 16 input/output pairs -- an empty stream, a
 single firing that nobody is ever paged for, both sides of the quiet period (a gap of exactly
@@ -90,8 +92,9 @@ CLOSE_AFTER = 47
 WIDE = 120
 
 # PAGE_AFTER = 2 minutes: how long the monitor must have been firing before a human is woken.
-# Chosen because the 1..3 firings span exactly 2, so this is the smallest value at which that
-# pair pages -- and therefore the smallest value at which the double page happens.
+# Chosen because the 1..3 firings span exactly 2, so this is the LARGEST value at which that
+# pair still pages -- and therefore the largest at which the double page happens; at 3 it
+# disappears.
 PAGE_AFTER = 2
 
 # A single firing, the two pairs that straddle the quiet period, a repeated firing, the same

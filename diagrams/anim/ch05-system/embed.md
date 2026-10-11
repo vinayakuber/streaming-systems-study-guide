@@ -2,7 +2,7 @@
 
 #### Why the decisive fact lives outside the pipeline
 
-**The question.** A payment pipeline that charges a card exactly once. It can crash and retry after a timeout, so the sink must be idempotent on an idempotency key and the shuffle must dedup — otherwise a retry double-charges.
+**The question.** A payment pipeline that charges a card exactly once. It can crash and retry after a timeout, and a retry must not double-charge order 4.
 
 **The pipeline:** replayable source (offset) → dedup shuffle → idempotent sink (idempotency key) → external system.
 
@@ -26,7 +26,7 @@ Total charged: **6**, not 12.
 
 **It works when the processor supports an idempotency key and the key can be derived from the order.** Both halves are required, and both are checked before anything else in the design.
 
-**Keep the dedup shuffle anyway.** It is cheap, it covers the crash window before the dedup point, and it reduces load on the processor. Treat it as an optimisation rather than as a guarantee.
+**Keep the dedup shuffle anyway.** It is cheap, it covers a re-send that arrives while the shuffle is still up (upstream crash, shuffle alive), and it reduces load on the processor. Treat it as an optimisation rather than as a guarantee.
 
 **Prefer this to 2PC whenever the choice exists**, for the reason above: 2PC's in-doubt state has no safe resolution.
 

@@ -36,15 +36,16 @@ the finished file is 45 bytes: 'aaaaabbbcccccccddeeeeeefggggggggghhhhiiiiiiii'
   after all 9   absent, rec=False  COMPLETE, rec=False  COMPLETE, rec=True
      none  COMPLETE, rec=False  COMPLETE, rec=True  COMPLETE, rec=True
 
-  rename: at all 11 crash points the visible file is absent or the full 45 bytes.
-  Nothing is ever half visible, and there is no record to disagree with it.
+  rename: at all 10 crash points and on the uninterrupted run, the visible file is
+  absent or the full 45 bytes.  Nothing is ever half visible, and there is no record
+  to disagree with it.
 
-  direct: 8 of the 11 crash points leave a partial file under the real
+  direct: 8 of the 10 crash points leave a partial file under the real
   name -- a restore from it silently produces a truncated database.  And crashing
   after the last chunk leaves a COMPLETE file with the record still saying failed,
   which is the harmless half of the same split.
 
-  record_first: 9 of the 11 crash points leave the record saying SUCCESS with
+  record_first: 9 of the 10 crash points leave the record saying SUCCESS with
   no complete file behind it -- every point during the upload, which is where all
   the time goes.  Nobody finds out until a restore is attempted, which is why this
   ordering is the one that loses data rather than merely wasting work.

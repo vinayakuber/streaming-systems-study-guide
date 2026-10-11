@@ -2,10 +2,10 @@
   "name": "ch02-system-memory",
   "steps": [
     {
-      "t": "WHERE: anything outside this window is skipped",
+      "t": "WHERE: anything outside this window adds nothing",
       "line": [
-        47,
-        53
+        53,
+        67
       ],
       "stack": [
         {
@@ -22,7 +22,9 @@
             "events = EVENTS",
             "dash = @0x100",
             "ids = @0x200",
-            "last = NONE",
+            "last = 15",
+            "onTime = false",
+            "t = 180",
             "i = 3",
             "e = EVENTS[3]"
           ]
@@ -32,7 +34,7 @@
     {
       "t": "WHEN: the allowed-lateness check is what can drop an event",
       "line": [
-        54
+        66
       ],
       "stack": [
         {
@@ -50,6 +52,8 @@
             "dash = @0x100",
             "ids = @0x200",
             "last = 15",
+            "onTime = true",
+            "t = 300",
             "i = 7",
             "e = EVENTS[7]"
           ]
@@ -59,9 +63,9 @@
     {
       "t": "HOW: the refinement emits an undo before the new total",
       "line": [
-        39,
-        40,
-        32
+        37,
+        38,
+        30
       ],
       "stack": [
         {
@@ -79,8 +83,18 @@
             "dash = @0x100",
             "ids = @0x200",
             "last = 15",
+            "onTime = true",
+            "t = 300",
             "i = 7",
             "e = EVENTS[7]"
+          ]
+        },
+        {
+          "name": "pane",
+          "locals": [
+            "dash = @0x100",
+            "last = 15",
+            "value = 19"
           ]
         },
         {
@@ -103,7 +117,7 @@
     {
       "t": "WHAT: and the consumer ends on the right number",
       "line": [
-        67
+        84
       ],
       "stack": [
         {
@@ -111,7 +125,7 @@
           "locals": [
             "dash = @0x100",
             "final = 19",
-            "count = 4"
+            "count = 11"
           ]
         }
       ]

@@ -32,8 +32,10 @@ Standalone and runnable.
                                               that edge, and both sides must come out alike
     crash at 8, keep the window -> (7, 7.0)   the last input there is
     crash at 4, keep the TOTAL  -> (7, 11.0)  the right NUMBER of answers and a wrong final
-                                              one: with the window gone, nothing can be
-                                              subtracted, so the total can only read high
+                                              one: the restored total has no window entry
+                                              behind it, so it is never subtracted and the
+                                              answer is off by the restored total over W --
+                                              high here, where every value is positive
     crash at 4, position AHEAD  -> (6, 7.0)   one input lost: the final value still looks
                                               right, and there are six answers, not seven
     crash at 4, position BEHIND -> (8, 7.0)   one input read twice: eight answers
@@ -162,8 +164,9 @@ def run(xs, w=W, crash_at=None, policy="window", skew=0):
     policy:
       "window"  -- persist the window and the position together.  Exact.
       "total"   -- persist the accumulator and the position.  On restart the window is
-                   gone, so the departing value is unknown and nothing can be subtracted;
-                   the total only ever reads too high.
+                   gone, so the restored total is never subtracted; the answer is off by
+                   exactly the restored total over W: high for a positive total, low for
+                   a negative one.
       "replay"  -- persist the accumulator, and on restart RE-READ the last w inputs from
                    the source to reconstitute the window.  Exact, and it is persisting the
                    window by another name: the cost moved from the checkpoint to the
@@ -214,7 +217,7 @@ def show_examples():
     Each row is checked TWO ways.  The first is the expected (count, final answer) written
     in the table.  The second is the from-scratch reference: for a policy that is supposed
     to be exact, EVERY answer must equal exact_answers(), not just the last one; for the
-    total-only policy, the final answer must be high by exactly the restored total over W,
+    total-only policy, the final answer must be off by exactly the restored total over W,
     which is the law the rest of this file measures.  Integer streams are compared exactly;
     the two rows whose values exceed 2**53 cannot be, and are compared to a tolerance,
     which is the float finding showing up in the test harness rather than in the program.
@@ -399,7 +402,7 @@ def main():
                 # sum rather than the restored total, so the transient is wrong either way.
                 assert (abs(got[-1] - want[-1]) < 1e-9) == (ck["total"] == 0), (xs, w, c, ck)
     print(f"\n  300 random streams x every crash point: the window checkpoint and the replay")
-    print(f"  recover exactly, and the total-only checkpoint's final answer is high by exactly")
+    print(f"  recover exactly, and the total-only checkpoint's final answer is off by exactly")
     print(f"  the restored total over W -- so it is right only when that total happens to be")
     print(f"  zero, which negative values do occasionally arrange.")
 

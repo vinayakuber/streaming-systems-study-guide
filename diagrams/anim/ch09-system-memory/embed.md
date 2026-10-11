@@ -6,7 +6,7 @@
 
 The unusual requirement is retracting a **negative**. `markUnattributed` publishes `"NONE MATCHED"` for click 0 — correct from everything that had arrived — and impression 7 later proves it false.
 
-Step 3 is why an updating sink is not enough: overwriting the row fixes the store, but a consumer that already read "NONE MATCHED" never learns otherwise. And step 4 is the quieter problem — both stores end identical, and neither mentions the 2 click that never emitted at all, holding 2 of the 5 true matches.
+Step 3 is why an updating sink is not enough: overwriting the row fixes the store, but a consumer that already read "NONE MATCHED" never learns otherwise. And step 4 is the quieter problem — both stores end identical, and neither mentions the 2 clicks that never emitted at all, holding 2 of the 5 true matches.
 
 The animation steps through the code, holding each line long enough to read the STACK (call frames and their locals) and the HEAP (allocated arrays and objects) as they are AT THAT MOMENT. Expand any step to study it on its own.
 
@@ -41,7 +41,7 @@ The tombstone is the record that a claim was withdrawn. Overwriting `rows[0]` fi
 
 <img src="../diagrams/anim/ch09-system-memory/frames/step-04.svg" alt="Step 4: and without it the two stores look identical" width="980">
 
-Both stores end with the same 3 attributed clicks; only `tombstones` differs. So the damage from omitting retractions is invisible in the store's final state — and note neither store mentions the 2 click that never emitted at all, holding 2 of the 5 true matches.
+Both stores end with the same 3 attributed clicks; only `tombstones` differs. So the damage from omitting retractions is invisible in the store's final state — and note neither store mentions the 2 clicks that never emitted at all, holding 2 of the 5 true matches.
 
 </details>
 

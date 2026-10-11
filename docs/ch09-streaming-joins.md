@@ -30,9 +30,9 @@ So SQL requires a **time bound**, and with a 60s bound there are exactly **5 tru
 
 **The join must buffer.** A row cannot be matched and discarded — it waits for a counterpart that may never come. The buffer peaks at **5 rows** on this 9-row stream, and the sizing formula is (arrival rate × join window) per side.
 
-**The watermark ends the wait, and it is the minimum over both inputs** — ch03's rule, now structural because a join always has two. Trace each click's emission point and **2 of the 5 never emits at all**, because the minimum watermark never passes its bound. Those rows hold **2 of the 5 true matches**: computed, sitting in state, never published.
+**The watermark ends the wait, and it is the minimum over both inputs** — ch03's rule, now structural because a join always has two. Trace each click's emission point and **2 of the 5 never emit at all**, because the minimum watermark never passes its bound. Those rows hold **2 of the 5 true matches**: computed, sitting in state, never published.
 
-**And the input type picks the join type.** Stream ⋈ stream is bounded by *time*; stream ⋈ table is bounded by the *table*, one lookup per row. On this data the windowed join publishes 1 of 5 matches on time, while a temporal join enriches all 5 clicks immediately. Mistaking the second for the first is the common streaming-join bug.
+**And the input type picks the join type.** Stream ⋈ stream is bounded by *time*; stream ⋈ table is bounded by the *table*, one lookup per row. On this data the windowed join publishes 1 of 5 matches on time, while a temporal join answers all 5 clicks on arrival — 2 of them short, because an impression stream is not a settled table. Mistaking one for the other, in either direction, is the common streaming-join bug.
 
 #### When a windowed join is the right tool, and how to size it
 
@@ -81,7 +81,7 @@ This is where a stream-stream join stops resembling a batch join. 3 of the 5 cli
 
 <img src="../diagrams/anim/ch09-hard/frames/step-04.svg" alt="Step 4: so the input type picks the join type" width="1040">
 
-The decision is about what is being joined, not how the data got there. Two streams need a time bound and inherit all of the above — 1 of 5 matches on time here. A stream against a table is a lookup, bounded per key, and all 5 rows are enriched at once. The bug is windowing the second case.
+The decision is about what is being joined, not how the data got there. Two streams need a time bound and inherit all of the above — 1 of 5 matches on time here. A stream against a table is a lookup, bounded per key, and all 5 rows are looked up on arrival — which is right only when the table is settled for that time. These impressions are not: impressions 6 and 7 arrive after clicks they precede, so 2 of the lookups come up short. The bug is windowing a genuine table; the mirror-image bug is treating a late stream as one.
 
 </details>
 
@@ -128,9 +128,9 @@ Click 3 needs the join watermark above 130 + 60 = 190, which first happens at ro
 
 </details>
 <details>
-<summary><b>Step 4 of 4</b> — and 2 click never reaches it, holding 2 matches</summary>
+<summary><b>Step 4 of 4</b> — and 2 clicks never reach it, holding 2 matches</summary>
 
-<img src="../diagrams/anim/ch09-hard-memory/frames/step-04.svg" alt="Step 4: and 2 click never reaches it, holding 2 matches" width="980">
+<img src="../diagrams/anim/ch09-hard-memory/frames/step-04.svg" alt="Step 4: and 2 clicks never reach it, holding 2 matches" width="980">
 
 Click 4 needs the watermark above 305, and `claim` only ever reaches 200. So `when` stays NONE while `ms` holds 2 real matches. They are computed, sitting in state, and never published — and no error is raised.
 
@@ -162,16 +162,16 @@ Worth noticing early: **one click matches 2 impressions**, so a windowed join is
 
 **The temporal (stream-table) join** enriches each row with the version of a table that was current *at that row's event time*. Here each click probes the impression side as of its own `et`: click 3 → 11, click 4 → 20, and 2 clicks get NULL because no impression existed yet at that time.
 
-No window, no buffer, no wait — all 5 rows are enriched immediately. The price is that it needs a **versioned** table: "as of 12:02:10" is not the same question as "now", and a table holding only current values cannot answer it.
+No window, no buffer, no wait on the other side's watermark — each of the 5 rows is looked up as it arrives. The price is that it needs a **versioned** table that is **complete** for that time: "as of 12:02:10" is not the same question as "now", and a table holding only current values cannot answer it. These impressions are not complete in time: looked up on arrival, click 3 reads 7 instead of 11 and click 4 reads 7 instead of 20, because impressions 6 and 7 arrive after the clicks they precede.
 
 **So the two are bounded by entirely different things:**
 
 - what bounds it — windowed: the 60s window · temporal: the table, finite per key
 - what it buffers — windowed: up to 5 rows · temporal: nothing
-- when it emits — windowed: when both watermarks pass · temporal: immediately
+- when it emits — windowed: when both watermarks pass · temporal: on arrival, trusting the table to be settled
 - what it needs — windowed: watermarks on both sides · temporal: a versioned table
 
-The third row is the substantive difference: a windowed join waits because a counterpart may still arrive, and a temporal join does not because the table's state at that event time is already settled. On this data that is 2 click never emitting versus all 5 emitting at once.
+The third row is the substantive difference: a windowed join waits because a counterpart may still arrive, and a temporal join does not because it trusts the table's state at that event time to be settled. On this data that is 2 clicks never emitting versus all 5 answered on arrival, 2 of them short — the trust holds for a dimension table, not for a stream of impressions.
 
 **And mistaking one for the other is the common bug.** The symptom is results arriving late or not at all; the cause is a windowed join against what is really a slowly-changing table; the cost here would be 2 of 5 rows never emitting and 2 matches withheld.
 
@@ -206,7 +206,7 @@ The join predicate is one subtraction, and it produces 5 matches from 20 candida
 
 <img src="../diagrams/anim/ch09-kinds/frames/step-02.svg" alt="Step 2: the temporal join: look up the table AS OF the row&#39;s time" width="1040">
 
-A temporal join is a lookup, and it behaves completely differently: all 5 clicks are enriched immediately, with no buffer and no wait. The price is in the note — it needs the table's **history**, because "as of 12:02:10" is not the same question as "now", and a table that only holds current values cannot answer it.
+A temporal join is a lookup, and it behaves completely differently: no buffer, and no wait on a second watermark. The price is in the note — it needs the table's **history**, because "as of 12:02:10" is not the same question as "now", and it needs that history to be **complete**. The values above are the as-of answers; looked up the moment each click arrives, click 3 reads 7 instead of 11 and click 4 reads 7 instead of 20, because impressions 6 and 7 have not arrived yet.
 
 </details>
 <details>
@@ -214,7 +214,7 @@ A temporal join is a lookup, and it behaves completely differently: all 5 clicks
 
 <img src="../diagrams/anim/ch09-kinds/frames/step-03.svg" alt="Step 3: so the two joins are bounded by entirely different things" width="1040">
 
-The row that matters is the third. A windowed join waits because a counterpart may still arrive; a temporal join does not, because the table's state at that event time is already settled. On this data that is the difference between 2 click never emitting and all 5 emitting at once.
+The row that matters is the third. A windowed join waits because a counterpart may still arrive; a temporal join does not, because it trusts the table's state at that event time to be settled. On this data that is the difference between 2 clicks never emitting and all 5 answered on arrival — and the trust is misplaced for 2 of them, because impressions 6 and 7 arrive after the clicks they precede. A temporal join is for a side that is already settled.
 
 </details>
 <details>
@@ -257,7 +257,7 @@ Both operands are stream rows, so neither is authoritative — the pair exists o
 
 <img src="../diagrams/anim/ch09-kinds-memory/frames/step-02.svg" alt="Step 2: the temporal join probes a TABLE as of the row&#39;s own time" width="980">
 
-The `continue` skips table versions later than the row's own `et` — that is the "as of" semantics, and it is why the lookup needs the table's HISTORY rather than its current value. For click 3 the answer is 11, determined the moment the click arrives.
+The `continue` skips table versions later than the row's own `et` — that is the "as of" semantics, and it is why the lookup needs the table's HISTORY rather than its current value. For click 3 the as-of answer is 11 — but only once the history up to 12:02:10 is complete. In this seed it is not: looked up the moment the click arrives, the table yields 7, because impression 7 has not arrived yet.
 
 </details>
 <details>
@@ -273,7 +273,7 @@ Click 0 at 12:00:01 precedes every impression, so `any` stays false and the resu
 
 <img src="../diagrams/anim/ch09-kinds-memory/frames/step-04.svg" alt="Step 4: and that is the whole difference: one waits, one does not" width="980">
 
-`wWaits` is "both watermarks" and `tWaits` is "nothing". Read the heap rows: `pairs` holds 5 matches of which 2 are never published, while `enriched` holds all 5 rows, complete. Windowing a lookup imports the first column's problems for no benefit.
+`wWaits` is "both watermarks" and `tWaits` is "nothing". Read the heap rows: `pairs` holds 5 matches of which 2 are never published, while `enriched` holds all 5 rows with no buffer — 2 of them as-of values that a lookup on arrival could not yet have read. Windowing a genuine lookup imports the first column's problems for no benefit; using a lookup on a late stream imports a different one.
 
 </details>
 
@@ -311,7 +311,7 @@ So the join must retract and re-emit. And note which result is being retracted: 
 
 1 + 2 + 2 = 5. Only 20% of the true matches are published correctly the first time, and 40% are never published. **Nothing is broken** — this is what a correct windowed join does on out-of-order data.
 
-**And the state must be collected, or the join grows without bound.** The same watermark drives both: it decides when a match may be emitted and when its inputs may be dropped. So the 2 clicks that never emits is also 2 buffered rows that is never freed — a stalled input is a liveness problem *and* a memory leak, silently.
+**And the state must be collected, or the join grows without bound.** The same watermark drives both: it decides when a match may be emitted and when its inputs may be dropped. So the 2 clicks that never emit are also 2 buffered rows that are never freed — a stalled input is a liveness problem *and* a memory leak, silently.
 
 #### When to accept this, and what to do about the undelivered matches
 
@@ -352,7 +352,7 @@ The worst version of this is visible in the first row: the join emits **no match
 
 <img src="../diagrams/anim/ch09-correctness/frames/step-03.svg" alt="Step 3: so the accounting is: on time, late, or never" width="1040">
 
-The accounting is the chapter's central result and it is not comfortable: of 5 true matches, **1** is published correctly on the first attempt, **2** requires a retraction, and **2** are computed, held in state and never published at all. Nothing is broken — this is what a correct windowed join does on this data.
+The accounting is the chapter's central result and it is not comfortable: of 5 true matches, **1** is published correctly on the first attempt, **2** require a retraction, and **2** are computed, held in state and never published at all. Nothing is broken — this is what a correct windowed join does on this data.
 
 </details>
 <details>
@@ -360,7 +360,7 @@ The accounting is the chapter's central result and it is not comfortable: of 5 t
 
 <img src="../diagrams/anim/ch09-correctness/frames/step-04.svg" alt="Step 4: and the state must be collected, or the join grows forever" width="1040">
 
-The coupling is worth stating explicitly: the same watermark decides emission and collection, so a stalled input is simultaneously a liveness problem and a memory leak. The 2 clicks here that never emits is also never collected, and neither symptom raises an error.
+The coupling is worth stating explicitly: the same watermark decides emission and collection, so a stalled input is simultaneously a liveness problem and a memory leak. The 2 clicks here that never emit are also never collected, and neither symptom raises an error.
 
 </details>
 
@@ -447,7 +447,7 @@ The reframe uses both: one cursor into each list, and **advance whichever span e
 
 Two things to get right. The rule is **symmetric** — advancing by start, or always advancing the left, skips overlaps. And a single span can produce **several** overlaps, so the loop must not assume one each.
 
-The second half is a different question wearing the same clothes. The sweep assumed both lists were finished. As streams they are not: a span the cursor has passed cannot be released, because something overlapping it may not have arrived. So "finished with" becomes a claim about the future, and it needs a **declared bound on how late a stream may be** — below which nothing new can start. With that bound, 1 of these 3 spans are safe to forget; without it, **nothing is**, and state grows for as long as the system runs.
+The second half is a different question wearing the same clothes. The sweep assumed both lists were finished. As streams they are not: a span the cursor has passed cannot be released, because something overlapping it may not have arrived. So "finished with" becomes a claim about the future, and it needs a **declared bound on how late a stream may be** — below which nothing new can start. With that bound, 1 of these 3 spans is safe to forget; without it, **nothing is**, and state grows for as long as the system runs.
 
 And the bound must be the **minimum over both sides**, because one silent stream means nothing can be released from either. That makes memory a function of the declared lateness rather than of the data, and makes a stalled stream stall the join rather than corrupt it. Naming the bound is the answer; the sweep is the easy half.
 
@@ -455,7 +455,7 @@ And the bound must be the **minimum over both sides**, because one silent stream
 
 Each of these is the program below with different nouns. The reason to read them is not the
 answer — it is the *recognition*. 4 surfaces (shift rosters, facilities, advertising, scheduling), one shape, and in every
-case the appealing first answer is to materialise a sequence you cannot afford.
+case the appealing first answer is to treat a span the cursor has passed as finished with — true only under promises the input must make (sorted, never overlapping itself, nothing still in flight) — so the two-pointer rule misses a clash in a room whose bookings overlap each other, a click answered on arrival or after only W loses the impression still in flight, a one-pass gap finder reports busy time as free on a calendar that is unsorted or overlaps itself, and a stream that releases passed spans with no lateness bound drops one a late arrival still overlaps.
 
 <details>
 <summary><b>Variation 2</b> — the double-booked room <i>(looks like facilities)</i></summary>
@@ -525,8 +525,8 @@ This is **the double-booked room** solved on its own: a complete file, every hel
 The chapter had two lists and leaned on a promise about each one: within a list, spans never
 overlap.  Here there is one list and it overlaps ITSELF, so "the span that ends first is
 finished" is simply false and the two-pointer rule does not apply at all -- the version that
-pairs the list with itself is written out below and gets the wrong answer, which is more
-convincing than being told.  The move is to stop thinking in spans and think in EVENTS: every
+pairs the list with itself is written out below; it survives the chapter's five bookings by
+luck and misses a pair once a third booking overlaps, which is more convincing than being told.  The move is to stop thinking in spans and think in EVENTS: every
 booking becomes a start and an end, all of them sorted together, and a running count rises
 and falls.  The busiest moment is that count's maximum and an overlap exists wherever it
 exceeds one.  The span-pair framing was the obstacle, not the solution -- and the event sweep
@@ -624,8 +624,9 @@ def two_pointer_against_itself(bookings):
 
     It is here to be run rather than dismissed.  The rule was licensed by a promise -- the
     other list does not overlap itself, so everything remaining in it starts later than the
-    span just compared -- and that promise is now false by construction.  What comes out is
-    every span matched with itself and the real double-bookings missed.
+    span just compared -- and that promise is now false by construction.  On the chapter's own
+    data it still gets the right answer, because each booking overlaps only its neighbour; with
+    three bookings live at once it skips a real double-booking, and it never reports a false one.
     """
     out, i, j = [], 0, 0
     while i < len(bookings) and j < len(bookings):
@@ -1118,8 +1119,8 @@ FOREVER       = float("inf")                        # the offline wait: every im
 
 # ------------------------------------------------------------------- WORKED EXAMPLES
 # (what it exercises, impressions, clicks, W, wait, attributed, the most any rule could get).
-# The last column is None where max_matching() is too expensive to run -- it is O(clicks x
-# impressions) with backtracking and takes half a minute at 300 streams, which is itself a fact
+# The last column is None where max_matching() is too expensive to run -- it tries every
+# impression for every click, with backtracking, and takes half a minute at 300 streams, which is itself a fact
 # about the yardstick.  Every row is asserted by show_examples(), which is why the table is data
 # and not a comment: a comment can go stale silently, and this cannot.
 EXAMPLES = [
@@ -1611,8 +1612,8 @@ gap, spans one minute apart leave a one-minute gap), a zero-length meeting, a on
 both busy and free, spans that start before or end after the window, a nested meeting, a window
 whose start is after its end, the chapter's own calendar, and two generated years of 525,600
 minutes.  Each row prints the spans the one pass reads beside the minutes the per-minute walk
-would examine, and on a crowded ten-minute window the walk is the cheaper of the two.  Every row
-is ASSERTED -- against the answer below, against free plus busy summing to the whole window,
+would examine, and on a crowded eleven-minute window (0..10) the walk is the cheaper of the
+two.  Every row is ASSERTED -- against the answer below, against free plus busy summing to the whole window,
 and wherever the range is small enough against free_by_walking() minute by minute -- so the
 table cannot drift from the code.
 
@@ -1731,9 +1732,9 @@ def free_spans_unsorted(busy, start, end):
 def free_by_walking(busy, start, end):
     """The reference: ask of every single minute whether it is busy, and group the runs.
 
-    Correct, trivially, and O(end - start) -- at a year of minutes that is 525,600 questions to
-    report a handful of spans, which is why it is the thing the one pass replaces and not the
-    thing that ships.  It is also the only implementation here that cannot have an off-by-one,
+    Correct, trivially, and it asks one question per minute in the window -- at a year of minutes
+    that is 525,600 questions to report a handful of spans, which is why it is the thing the one
+    pass replaces and not the thing that ships.  It is also the only implementation here that cannot have an off-by-one,
     which is exactly what makes it the right reference.
     """
     out, run = [], None
@@ -1771,8 +1772,9 @@ def show_examples():
     whole window, which is the one check that catches an off-by-one at either end.  On every row
     whose range is short enough to walk, the spans themselves are compared minute by minute with
     free_by_walking(), the reference that cannot have an off-by-one.  The two cost columns say
-    why the pass exists and also where it does not pay: on a crowded ten-minute window the walk
-    examines fewer minutes than the pass reads spans, and on a one-minute window they tie.
+    why the pass exists and also where it does not pay: on a crowded eleven-minute window (0..10)
+    the walk examines fewer minutes than the pass reads spans, and on a one-minute window they
+    tie.
     """
     print(f"{'what it exercises':33s} {'spans':>6} {'window':>10} {'free':>5} {'free min':>9} "
           f"{'walk min':>9}  gaps")
@@ -2127,7 +2129,7 @@ def droppable(left, bound):
 # The three variations.
 
 def the_double_booked_room(bookings):
-    """Variation 1, surface: facilities.  One list; find overlapping pairs and the
+    """Variation 2, surface: facilities.  One list; find overlapping pairs and the
     busiest moment.
 
     Non-obvious point: self-overlap removes the guarantee the sweep rested on, so
@@ -2156,7 +2158,7 @@ def the_double_booked_room(bookings):
     return best, at, pairs
 
 def the_attributed_click(impressions, clicks, w, wait_for_late):
-    """Variation 2, surface: advertising.  Match each click to the NEAREST impression
+    """Variation 3, surface: advertising.  Match each click to the NEAREST impression
     that preceded it by at most w, one-to-one.
 
     Non-obvious point: the match is asymmetric and one-to-one, so an impression already
@@ -2187,7 +2189,7 @@ def the_attributed_click(impressions, clicks, w, wait_for_late):
     return out
 
 def the_unavailable_hours(busy, start, end):
-    """Variation 3, surface: scheduling.  Report the FREE spans between start and end.
+    """Variation 4, surface: scheduling.  Report the FREE spans between start and end.
 
     Non-obvious point: the complement rather than the intersection, and it is almost
     all boundary conditions -- before the first busy span, between consecutive ones,
@@ -2355,7 +2357,7 @@ all assertions passed
 
 The reframe above is six paragraphs; this is both answers running and then the streaming question measured, with the two things a whiteboard cannot show — **what is allocated, and when**.
 
-Measured on 1..3  130..245  540..540 against 50..150  220..320: trying every pair costs **6 comparisons**, the sweep costs **4**, and both return the same 2 overlaps — [130..150, 220..245] — asserted span for span. Both directions of the advance rule are exercised and so is a pair that does not overlap at all. Given a bound of 220 on how late the right-hand stream may be, **1 of the 3 left spans become droppable** and 2 must be kept.
+Measured on 1..3  130..245  540..540 against 50..150  220..320: trying every pair costs **6 comparisons**, the sweep costs **4**, and both return the same 2 overlaps — [130..150, 220..245] — asserted span for span. Both directions of the advance rule are exercised and so is a pair that does not overlap at all. Given a bound of 220 on how late the right-hand stream may be, **1 of the 3 left spans becomes droppable** and 2 must be kept.
 
 The animation steps through the code, holding each line long enough to read the STACK (call frames and their locals) and the HEAP (allocated arrays and objects) as they are AT THAT MOMENT. Expand any step to study it on its own.
 
@@ -2430,7 +2432,7 @@ The rule is symmetric and must be, which is the part to get right: advancing the
 
 <img src="../diagrams/anim/ch09-interview-memory/frames/step-09.svg" alt="Step 9: 4 comparisons against 6" width="980">
 
-4 against 6 here — small lists, small margin. The shape is what matters: each comparison advances exactly one cursor, so the total is at most 3 + 2, and at 10⁶ spans each that is 2 × 10⁶ comparisons instead of 10¹². O(m+n) rather than O(mn), and no sorting needed because both inputs arrived sorted.
+4 against 6 here — small lists, small margin. The shape is what matters: each comparison advances exactly one cursor, so the total is at most 3 + 2 rather than 3 × 2, and at 10⁶ spans each that is 2 × 10⁶ comparisons instead of 10¹² — with no sorting needed, because both inputs arrived sorted.
 
 </details>
 <details>
@@ -2458,7 +2460,7 @@ Where does 220 come from? Not from the algorithm — from a declared limit on ho
 
 </details>
 
-<sub>Locals live in the frame and vanish when it is popped; the two cursors are the whole state, which is why the sweep is O(m+n) in time and O(1) in space — and why the streaming half is hard, because a stream cannot drop what it has passed. Every figure is derived from `tools/stream_seed.js` and asserted — including that neither list overlaps itself (the guarantee the advance rule rests on), that the sweep and the pair check agree exactly, that the sweep advances each side at least once, that at least one compared pair does NOT overlap, that the sweep makes fewer comparisons, and that something is droppable while something else is not. Generated by `node tools/gen_ch09_interview.js` on `tools/interviewkit.js`.</sub>
+<sub>Locals live in the frame and vanish when it is popped; the two cursors are the whole state, which is why the sweep makes at most m + n comparisons and needs no other memory — and why the streaming half is hard, because a stream cannot drop what it has passed. Every figure is derived from `tools/stream_seed.js` and asserted — including that neither list overlaps itself (the guarantee the advance rule rests on), that the sweep and the pair check agree exactly, that the sweep advances each side at least once, that at least one compared pair does NOT overlap, that the sweep makes fewer comparisons, and that something is droppable while something else is not. Generated by `node tools/gen_ch09_interview.js` on `tools/interviewkit.js`.</sub>
 
 <!-- ch09-interview-memory:end -->
 
@@ -2468,13 +2470,13 @@ Where does 220 come from? Not from the algorithm — from a declared limit on ho
 Concepts this chapter mentions but does not fully unpack are linked below — each pointer names the chapter where the concept is covered in depth and gives a concrete example that ties the two chapters together.
 
 - **[Chapter 3: Watermarks → Propagation and correctness](ch03-watermarks.md#propagation-and-correctness)** — a windowed join is bounded by the minimum of its inputs' watermarks — the exact propagation rule ch03 defines.
-  - _Example:_ ch09's "emit when both sides pass 12:05:00" is ch03's stage watermark min(12:06:00, 12:04:30) = 12:04:30: the join waits on the slower stream before emitting a match.
+  - _Example:_ ch09's join claims min(12:08:00, 12:03:20) = 12:03:20, ch03's stage watermark, so click 4 (et 12:04:05, bound 12:05:05) never emits: the join waits on the slower stream.
 - **[Chapter 4: Advanced Windowing → The window lifecycle](ch04-advanced-windowing.md#the-window-lifecycle)** — a windowed join is a windowing problem — the join window assigns, buffers, and is garbage-collected by the same lifecycle ch04 covers.
-  - _Example:_ ch09's join window [12:00,12:05) is ch04's fixed window; ch09's buffer holding impression 12:02 until the click probes it is ch04's assign-then-group step.
+  - _Example:_ ch09's join bound, 60 s either side of each click, is a window assigned per row by ch04's step 1 (Assign, which reads e.et and never the arrival time); ch09's buffer holding impression 2 (12:01:30) until click 3 (12:02:10) probes it is ch04's step 3 (Group and trigger), and dropping it once the watermark passes the bound is ch04's step 4 garbage collection.
 - **[Chapter 8: Streaming SQL → Joins and time in SQL](ch08-streaming-sql.md#joins-and-time-in-sql)** — streaming SQL gives the join a declarative spelling — interval joins and temporal joins with the same watermark semantics.
-  - _Example:_ ch09's "match within 5 min" is ch08's INTERVAL join; ch09's stream-table enrichment (user_table[42] = tier gold) is ch08's temporal join, which emits without waiting on a watermark.
+  - _Example:_ ch09's 60 s interval join is ch08's `i.et BETWEEN c.et - INTERVAL '60' SECOND AND c.et + INTERVAL '60' SECOND` join (ch08 Q2); ch08's "do not window a join against a slowly-changing table" is handed to this chapter's temporal join.
 - **[Chapter 7: The Practicalities of Persistent State → Consistency and recovery](ch07-the-practicalities-of-persistent-state.md#consistency-and-recovery)** — join state is keyed state — bounded by the window and garbage-collected past window + lateness — and ch07 covers how that state is stored and recovered.
-  - _Example:_ ch09's impression buffer is the join state; ch07's checkpoint { count: {42:13}, offset: 500 } is how that buffer is snapshotted so a crash does not re-buffer from the start.
+  - _Example:_ ch09's impression buffer is the join state; ch07's checkpoint taken after event 4 — 4 state entries holding 23, {a@0:8, b@0:7, a@120:2, a@240:6}, at offset 4, resumed at 5 — is how keyed state like it is snapshotted with its input position, so a crash does not re-buffer from the start.
 
 ## System Design Interview
 
@@ -2488,25 +2490,25 @@ Concepts this chapter mentions but does not fully unpack are linked below — ea
 
 _Role: two streams — feed the join with event-time rows_
 
-- a click {campaign: "C1", event_time: "12:03:00"} arrives
-- an impression {campaign: "C1", event_time: "12:02:00"} arrives
+- click 3 {event_time: "12:02:10"} arrives at 12:02:12
+- impression 2 {event_time: "12:01:30"} arrived earlier, at 12:01:33
 - each side carries its own watermark
 
 ### windowed join (buffer + watermark)
 
 _Role: windowed join — buffers one side and matches within a window_
 
-- the impression buffer holds rows within 5 min of a click
-- the click probes the buffer and finds the 12:02 impression
-- the match is held until both watermarks pass 12:05:00
+- the impression buffer holds rows within 60 s of a click
+- click 3 probes the buffer and finds impression 2, 40 s apart
+- the match is held until the join watermark passes 12:03:10 (et + 60 s), after event 8
 
 ### retraction emitter
 
 _Role: retraction emitter — corrects matches when late data arrives_
 
-- a late impression within allowed lateness changes the match
-- the old match is retracted downstream
-- the corrected match is emitted
+- click 0 publishes NO-MATCH after event 5; impression 7 (et 12:00:50) arrives at 12:04:40 and changes it
+- the NO-MATCH is retracted downstream
+- the corrected match (click 0, impression 7) is emitted
 
 ### attribution store
 
@@ -2599,7 +2601,7 @@ The fourth gap is the one that is a business question rather than an engineering
 
 The unusual requirement is retracting a **negative**. `markUnattributed` publishes `"NONE MATCHED"` for click 0 — correct from everything that had arrived — and impression 7 later proves it false.
 
-Step 3 is why an updating sink is not enough: overwriting the row fixes the store, but a consumer that already read "NONE MATCHED" never learns otherwise. And step 4 is the quieter problem — both stores end identical, and neither mentions the 2 click that never emitted at all, holding 2 of the 5 true matches.
+Step 3 is why an updating sink is not enough: overwriting the row fixes the store, but a consumer that already read "NONE MATCHED" never learns otherwise. And step 4 is the quieter problem — both stores end identical, and neither mentions the 2 clicks that never emitted at all, holding 2 of the 5 true matches.
 
 The animation steps through the code, holding each line long enough to read the STACK (call frames and their locals) and the HEAP (allocated arrays and objects) as they are AT THAT MOMENT. Expand any step to study it on its own.
 
@@ -2634,7 +2636,7 @@ The tombstone is the record that a claim was withdrawn. Overwriting `rows[0]` fi
 
 <img src="../diagrams/anim/ch09-system-memory/frames/step-04.svg" alt="Step 4: and without it the two stores look identical" width="980">
 
-Both stores end with the same 3 attributed clicks; only `tombstones` differs. So the damage from omitting retractions is invisible in the store's final state — and note neither store mentions the 2 click that never emitted at all, holding 2 of the 5 true matches.
+Both stores end with the same 3 attributed clicks; only `tombstones` differs. So the damage from omitting retractions is invisible in the store's final state — and note neither store mentions the 2 clicks that never emitted at all, holding 2 of the 5 true matches.
 
 </details>
 
@@ -2659,10 +2661,10 @@ An attribution pipeline joins ad impressions with clicks to attribute conversion
 - Retraction — correct emitted matches
 
 ```java
-// click 12:03, impression 12:02, window 5 min
-//   impressions wm 12:04:30 < 12:05 -> hold
-//   impressions wm -> 12:06 -> both pass -> emit
-//   late impression 12:01 -> retract old, emit corrected
+// click 3 @ 12:02:10, impression 2 @ 12:01:30, bound 60 s -> release at 12:03:10
+//   join wm min(12:03:05, 12:03:20) = 12:03:05 < 12:03:10 -> hold
+//   id 8 lifts clicks to 12:08:00 -> min 12:03:20 > 12:03:10 -> emit
+//   late impression 7 @ 12:00:50 -> retract click 0's NO-MATCH, emit (0, 7)
 ```
 
 _This is exactly the windowed-join and watermark material in this chapter._
@@ -2685,9 +2687,10 @@ A click stream needs each click enriched with the user's current subscription ti
 - Join key — user id
 
 ```java
-// click {user:42, event_time:12:03}
-//   probe user_table[42] = {tier: gold}
-//   -> click + tier=gold, no window needed
+// click 3 @ 12:02:10 is a seed row; the user id and the tier table are an
+// illustration OUTSIDE this chapter's dataset, which has two event streams and no dimension table
+//   probe user_table[42] as of 12:02:10 = {tier: gold}   (the version valid then, not now)
+//   -> click 3 + tier=gold, no window, no wait on a second watermark
 ```
 
 _This is exactly the temporal-join material in this chapter._
@@ -2708,10 +2711,10 @@ _From the 28 problems:_ 21-ad-click-aggregation
 A windowed join matches rows whose time attributes are within a window of each other.
 
 ```java
-// click 12:03, impression 12:02, window 5 min
-//   impressions wm 12:04:30 < 12:05 -> hold
-//   impressions wm -> 12:06 -> both pass -> emit
-//   late impression 12:01 -> retract old, emit corrected
+// click 3 @ 12:02:10, impression 2 @ 12:01:30, bound 60 s -> release at 12:03:10
+//   join wm min(12:03:05, 12:03:20) = 12:03:05 < 12:03:10 -> hold
+//   id 8 lifts clicks to 12:08:00 -> min 12:03:20 > 12:03:10 -> emit
+//   late impression 7 @ 12:00:50 -> retract click 0's NO-MATCH, emit (0, 7)
 ```
 
 
@@ -2872,7 +2875,7 @@ A windowed join matches rows whose time attributes are within a window of each o
 
 <details><summary>Reveal answer</summary>
 
-**B.** A temporal join probes a table at the join key for the current version.
+**B.** A temporal join probes the table at the join key for the version that was current at the row's event time, not the current one.
 
 </details>
 

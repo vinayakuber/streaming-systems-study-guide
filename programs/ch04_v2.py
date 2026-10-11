@@ -92,7 +92,8 @@ CANCEL_START = 90
 
 # The chapter's nine requests as an operation stream, and the same stream with the cancel.
 # Below them: a single booking, the abutting pair and the one-minute-overlap pair, a tiny day,
-# a long day, and a generated stream of 600 bookings.  These are inputs for the examples
+# a long day, and a generated stream of 400 abutting bookings (and the same 400 requested
+# twice).  These are inputs for the examples
 # table, not alternative versions of the problem.
 REQUEST_OPS = [("book", r) for r in REQUESTS]
 REQUEST_OPS_CANCEL = REQUEST_OPS + [("cancel", CANCEL_START)]
@@ -349,7 +350,10 @@ def main():
     gaps_keep = [g for g in free_gaps([(r[0], r[1]) for r in runs_keep])]
     missing = [g for g in gaps_true if g not in gaps_keep]
     assert missing == [(80, 130)], missing
-    print(f"    keep never offers {missing} -- the freed 50 minutes are unbookable forever.")
+    cancelled = next(r for r in REQUESTS if r[0] == CANCEL_START)
+    freed = sum(e - s for s, e in gaps_true) - sum(e - s for s, e in gaps_keep)
+    assert freed == cancelled[1] - cancelled[0], (freed, cancelled)
+    print(f"    keep never offers {missing} as one gap -- the freed {freed} minutes are unbookable forever.")
     # and the consequence, as a booking anyone would try to make
     probe = (95, 125)
     assert run_member_calendar(full + [("book", probe)])[0][-1] is True

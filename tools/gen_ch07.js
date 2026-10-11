@@ -58,6 +58,17 @@ const LATE_KEY = KEYS.find(k => barrierAt[k] === LAST_BARRIER);
 // stale offset double-counts, and with the offset but no state under-counts
 const CHK = 4;
 const AFTER_CHK = EVENTS.slice(CHK + 1).reduce((s, e) => s + e.v, 0);
+const PREFIX = EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0);
+// a STALE offset means "nothing folded yet": the replay loop starts at STALE + 1 = 0
+const STALE = -1;
+const STALE_TOTAL = PREFIX + EVENTS.slice(STALE + 1).reduce((s, e) => s + e.v, 0);
+const STALE_REPLAYED = EVENTS.length - 1 - STALE;
+// the at-least-once error bound when checkpointing every k events: the most v that
+// can sit between the last checkpoint (as sweep() places them) and a crash
+const sinceLast = (k, i) => { const last = sweep(k).at.filter(x => x <= i).pop(); return EVENTS.slice(last === undefined ? 0 : last + 1, i + 1).reduce((s, e) => s + e.v, 0); };
+const errBound = (k) => Math.max(...EVENTS.map((_, i) => sinceLast(k, i)));
+const errWorstI = (k) => EVENTS.findIndex((_, i) => sinceLast(k, i) === errBound(k));
+const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 const fail = (m) => { throw new Error(`gen_ch07: ${m}`); };
 if (ENTRIES.length < 5) fail(`only ${ENTRIES.length} state entries — the state-sizing point needs more`);
 if (!PERMANENT.length) fail('every state entry is collectable, so the unbounded-state point cannot be shown');
@@ -67,6 +78,9 @@ if (!BUFFERED.length) fail('no record is buffered during barrier alignment — t
 if (FIRST_BARRIER === LAST_BARRIER) fail('both sources reach the barrier at the same index; there is no alignment to show');
 if (replayFrom(CHK) >= EVENTS.length) fail('checkpointing does not reduce the replay');
 if (AFTER_CHK <= 0) fail('nothing follows the checkpoint');
+if (STALE_TOTAL !== TOTAL + PREFIX) fail(`a stale-offset restore gives ${STALE_TOTAL}, not ${TOTAL} + ${PREFIX}`);
+if (errBound(1) !== 0) fail(`checkpointing every event should bound the error at 0, got ${errBound(1)}`);
+if (errBound(CHOSEN.k) !== 13) fail(`errBound(${CHOSEN.k}) = ${errBound(CHOSEN.k)}, the prose was checked against 13`);
 
 const W = 1140;
 
@@ -127,16 +141,16 @@ const C2 = [
   { t: 'a checkpoint is a snapshot plus a stream position', draw: (c) =>
       c.panel(`WHAT IS WRITTEN AT A CHECKPOINT TAKEN AFTER EVENT ${CHK}`, 'a')
       + c.mapRows('ck', c.P.main.x + 24, c.P.main.y + 52, [
-        [`the state`, `${new Set(EVENTS.slice(0, CHK + 1).map(entryOf)).size} entries, holding ${EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0)} in total`],
+        [`the state`, `${new Set(EVENTS.slice(0, CHK + 1).map(entryOf)).size} entries, holding ${PREFIX} in total`],
         [`the source offset`, `${CHK} — the position the state corresponds to`],
         [`why BOTH`, `state without the offset replays events already counted`],
-        [`the damage if the offset is stale`, `${AFTER_CHK} double-counted from ${EVENTS.length - 1 - CHK} re-applied events`],
+        [`the damage if the offset is stale`, `${PREFIX} double-counted from ${CHK + 1} re-applied events`],
       ], { w: 1040, rh: 36, hot: 2, label: 'two things, written together or the recovery is wrong' })
       + c.note('k1', c.P.main.x + 24, c.P.main.y + 212, 1040, [
         `The offset is not bookkeeping — it is half the checkpoint. A snapshot that does not say WHERE it was taken cannot be resumed from.`,
         `And the two must be committed atomically: state-then-crash double counts, offset-then-crash loses data.`,
       ], c.C.hot, c.C.hotFill),
-    cap: `A checkpoint is a pair, and the pairing is the point. The state says what the aggregation holds; the offset says which prefix of the stream it holds. Commit them non-atomically and ch05's scenario follows exactly: state saved but offset stale re-applies ${EVENTS.length - 1 - CHK} events worth ${AFTER_CHK}.` },
+    cap: `A checkpoint is a pair, and the pairing is the point. The state says what the aggregation holds; the offset says which prefix of the stream it holds. Commit them non-atomically and ch05's double count follows: state saved but offset stale (reset to ${STALE}, nothing folded) re-applies the ${CHK + 1} events worth ${PREFIX} that the state already holds.` },
   { t: 'state stores hold the bytes when it does not fit in memory', draw: (c) =>
       c.panel('WHY AN EMBEDDED STORE RATHER THAN A HASH MAP', 'a')
       + c.mapRows('ss', c.P.main.x + 24, c.P.main.y + 52, [
@@ -182,7 +196,7 @@ const C2 = [
         `k = ${SWEEP[0].k} replays ${SWEEP[0].worst} events and uploads ${SWEEP[0].incr} times; k = ${SWEEP[SWEEP.length - 1].k} replays ${SWEEP[SWEEP.length - 1].worst} and uploads ${SWEEP[SWEEP.length - 1].incr}.`,
         `Both ends are correct. The choice is a failure-budget question: how long may recovery take, and how much steady-state I/O is affordable?`,
       ], c.C.warn, c.C.warnFill); },
-    cap: `Four frequencies, and the trade is monotone in both directions — no setting is free. Checkpoint every event and recovery replays ${SWEEP[0].worst} but you pay ${SWEEP[0].incr} uploads; checkpoint once and you pay ${SWEEP[SWEEP.length - 1].incr} upload and replay ${SWEEP[SWEEP.length - 1].worst} events. The number to start from is the recovery time you can tolerate, not the I/O you would prefer.` },
+    cap: `Four frequencies, and the trade is monotone in both directions — no setting is free. Checkpoint every event and recovery replays ${SWEEP[0].worst} but you pay ${SWEEP[0].incr} uploads; checkpoint once and you pay ${plural(SWEEP[SWEEP.length - 1].incr, 'upload')} and replay ${SWEEP[SWEEP.length - 1].worst} events. The number to start from is the recovery time you can tolerate, not the I/O you would prefer.` },
 ];
 
 // ============== CONCEPT 3 — CONSISTENCY AND RECOVERY ========================
@@ -204,15 +218,15 @@ const C3 = [
       c.panel('THREE RECOVERIES FROM THE SAME CRASH', 'a')
       + c.mapRows('rv', c.P.main.x + 24, c.P.main.y + 52, [
         [`state + matching offset ${CHK}`, `replay ${replayFrom(CHK)} events · final total ${TOTAL} — correct`],
-        [`state, but offset reset to 0`, `replay all ${EVENTS.length} · total ${TOTAL + EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0)} — double counted`],
+        [`state, but offset reset to ${STALE}`, `replay all ${EVENTS.length} · total ${STALE_TOTAL} — double counted`],
         [`offset ${CHK}, but state lost`, `replay ${replayFrom(CHK)} · total ${AFTER_CHK} — the prefix is missing`],
         [`so a checkpoint is the PAIR`, `either half alone produces a wrong answer, in opposite directions`],
       ], { w: 1040, rh: 36, hot: 3, label: 'the same crash, three recovery states, three different totals' })
       + c.note('v1', c.P.main.x + 24, c.P.main.y + 212, 1040, [
-        `${TOTAL}, ${TOTAL + EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0)}, ${AFTER_CHK} — and only the first is right. Note the second and third are wrong in OPPOSITE directions.`,
+        `${TOTAL}, ${STALE_TOTAL}, ${AFTER_CHK} — and only the first is right. Note the second and third are wrong in OPPOSITE directions.`,
         `That is why the state and the offset must be committed together: a half-committed checkpoint is not a slightly-stale checkpoint, it is a wrong one.`,
       ], c.C.hot, c.C.hotFill),
-    cap: `Three recoveries, three totals: ${TOTAL} correct, ${TOTAL + EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0)} from a stale offset, ${AFTER_CHK} from lost state. The two failures are symmetric — one over-counts the checkpointed prefix and the other omits it — which is the clearest possible argument for committing the pair atomically.` },
+    cap: `Three recoveries, three totals: ${TOTAL} correct, ${STALE_TOTAL} from a stale offset, ${AFTER_CHK} from lost state. The two failures are symmetric — one over-counts the checkpointed prefix and the other omits it — which is the clearest possible argument for committing the pair atomically.` },
   { t: 'at-least-once and exactly-once recovery differ here', draw: (c) =>
       c.panel('WHAT HAPPENS TO THE EVENTS AFTER THE LAST CHECKPOINT', 'a')
       + c.mapRows('ao', c.P.main.x + 24, c.P.main.y + 52, [
@@ -260,22 +274,22 @@ const C4 = [
   { t: 'the recovery, traced', draw: (c) =>
       c.panel(`RESUMING FROM THE CHECKPOINT AT EVENT ${CHK}`, 'a')
       + c.mapRows('rs', c.P.main.x + 24, c.P.main.y + 52, [
-        [`1. load the state`, `${new Set(EVENTS.slice(0, CHK + 1).map(entryOf)).size} entries holding ${EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0)}`],
+        [`1. load the state`, `${new Set(EVENTS.slice(0, CHK + 1).map(entryOf)).size} entries holding ${PREFIX}`],
         [`2. seek the source to offset ${CHK}`, `the position those entries correspond to`],
         [`3. replay events ${CHK + 1}..${EVENTS.length - 1}`, `${replayFrom(CHK)} events worth ${AFTER_CHK}`],
         [`4. final state`, `${ENTRIES.length} entries holding ${TOTAL} — identical to a run with no crash`],
       ], { w: 1040, rh: 36, hot: 3, label: 'four steps, and the result is indistinguishable from the uncrashed run' })
       + c.note('s2', c.P.main.x + 24, c.P.main.y + 212, 1040, [
-        `${EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0)} loaded + ${AFTER_CHK} replayed = ${TOTAL}, which is the no-crash total. That equality is the design's whole claim.`,
+        `${PREFIX} loaded + ${AFTER_CHK} replayed = ${TOTAL}, which is the no-crash total. That equality is the design's whole claim.`,
         `And it holds only because step 2 used the offset FROM the checkpoint. Any other offset breaks the arithmetic in one direction or the other.`,
       ], c.C.good, c.C.goodFill),
-    cap: `The claim a checkpointing design has to make is that recovery is indistinguishable from no failure, and here it is one equation: ${EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0)} loaded plus ${AFTER_CHK} replayed equals ${TOTAL}. Every other recovery in this chapter failed that equation, and always because the state and the offset did not match.` },
+    cap: `The claim a checkpointing design has to make is that recovery is indistinguishable from no failure, and here it is one equation: ${PREFIX} loaded plus ${AFTER_CHK} replayed equals ${TOTAL}. Every other recovery in this chapter failed that equation, and always because the state and the offset did not match.` },
   { t: 'the two settings, and what each one buys', draw: (c) =>
       c.panel('FREQUENCY AND MODE', 'a')
       + c.mapRows('kb', c.P.main.x + 24, c.P.main.y + 52, [
-        [`checkpoint every ${SWEEP[0].k} event`, `${SWEEP[0].incr} uploads · replay ${SWEEP[0].worst} · at-least-once error up to ${0}`],
-        [`checkpoint every ${CHOSEN.k} events`, `${CHOSEN.incr} uploads · replay ${CHOSEN.worst} · error up to ${EVENTS.slice(-CHOSEN.worst).reduce((s, e) => s + e.v, 0)}`],
-        [`checkpoint once`, `${SWEEP[SWEEP.length - 1].incr} upload · replay ${SWEEP[SWEEP.length - 1].worst} · error up to ${EVENTS.slice(1).reduce((s, e) => s + e.v, 0)}`],
+        [`checkpoint every ${SWEEP[0].k} event`, `${SWEEP[0].incr} uploads · replay ${SWEEP[0].worst} · at-least-once error up to ${errBound(SWEEP[0].k)}`],
+        [`checkpoint every ${CHOSEN.k} events`, `${CHOSEN.incr} uploads · replay ${CHOSEN.worst} · error up to ${errBound(CHOSEN.k)}`],
+        [`checkpoint once`, `${plural(SWEEP[SWEEP.length - 1].incr, 'upload')} · replay ${SWEEP[SWEEP.length - 1].worst} · error up to ${errBound(EVENTS.length)}`],
         [`incremental rather than full`, `${CHOSEN.incr} uploads instead of ${CHOSEN.full} at k = ${CHOSEN.k} — ${SAVING}% less, and widening`],
       ], { w: 1040, rh: 36, hot: 1, label: 'the frequency sets recovery time AND the at-least-once error bound' })
       + c.note('k2', c.P.main.x + 24, c.P.main.y + 212, 1040, [
@@ -318,12 +332,12 @@ const DIAGRAMS = [
     subtitle: `full ${CHOSEN.full} vs incremental ${CHOSEN.incr} entry-uploads at k=${CHOSEN.k} (${SAVING}% less) · replay ${SWEEP.map(s => s.worst).join('/')} at k=${KS.join('/')}`,
     heading: 'Why a checkpoint is two things, and why the frequency is never free',
     why: [
-      `**A checkpoint is a snapshot PLUS a stream position**, and the pairing is the whole mechanism. Taken after event ${CHK}, it writes ${new Set(EVENTS.slice(0, CHK + 1).map(entryOf)).size} state entries holding ${EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0)}, and the offset **${CHK}** that those entries correspond to.`, '',
+      `**A checkpoint is a snapshot PLUS a stream position**, and the pairing is the whole mechanism. Taken after event ${CHK}, it writes ${new Set(EVENTS.slice(0, CHK + 1).map(entryOf)).size} state entries holding ${PREFIX}, and the offset **${CHK}** that those entries correspond to.`, '',
       `The offset is not bookkeeping — a snapshot that does not say *where* it was taken cannot be resumed from. And the two must be committed **atomically**: state-then-crash re-applies ${EVENTS.length - 1 - CHK} events worth **${AFTER_CHK}**, and offset-then-crash loses the same amount.`, '',
       `**A state store is where the bytes live, and it changes nothing semantic.** This stream's ${ENTRIES.length} entries fit in memory trivially; what makes real state not fit is that the entry count scales with keys × *open windows*, both unbounded. An embedded store (RocksDB and similar) keeps hot entries in memory and the rest on local disk. The entries, their values and their collection times are identical either way — what changes is that checkpointing now means reading those bytes back and uploading them.`, '',
       `**Incremental checkpointing uploads the churn rather than the state.** Checkpointing every ${CHOSEN.k} events, the full uploads are ${CHOSEN.at.map(cp => new Set(EVENTS.slice(0, cp + 1).map(entryOf)).size).join(', ')} entries and the incremental ones are ${CHOSEN.at.map((cp, i) => new Set(EVENTS.slice((i ? CHOSEN.at[i - 1] : -1) + 1, cp + 1).map(entryOf)).size).join(', ')} — **${CHOSEN.full} against ${CHOSEN.incr}**, a ${SAVING}% saving on ${EVENTS.length} events.`, '',
       `And the gap **widens**, because full scales with total state while incremental scales with how fast it changes. On a large, mostly-idle state that is the difference between uploading 10 GB and 10 KB.`, '',
-      `**The frequency is a trade with no free point.** Checkpoint every ${SWEEP[0].k} event: ${SWEEP[0].incr} uploads, worst-case replay ${SWEEP[0].worst}. Every ${CHOSEN.k}: ${CHOSEN.incr} uploads, replay ${CHOSEN.worst}. Once: ${SWEEP[SWEEP.length - 1].incr} upload, replay ${SWEEP[SWEEP.length - 1].worst}. Both ends are correct.`],
+      `**The frequency is a trade with no free point.** Checkpoint every ${SWEEP[0].k} event: ${SWEEP[0].incr} uploads, worst-case replay ${SWEEP[0].worst}. Every ${CHOSEN.k}: ${CHOSEN.incr} uploads, replay ${CHOSEN.worst}. Once: ${plural(SWEEP[SWEEP.length - 1].incr, 'upload')}, replay ${SWEEP[SWEEP.length - 1].worst}. Both ends are correct.`],
     whenHeading: 'When to checkpoint how often, and what the store choice actually decides',
     when: [
       `**Pick the frequency from the recovery time you can tolerate, not the I/O you would prefer.** Recovery time is (events since the last checkpoint ÷ replay throughput), so start from the SLA and derive the interval — the I/O then is what it is.`, '',
@@ -335,7 +349,7 @@ const DIAGRAMS = [
     sub: `The upload counts, the sweep and the double-count figure are computed from the seed and asserted.` },
   { name: 'ch07-recovery', steps: C3,
     title: 'Consistency and recovery — barriers, the pair, and the error bound',
-    subtitle: `alignment buffers ${BUFFERED.length} record${BUFFERED.length === 1 ? '' : 's'} · three recoveries give ${TOTAL} / ${TOTAL + EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0)} / ${AFTER_CHK}`,
+    subtitle: `alignment buffers ${BUFFERED.length} record${BUFFERED.length === 1 ? '' : 's'} · three recoveries give ${TOTAL} / ${STALE_TOTAL} / ${AFTER_CHK}`,
     heading: 'Why alignment costs something, and why half a checkpoint is wrong rather than stale',
     why: [
       `**A barrier makes the snapshot consistent across stages** (Chandy–Lamport): it flows through the stream, and each stage snapshots when it has seen the barrier from **every** input.`, '',
@@ -343,7 +357,7 @@ const DIAGRAMS = [
       `That buffer is the alignment cost, and with badly skewed sources it is the latency people notice at checkpoint time.`, '',
       `**The snapshot is tied to a position, or it is useless.** Three recoveries from the same crash:`, '',
       `- state **+ matching offset ${CHK}** → replay ${replayFrom(CHK)} events, total **${TOTAL}** — correct`,
-      `- state, **offset reset to 0** → replay all ${EVENTS.length}, total **${TOTAL + EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0)}** — double counted`,
+      `- state, **offset reset to ${STALE}** (nothing folded) → replay all ${EVENTS.length}, total **${STALE_TOTAL}** — double counted`,
       `- **offset ${CHK}, state lost** → replay ${replayFrom(CHK)}, total **${AFTER_CHK}** — the prefix is missing`, '',
       `The two failures are wrong in **opposite directions**, which is the clearest argument for atomicity: a half-committed checkpoint is not a slightly-stale checkpoint, it is a wrong one.`, '',
       `**At-least-once and exactly-once recovery differ exactly here.** Under at-least-once the ${replayFrom(CHK)} events after the checkpoint may be applied twice — up to **${AFTER_CHK} double-counted, ${Math.round(100 * AFTER_CHK / TOTAL)}% of the ${TOTAL} total**. Exactly-once aligns state and offsets so they are applied once, and pays for it with the alignment above plus a two-phase commit at the sink.`, '',
@@ -359,19 +373,19 @@ const DIAGRAMS = [
     sub: `The alignment buffer, all three recovery totals and the never-collectable entry are computed from the seed and asserted.` },
   { name: 'ch07-system', steps: C4,
     title: 'System design — checkpointing a stateful processor',
-    subtitle: `${EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0)} loaded + ${AFTER_CHK} replayed = ${TOTAL}, the no-crash total`,
+    subtitle: `${PREFIX} loaded + ${AFTER_CHK} replayed = ${TOTAL}, the no-crash total`,
     heading: 'Why the whole design reduces to one equation and one requirement',
     why: [
       `**The question.** After a crash the processor must resume from the last barrier snapshot — state plus offset — without losing events or double-counting, even though the source replays from the checkpoint.`, '',
       `**The pipeline:** stream → processor (state store) → checkpoint (state + offset) → durable storage → restart recovery.`, '',
       `**Two stages are easy to collapse and must not be.** The state store is **local** and exists for speed; the checkpoint in durable storage is **remote** and exists to survive the machine. A processor with only the first recovers from a restart but not from a failure.`, '',
       `**The recovery, traced:**`, '',
-      `1. Load the state — ${new Set(EVENTS.slice(0, CHK + 1).map(entryOf)).size} entries holding ${EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0)}.`,
+      `1. Load the state — ${new Set(EVENTS.slice(0, CHK + 1).map(entryOf)).size} entries holding ${PREFIX}.`,
       `2. Seek the source to offset **${CHK}**, the position those entries correspond to.`,
       `3. Replay events ${CHK + 1}..${EVENTS.length - 1} — ${replayFrom(CHK)} events worth ${AFTER_CHK}.`,
       `4. Final state: ${ENTRIES.length} entries holding **${TOTAL}**.`, '',
-      `That is the design's entire claim, as one equation: **${EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0)} loaded + ${AFTER_CHK} replayed = ${TOTAL}**, the no-crash total. Every failed recovery earlier in this chapter failed that equation, and always because the state and the offset did not match.`, '',
-      `**Two settings, and one of them is free.** Incremental rather than full checkpointing is ${CHOSEN.incr} uploads instead of ${CHOSEN.full} at k = ${CHOSEN.k}, with identical recovery behaviour — no trade at all. The frequency trades in three directions at once: I/O, recovery time, and under at-least-once the error bound (up to ${AFTER_CHK} of ${TOTAL} at a checkpoint every ${CHOSEN.k} events).`],
+      `That is the design's entire claim, as one equation: **${PREFIX} loaded + ${AFTER_CHK} replayed = ${TOTAL}**, the no-crash total. Every failed recovery earlier in this chapter failed that equation, and always because the state and the offset did not match.`, '',
+      `**Two settings, and one of them is free.** Incremental rather than full checkpointing is ${CHOSEN.incr} uploads instead of ${CHOSEN.full} at k = ${CHOSEN.k}, with identical recovery behaviour — no trade at all. The frequency trades in three directions at once: I/O, recovery time, and under at-least-once the error bound (up to ${errBound(CHOSEN.k)} of ${TOTAL} at a checkpoint every ${CHOSEN.k} events).`],
     whenHeading: 'When this design is enough, and the four things it does not settle',
     when: [
       `**It is enough when the sink is inside the system** — another stream, a keyed store you control. Then the atomic commit of state and offset is a local transaction and the design is complete as drawn.`, '',
@@ -520,7 +534,7 @@ PROGRAMS.push({
 PROGRAMS.push({
   name: 'ch07-checkpoints-memory',
   title: 'The checkpoint pair, and what full versus incremental uploads',
-  subtitle: `full ${CHOSEN.full} vs incremental ${CHOSEN.incr} entry-uploads at k=${CHOSEN.k} · stale offset costs ${AFTER_CHK}`,
+  subtitle: `full ${CHOSEN.full} vs incremental ${CHOSEN.incr} entry-uploads at k=${CHOSEN.k} · stale offset costs ${PREFIX}`,
   src: COMMON.concat([
     '',
     'type Checkpoint { entries, offset }',
@@ -532,7 +546,7 @@ PROGRAMS.push({
     `// primitive: CHECKPOINTS — where those land.  CHECKPOINTS = [${CHOSEN.at.join(', ')}]`,
     '',
     '// function: take(upto) — a checkpoint is the STATE and the OFFSET, together.',
-    `//   take(CHK).offset = ${CHK}      take(CHK).entries holds ${EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0)} across ${new Set(EVENTS.slice(0, CHK + 1).map(entryOf)).size} entries`,
+    `//   take(CHK).offset = ${CHK}      take(CHK).entries holds ${PREFIX} across ${new Set(EVENTS.slice(0, CHK + 1).map(entryOf)).size} entries`,
     'fun take(upto) {',
     '    var ent = {}',
     '    for (i in 0 .. upto) {',
@@ -545,7 +559,7 @@ PROGRAMS.push({
     '',
     '// function: restore(cp, useOffset) — resume. With the checkpoint\'s own offset the',
     '//   total is right; with a stale offset the prefix is applied twice.',
-    `//   restore(take(CHK), CHK) = ${TOTAL}      restore(take(CHK), 0) = ${TOTAL + EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0)}`,
+    `//   restore(take(CHK), CHK) = ${TOTAL}      restore(take(CHK), -1) = ${STALE_TOTAL}`,
     'fun restore(cp, useOffset) {',
     '    var total = 0',
     '    for (id in cp.entries) { total = total + cp.entries[id] }',
@@ -575,12 +589,12 @@ PROGRAMS.push({
     'fun main() {',
     '    val cp      = take(CHK)',
     '    val correct = restore(cp, CHK)',
-    '    val stale   = restore(cp, 0)',
+    '    val stale   = restore(cp, -1)',
     '    val cost    = uploadVolume()',
     '}',
   ]),
   heap: {
-    cp:   { addr: '0x100', type: 'Checkpoint', val: () => `${new Set(EVENTS.slice(0, CHK + 1).map(entryOf)).size} entries holding ${EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0)} · offset ${CHK}` },
+    cp:   { addr: '0x100', type: 'Checkpoint', val: () => `${new Set(EVENTS.slice(0, CHK + 1).map(entryOf)).size} entries holding ${PREFIX} · offset ${CHK}` },
     cost: { addr: '0x200', type: 'Upload', val: () => `full ${CHOSEN.full} · incremental ${CHOSEN.incr}` },
   },
   steps: (at) => {
@@ -591,17 +605,17 @@ PROGRAMS.push({
       { t: 'the checkpoint writes the state AND the offset', line: at('fun take(upto)', 'return Checkpoint(ent, upto)'),
         stack: [MAIN(), { name: 'take', locals: [`upto = ${CHK}`, 'ent = (a map)', `i = ${CHK}`, `id = "${entryOf(EVENTS[CHK])}"`] }],
         heap: [{ key: 'cp', hot: true }],
-        cap: `The Checkpoint carries \`ent\` and \`upto\` in one value — ${new Set(EVENTS.slice(0, CHK + 1).map(entryOf)).size} entries holding ${EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0)}, at offset ${CHK}. The offset is half the checkpoint, not metadata about it: a snapshot that does not say where it was taken cannot be resumed from.` },
+        cap: `The Checkpoint carries \`ent\` and \`upto\` in one value — ${new Set(EVENTS.slice(0, CHK + 1).map(entryOf)).size} entries holding ${PREFIX}, at offset ${CHK}. The offset is half the checkpoint, not metadata about it: a snapshot that does not say where it was taken cannot be resumed from.` },
       { t: 'restoring with the matching offset gives the no-crash total', line: at('fun restore(cp, useOffset)', 'for (i in useOffset + 1 .. len(EVENTS) - 1) { total = total + EVENTS[i].v }'),
         stack: [MAIN({ cp: '@0x100', correct: TOTAL }), { name: 'restore', locals: ['cp = @0x100', `useOffset = ${CHK}`, `total = ${TOTAL}`, `id = "${ENTRIES.filter(x => EVENTS.slice(0, CHK + 1).some(e => entryOf(e) === x)).slice(-1)[0]}" (the loop over entries is done)`, `i = ${EVENTS.length - 1}`] }],
         heap: [{ key: 'cp' }],
-        cap: `The loop starts at \`useOffset + 1\` = ${CHK + 1}, so it adds the ${replayFrom(CHK)} events after the checkpoint to the ${EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0)} loaded from it: ${TOTAL}, the no-crash total. One expression, \`useOffset + 1\`, is the entire correctness of the recovery.` },
-      { t: 'and with a stale offset the prefix is counted twice', line: at('    val stale   = restore(cp, 0)'),
-        stack: [MAIN({ cp: '@0x100', correct: TOTAL, stale: TOTAL + EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0) })],
+        cap: `The loop starts at \`useOffset + 1\` = ${CHK + 1}, so it adds the ${replayFrom(CHK)} events after the checkpoint to the ${PREFIX} loaded from it: ${TOTAL}, the no-crash total. One expression, \`useOffset + 1\`, is the entire correctness of the recovery.` },
+      { t: 'and with a stale offset the prefix is counted twice', line: at('    val stale   = restore(cp, -1)'),
+        stack: [MAIN({ cp: '@0x100', correct: TOTAL, stale: STALE_TOTAL })],
         heap: [{ key: 'cp' }],
-        cap: `\`restore(cp, 0)\` replays from index 1, re-adding events already in \`cp.entries\`: ${TOTAL + EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0)} instead of ${TOTAL}, over by exactly the ${EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0)} the checkpoint had already accumulated. Same state, same stream, one wrong argument.` },
+        cap: `\`restore(cp, -1)\` replays from index 0, all ${EVENTS.length} events, re-adding events already in \`cp.entries\`: ${STALE_TOTAL} instead of ${TOTAL}, over by exactly the ${PREFIX} the checkpoint had already accumulated. Same state, same stream, one wrong argument.` },
       { t: 'incremental uploads churn; full uploads everything, every time', line: at('fun uploadVolume()', 'incr = incr + countEntries(prev + 1, c)'),
-        stack: [MAIN({ cp: '@0x100', correct: TOTAL, stale: TOTAL + EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0), cost: '@0x200' }),
+        stack: [MAIN({ cp: '@0x100', correct: TOTAL, stale: STALE_TOTAL, cost: '@0x200' }),
                 { name: 'uploadVolume', locals: [`full = ${CHOSEN.full}`, `incr = ${CHOSEN.incr}`, `prev = ${CHOSEN.at[CHOSEN.at.length - 2]}`, `c = ${CHOSEN.at[CHOSEN.at.length - 1]}`] }],
         heap: [{ key: 'cost', hot: true }],
         cap: `Compare the two accumulators' arguments: \`countEntries(0, c)\` grows with every checkpoint while \`countEntries(prev + 1, c)\` depends only on the gap. ${CHOSEN.full} against ${CHOSEN.incr} here — and the ratio keeps improving, because full tracks total state and incremental tracks churn.` },
@@ -609,7 +623,7 @@ PROGRAMS.push({
   },
   intro: [
     `**What is being answered.** Why a checkpoint is a pair, and what the two checkpointing modes actually upload.`, '',
-    `\`take(upto)\` returns a \`Checkpoint(ent, upto)\` — the state and the offset in one value. \`restore(cp, useOffset)\` then shows why they must match: the replay loop starts at \`useOffset + 1\`, so that one expression is the whole correctness of the recovery. Called with ${CHK} it gives ${TOTAL}; called with 0 it gives ${TOTAL + EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0)}.`, '',
+    `\`take(upto)\` returns a \`Checkpoint(ent, upto)\` — the state and the offset in one value. \`restore(cp, useOffset)\` then shows why they must match: the replay loop starts at \`useOffset + 1\`, so that one expression is the whole correctness of the recovery. Called with ${CHK} it gives ${TOTAL}; called with ${STALE} it gives ${STALE_TOTAL}.`, '',
     `\`uploadVolume\` prices the modes by their arguments: \`countEntries(0, c)\` grows with every checkpoint, \`countEntries(prev + 1, c)\` depends only on the gap. ${CHOSEN.full} against ${CHOSEN.incr}.`],
   sub: `Both restore totals and both upload counts are computed from the seed and asserted.` });
 
@@ -617,7 +631,7 @@ PROGRAMS.push({
 PROGRAMS.push({
   name: 'ch07-recovery-memory',
   title: 'Barrier alignment, and three recoveries from one crash',
-  subtitle: `${BUFFERED.length} record${BUFFERED.length === 1 ? '' : 's'} buffered · totals ${TOTAL} / ${TOTAL + EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0)} / ${AFTER_CHK}`,
+  subtitle: `${BUFFERED.length} record${BUFFERED.length === 1 ? '' : 's'} buffered · totals ${TOTAL} / ${STALE_TOTAL} / ${AFTER_CHK}`,
   src: COMMON.concat([
     '',
     'type Align    { buffered, snapshotAt }',
@@ -625,7 +639,7 @@ PROGRAMS.push({
     '',
     '// primitive: barrierIndex(k) — the index at which source k injects its barrier.',
     `//   barrierIndex("${EARLY_KEY}") = ${barrierAt[EARLY_KEY]}      barrierIndex("${LATE_KEY}") = ${barrierAt[LATE_KEY]}`,
-    `// primitive: PREFIX_V — the v already in the checkpoint.  PREFIX_V = ${EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0)}`,
+    `// primitive: PREFIX_V — the v already in the checkpoint.  PREFIX_V = ${PREFIX}`,
     `// primitive: SUFFIX_V — the v after it.  SUFFIX_V = ${AFTER_CHK}`,
     '',
     '// function: align() — the stage snapshots only when the barrier has arrived from',
@@ -645,7 +659,7 @@ PROGRAMS.push({
     '',
     '// function: recover(hasState, offset) — resume with or without each half of the',
     '//   checkpoint. Only the matching pair reaches the no-crash total.',
-    `//   recover(true, CHK) = ${TOTAL}      recover(true, 0) = ${TOTAL + EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0)}      recover(false, CHK) = ${AFTER_CHK}`,
+    `//   recover(true, CHK) = ${TOTAL}      recover(true, -1) = ${STALE_TOTAL}      recover(false, CHK) = ${AFTER_CHK}`,
     'fun recover(hasState, offset) {',
     '    var total = 0',
     '    if (hasState) { total = PREFIX_V }',
@@ -657,11 +671,11 @@ PROGRAMS.push({
     '',
     '// function: errorBound(k) — under at-least-once, how much can be double counted',
     '//   when checkpointing every k events? It is the checkpoint interval, in v.',
-    `//   errorBound(1) = ${EVENTS.slice(-1).reduce((s, e) => s + e.v, 0) - EVENTS.slice(-1).reduce((s, e) => s + e.v, 0)}      errorBound(${CHOSEN.k}) = ${EVENTS.slice(-CHOSEN.worst).reduce((s, e) => s + e.v, 0)}      errorBound(${EVENTS.length}) = ${EVENTS.slice(1).reduce((s, e) => s + e.v, 0)}`,
+    `//   errorBound(1) = ${errBound(1)}      errorBound(${CHOSEN.k}) = ${errBound(CHOSEN.k)}      errorBound(${EVENTS.length}) = ${errBound(EVENTS.length)}`,
     'fun errorBound(k) {',
     '    var worst = 0',
     '    for (i in 0 .. len(EVENTS) - 1) {',
-    '        val since = i % k',
+    '        val since = (i + 1) % k',
     '        var run = 0',
     '        for (j in i - since + 1 .. i) { run = run + EVENTS[j].v }',
     '        if (run > worst) { worst = run }',
@@ -673,7 +687,7 @@ PROGRAMS.push({
     'fun main() {',
     '    val a       = align()',
     '    val good    = recover(true, CHK)',
-    '    val stale   = recover(true, 0)',
+    '    val stale   = recover(true, -1)',
     '    val noState = recover(false, CHK)',
     `    val bound   = errorBound(${CHOSEN.k})`,
     '}',
@@ -681,7 +695,7 @@ PROGRAMS.push({
   heap: {
     a:       { addr: '0x100', type: 'Align', val: () => `buffered [${BUFFERED.join(', ')}] · snapshotAt ${LAST_BARRIER}` },
     good:    { addr: '0x200', type: 'Recovery', val: () => `${TOTAL} · CORRECT` },
-    stale:   { addr: '0x300', type: 'Recovery', val: () => `${TOTAL + EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0)} · DOUBLE COUNTED` },
+    stale:   { addr: '0x300', type: 'Recovery', val: () => `${STALE_TOTAL} · DOUBLE COUNTED` },
     noState: { addr: '0x400', type: 'Recovery', val: () => `${AFTER_CHK} · LOST THE PREFIX` },
   },
   steps: (at) => {
@@ -696,29 +710,29 @@ PROGRAMS.push({
       { t: 'the matching pair reaches the no-crash total', line: at('fun recover(hasState, offset)', `if (total == ${TOTAL}) { return Recovery(total, "CORRECT") }`),
         stack: [MAIN({ a: '@0x100', good: '@0x200' }), { name: 'recover', locals: ['hasState = true', `offset = ${CHK}`, `total = ${TOTAL}`, `i = ${EVENTS.length - 1}`] }],
         heap: [{ key: 'a' }, { key: 'good', hot: true }],
-        cap: `\`total\` = PREFIX_V (${EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0)}) plus the ${replayFrom(CHK)} replayed events (${AFTER_CHK}) = ${TOTAL}. That equation is the whole claim a checkpointing design makes: recovery indistinguishable from no failure.` },
+        cap: `\`total\` = PREFIX_V (${PREFIX}) plus the ${replayFrom(CHK)} replayed events (${AFTER_CHK}) = ${TOTAL}. That equation is the whole claim a checkpointing design makes: recovery indistinguishable from no failure.` },
       { t: 'and the two half-checkpoints fail in OPPOSITE directions', line: at('    val noState = recover(false, CHK)'),
         stack: [MAIN({ a: '@0x100', good: '@0x200', stale: '@0x300', noState: '@0x400' })],
         heap: [{ key: 'stale', hot: true }, { key: 'noState', hot: true }],
-        cap: `Read the two heap rows together: ${TOTAL + EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0)} DOUBLE COUNTED and ${AFTER_CHK} LOST THE PREFIX, against a truth of ${TOTAL}. State without the offset over-counts by ${EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0)}; the offset without state under-counts by the same ${EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0)}. A half-committed checkpoint is wrong, not stale.` },
+        cap: `Read the two heap rows together: ${STALE_TOTAL} DOUBLE COUNTED and ${AFTER_CHK} LOST THE PREFIX, against a truth of ${TOTAL}. State without the offset over-counts by ${PREFIX}; the offset without state under-counts by the same ${PREFIX}. A half-committed checkpoint is wrong, not stale.` },
       { t: 'so the checkpoint interval IS the at-least-once error bound', line: at('fun errorBound(k)', 'if (run > worst) { worst = worst }'.replace('worst = worst', 'worst = run')),
-        stack: [MAIN({ a: '@0x100', good: '@0x200', stale: '@0x300', noState: '@0x400', bound: EVENTS.slice(-CHOSEN.worst).reduce((s, e) => s + e.v, 0) }),
-                { name: 'errorBound', locals: [`k = ${CHOSEN.k}`, `worst = ${EVENTS.slice(-CHOSEN.worst).reduce((s, e) => s + e.v, 0)}`, `i = ${EVENTS.length - 1}`, `since = ${(EVENTS.length - 1) % CHOSEN.k}`, `j = ${EVENTS.length - 1}`, 'run = (a partial sum)'] }],
+        stack: [MAIN({ a: '@0x100', good: '@0x200', stale: '@0x300', noState: '@0x400', bound: errBound(CHOSEN.k) }),
+                { name: 'errorBound', locals: [`k = ${CHOSEN.k}`, `worst = ${errBound(CHOSEN.k)}`, `i = ${errWorstI(CHOSEN.k)}`, `since = ${(errWorstI(CHOSEN.k) + 1) % CHOSEN.k}`, `j = ${errWorstI(CHOSEN.k)}`, 'run = (a partial sum)'] }],
         heap: [{ key: 'good' }],
-        cap: `\`errorBound\` sums the v of the events since the last checkpoint and keeps the largest — ${EVENTS.slice(-CHOSEN.worst).reduce((s, e) => s + e.v, 0)} at k = ${CHOSEN.k}. Note what it takes as its only argument: \`k\`. The interval chosen in the previous concept for I/O and recovery time also sets how wrong an at-least-once answer can be.` },
+        cap: `\`errorBound\` sums the v of the events since the last checkpoint and keeps the largest — ${errBound(CHOSEN.k)} at k = ${CHOSEN.k}. Note what it takes as its only argument: \`k\`. The interval chosen in the previous concept for I/O and recovery time also sets how wrong an at-least-once answer can be.` },
     ];
   },
   intro: [
     `**What is being answered.** What barrier alignment costs, and why half a checkpoint is wrong rather than stale.`, '',
     `\`align()\` measures the cost in records: source "${EARLY_KEY}" is ready at index ${FIRST_BARRIER}, "${LATE_KEY}" at ${LAST_BARRIER}, and the condition \`i > barrierIndex(EVENTS[i].key)\` collects the ${BUFFERED.length} record${BUFFERED.length === 1 ? '' : 's'} that overtook their own barrier.`, '',
-    `\`recover(hasState, offset)\` then runs the same crash three ways: ${TOTAL} correct, ${TOTAL + EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0)} double-counted, ${AFTER_CHK} with the prefix lost. The two failures are symmetric around the truth, which is the argument for atomicity. And \`errorBound(k)\` takes only \`k\` — the interval is the error bound.`],
+    `\`recover(hasState, offset)\` then runs the same crash three ways: ${TOTAL} correct, ${STALE_TOTAL} double-counted, ${AFTER_CHK} with the prefix lost. The two failures are symmetric around the truth, which is the argument for atomicity. And \`errorBound(k)\` takes only \`k\` — the interval is the error bound.`],
   sub: `The alignment buffer, all three recovery totals and the error bound are computed from the seed and asserted.` });
 
 // ---- concept 4: the checkpointing design ----------------------------------
 PROGRAMS.push({
   name: 'ch07-system-memory',
   title: 'Checkpointing a stateful processor — the full cycle',
-  subtitle: `${EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0)} loaded + ${AFTER_CHK} replayed = ${TOTAL} · local store vs durable checkpoint`,
+  subtitle: `${PREFIX} loaded + ${AFTER_CHK} replayed = ${TOTAL} · local store vs durable checkpoint`,
   src: COMMON.concat([
     '',
     'type Store      { entries, durable }',
@@ -727,7 +741,7 @@ PROGRAMS.push({
     '',
     '// primitive: entryOf(e) — the (key, window) pair this event belongs to.',
     `//   entryOf(EVENTS[0]) = "${entryOf(EVENTS[0])}"`,
-    `// primitive: PREFIX_V — the v inside the checkpoint at CHK.  PREFIX_V = ${EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0)}`,
+    `// primitive: PREFIX_V — the v inside the checkpoint at CHK.  PREFIX_V = ${PREFIX}`,
     '',
     '// function: applyTo(store, e) — the processor\'s whole steady-state behaviour.',
     `//   applyTo(a fresh store, EVENTS[0]) sets entries["${entryOf(EVENTS[0])}"] : 0 -> ${EVENTS[0].v}`,
@@ -748,13 +762,13 @@ PROGRAMS.push({
     '//   commit(store, CHK, false) may land the state WITHOUT the offset',
     'fun commit(store, offset, atomic) {',
     '    var cp = Checkpoint(copyOf(store.entries), offset)',
-    '    if (atomic == false) { cp.offset = 0 }            // crashed between the two writes',
+    '    if (atomic == false) { cp.offset = -1 }            // crashed between the two writes',
     '    return cp',
     '}',
     `// primitive: countOf(m) — how many keys the map has.  countOf(the full state) = ${ENTRIES.length}`,
     '',
     '// function: resume(cp) — load the state, seek to the offset, replay the rest.',
-    `//   resume(commit(store, CHK, true)).total = ${TOTAL}      resume(commit(store, CHK, false)).total = ${TOTAL + EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0)}`,
+    `//   resume(commit(store, CHK, true)).total = ${TOTAL}      resume(commit(store, CHK, false)).total = ${STALE_TOTAL}`,
     'fun resume(cp) {',
     '    var store = Store(copyOf(cp.entries), true)',
     '    var n = 0',
@@ -777,10 +791,10 @@ PROGRAMS.push({
     '}',
   ]),
   heap: {
-    store:  { addr: '0x100', type: 'Store', val: () => `${new Set(EVENTS.slice(0, CHK + 1).map(entryOf)).size} entries holding ${EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0)} · durable false` },
+    store:  { addr: '0x100', type: 'Store', val: () => `${new Set(EVENTS.slice(0, CHK + 1).map(entryOf)).size} entries holding ${PREFIX} · durable false` },
     cpGood: { addr: '0x200', type: 'Checkpoint', val: () => `${new Set(EVENTS.slice(0, CHK + 1).map(entryOf)).size} entries · offset ${CHK}` },
     good:   { addr: '0x300', type: 'Run', val: () => `total ${TOTAL} · ${ENTRIES.length} entries · replayed ${replayFrom(CHK)}` },
-    torn:   { addr: '0x400', type: 'Run', val: () => `total ${TOTAL + EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0)} · replayed ${EVENTS.length - 1}` },
+    torn:   { addr: '0x400', type: 'Run', val: () => `total ${STALE_TOTAL} · replayed ${STALE_REPLAYED}` },
   },
   steps: (at) => {
     const MAIN = (o = {}) => ({ name: 'main', locals: ['store = @0x100', `i = ${o.i !== undefined ? o.i : '...'}`,
@@ -790,26 +804,26 @@ PROGRAMS.push({
       { t: 'steady state: one entry per (key, window), updated in place', line: at('fun applyTo(store, e)', 'store.entries[id] = store.entries[id] + e.v'),
         stack: [MAIN({ i: CHK }), { name: 'applyTo', locals: ['store = @0x100', `e = EVENTS[${CHK}]`, `id = "${entryOf(EVENTS[CHK])}"`] }],
         heap: [{ key: 'store', hot: true }],
-        cap: `After ${CHK + 1} events the local store holds ${new Set(EVENTS.slice(0, CHK + 1).map(entryOf)).size} entries totalling ${EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0)}, and \`durable\` is **false** — it is on local disk, fast and doomed with the machine. That flag is the distinction the next step exists for.` },
+        cap: `After ${CHK + 1} events the local store holds ${new Set(EVENTS.slice(0, CHK + 1).map(entryOf)).size} entries totalling ${PREFIX}, and \`durable\` is **false** — it is on local disk, fast and doomed with the machine. That flag is the distinction the next step exists for.` },
       { t: 'the commit writes state and offset to durable storage', line: at('fun commit(store, offset, atomic)', 'var cp = Checkpoint(copyOf(store.entries), offset)'),
         stack: [MAIN({ i: CHK, cpGood: '@0x200' }), { name: 'commit', locals: ['store = @0x100', `offset = ${CHK}`, 'atomic = true', 'cp = @0x200'] }],
         heap: [{ key: 'store' }, { key: 'cpGood', hot: true }],
         cap: `\`copyOf\` is deliberate: the checkpoint is a SNAPSHOT, not a reference, so the processor can keep mutating its store while the upload proceeds. And the Checkpoint carries \`offset\` = ${CHK} alongside the entries — the pair, in one durable value.` },
       { t: 'resuming from the intact pair reproduces the no-crash run', line: at('fun resume(cp)', 'for (i in cp.offset + 1 .. len(EVENTS) - 1) {'),
-        stack: [MAIN({ i: CHK, cpGood: '@0x200', cpTorn: 'offset 0', good: '@0x300' }), { name: 'resume', locals: ['cp = @0x200', 'store = (restored)', `n = ${replayFrom(CHK)}`, `i = ${EVENTS.length - 1}`, `total = ${TOTAL}`] }],
+        stack: [MAIN({ i: CHK, cpGood: '@0x200', cpTorn: 'offset -1', good: '@0x300' }), { name: 'resume', locals: ['cp = @0x200', 'store = (restored)', `n = ${replayFrom(CHK)}`, `i = ${EVENTS.length - 1}`, `total = ${TOTAL}`] }],
         heap: [{ key: 'cpGood' }, { key: 'good', hot: true }],
-        cap: `The loop starts at \`cp.offset + 1\` = ${CHK + 1} and runs ${replayFrom(CHK)} times. \`total\` ends at ${TOTAL} across ${ENTRIES.length} entries — identical to a run that never crashed. ${EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0)} loaded plus ${AFTER_CHK} replayed, and that equation is the design's whole claim.` },
-      { t: 'a torn commit replays the prefix and over-counts', line: at('if (atomic == false) { cp.offset = 0 }            // crashed between the two writes'),
-        stack: [MAIN({ i: CHK, cpGood: '@0x200', cpTorn: 'offset 0', good: '@0x300', torn: '@0x400' }),
-                { name: 'commit', locals: ['store = @0x100', `offset = ${CHK}`, 'atomic = false', 'cp = (offset 0)'] }],
+        cap: `The loop starts at \`cp.offset + 1\` = ${CHK + 1} and runs ${replayFrom(CHK)} times. \`total\` ends at ${TOTAL} across ${ENTRIES.length} entries — identical to a run that never crashed. ${PREFIX} loaded plus ${AFTER_CHK} replayed, and that equation is the design's whole claim.` },
+      { t: 'a torn commit replays the prefix and over-counts', line: at('if (atomic == false) { cp.offset = -1 }            // crashed between the two writes'),
+        stack: [MAIN({ i: CHK, cpGood: '@0x200', cpTorn: 'offset -1', good: '@0x300', torn: '@0x400' }),
+                { name: 'commit', locals: ['store = @0x100', `offset = ${CHK}`, 'atomic = false', 'cp = (offset -1)'] }],
         heap: [{ key: 'good' }, { key: 'torn', hot: true }],
-        cap: `With \`atomic\` false the entries landed and the offset did not, so \`resume\` replays from index 1 and \`torn.total\` reaches ${TOTAL + EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0)} — over by the whole ${EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0)} the checkpoint already held. The design REQUIRES this commit to be atomic and does not itself provide that.` },
+        cap: `With \`atomic\` false the entries landed and the offset did not, so \`resume\` replays from index 0, all ${EVENTS.length} events, and \`torn.total\` reaches ${STALE_TOTAL} — over by the whole ${PREFIX} the checkpoint already held. The design REQUIRES this commit to be atomic and does not itself provide that.` },
     ];
   },
   intro: [
     `**What is being answered.** The full checkpoint cycle — steady state, commit, crash, resume — and the one requirement the design does not supply.`, '',
     `Two details are worth watching. \`store.durable\` is **false**: the local state store is fast and dies with the machine, which is why \`commit\` exists at all. And \`copyOf\` makes the checkpoint a snapshot rather than a reference, so the processor can keep working while the upload runs.`, '',
-    `Step 4 is the requirement stated as code: \`if (atomic == false) { cp.offset = 0 }\`. The entries landed and the offset did not, so \`torn.total\` reaches ${TOTAL + EVENTS.slice(0, CHK + 1).reduce((s, e) => s + e.v, 0)} against ${TOTAL}. This design assumes that commit is atomic; it does not make it so.`],
+    `Step 4 is the requirement stated as code: \`if (atomic == false) { cp.offset = -1 }\`. The entries landed and the offset did not, so \`torn.total\` reaches ${STALE_TOTAL} against ${TOTAL}. This design assumes that commit is atomic; it does not make it so.`],
   sub: `Both run totals and the entry counts are computed from the seed and asserted.` });
 
 for (const g of PROGRAMS) {

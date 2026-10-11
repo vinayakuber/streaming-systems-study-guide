@@ -1,3 +1,27 @@
+const CH06 = (() => {
+  const S = require(require('path').resolve('tools', 'stream_seed.js'));
+  const run = {}, hist = {};
+  const LOG = S.EVENTS.map(e => { run[e.key] = (run[e.key] || 0) + e.v; (hist[e.key] = hist[e.key] || []).push(run[e.key]); return `${e.key}=${run[e.key]}`; });
+  const K = S.KEYS[0], H = hist[K];
+  const TABLE = S.KEYS.map(k => `${k}:${run[k]}`).join(' ');
+  const TOTAL = S.KEYS.reduce((s, k) => s + run[k], 0);
+  const FROM = H[H.length - 2], TO = H[H.length - 1];
+  const PAIRS = H.map((v, i) => `(${i ? H[i - 1] : 0},${v})`).join(', ');
+  const vs = S.EVENTS.filter(e => e.key === K).map(e => e.v);
+  const mx = vs.map((v, i) => Math.max(...vs.slice(0, i + 1)));
+  const AMBIGUITY = mx.reduce((n, m, i) => i && m === mx[i - 1] ? n * (mx[i - 1] + 1) : n, 1);
+  const W0 = S.WIN_STARTS[0], W0IDS = S.WINDOWS[W0];
+  const ON_TIME = S.SUM(W0IDS.filter(i => !S.LATE.some(e => e.id === i))), W0_ALL = S.SUM(W0IDS);
+  const mm = (sec) => S.hhmmss(sec).slice(0, 5);
+  const WL = S.WIN_STARTS[S.WIN_STARTS.length - 1], K2 = S.KEYS[1];
+  const BUG_K = S.EVENTS.filter(e => e.key === K).reduce((s, e) => s + Math.floor(e.v / 2), 0);
+  return { LOG: LOG.join('  '), N: LOG.length, K, TABLE, TOTAL, FROM, TO, PAIRS, AMBIGUITY,
+    DELTAS: S.EVENTS.map(e => `${e.key}+${e.v}`).join(' '),
+    W0: `[${mm(W0)}, ${mm(W0 + S.WIN)})`, ON_TIME, W0_ALL,
+    DELTA: TO - FROM, WL: `[${mm(WL)}, ${mm(WL + S.WIN)})`, WL_SUM: S.SUM(S.WINDOWS[WL]),
+    FILTER_N: S.EVENTS.filter(e => e.v > 5).length,
+    K_TO: run[K], BUG_K, BUG_TOTAL: TOTAL - run[K] + BUG_K, K2, K2_TO: run[K2] };
+})();
 registerChapter({
   id: 'ch06',
   num: 6,
@@ -60,7 +84,7 @@ registerChapter({
       { tag: 'solution', tagLabel: 'View', title: '3. Tables', content: '<p><strong>Why.</strong> A point-in-time answer needs a snapshot, not a history.</p><p><strong>Claim.</strong> A table is a snapshot of state at a point in time — a materialized view.</p><p><strong>Grounding.</strong> It answers "what is true now".</p><p><strong>In the wild.</strong> A SQL materialized view or a database index is a table.</p>' },
       { tag: 'solution', tagLabel: 'Direction', title: '4. Stream -> table', content: '<p><strong>Why.</strong> To answer "what is the current total" from a feed of events, aggregate them.</p><p><strong>Claim.</strong> Aggregating a stream produces a table — the materialized view of the stream.</p><p><strong>Grounding.</strong> The table is the fold of the stream.</p><p><strong>In the wild.</strong> A Flink keyed aggregation produces a stateful table.</p>' },
       { tag: 'solution', tagLabel: 'Direction', title: '5. Table -> stream', content: '<p><strong>Why.</strong> To react to database changes in real time, capture them as a feed.</p><p><strong>Claim.</strong> Capturing a table\'s changes produces a changelog stream — change-data-capture.</p><p><strong>Grounding.</strong> The changelog records (old, new) pairs so updates are reversible.</p><p><strong>In the wild.</strong> Debezium CDC turns MySQL/Postgres into Kafka changelogs.</p>' },
-      { tag: 'solution', tagLabel: 'Duality', title: '6. The round-trip', content: '<p><strong>Why.</strong> The two directions should be inverses — that is the formal statement of the duality.</p><p><strong>Claim.</strong> Aggregating the change log reproduces the table; capturing the table\'s changes reproduces the change log.</p><p><strong>Grounding.</strong> The round-trip is lossless for a changelog that carries old and new values.</p><p><strong>In the wild.</strong> This is the theoretical basis for stream-table systems.</p>' },
+      { tag: 'solution', tagLabel: 'Duality', title: '6. The round-trip', content: `<p><strong>Why.</strong> The two directions should be inverses — that is the formal statement of the duality.</p><p><strong>Claim.</strong> Aggregating the change log reproduces the table; capturing the table's changes reproduces the change log.</p><p><strong>Grounding.</strong> Changelog → table is lossless under any aggregate; changelog → events is lossless only for an invertible aggregate (sum, count). For a running max of key "${CH06.K}", ${CH06.AMBIGUITY} different event sequences give the same old → new log.</p><p><strong>In the wild.</strong> This is the theoretical basis for stream-table systems.</p>` },
       { tag: 'tradeoff', tagLabel: 'Choice', title: '7. Materialize vs recompute', content: '<p><strong>Why.</strong> Keeping a table has a cost, and recomputing it also has a cost — the duality makes the trade explicit.</p><p><strong>Claim.</strong> Eager materialization costs storage; lazy recompute-from-stream costs time.</p><p><strong>Grounding.</strong> The stream is the source of truth; the table is a derived view.</p><p><strong>In the wild.</strong> A cache (eager) vs a query-time fold (lazy) is the production choice.</p>' },
       { tag: 'tradeoff', tagLabel: 'Truth', title: '8. Stream as source of truth', content: '<p><strong>Why.</strong> A table alone loses history; a stream alone is inconvenient for lookups.</p><p><strong>Claim.</strong> Keep the stream as the source of truth and derive tables as views — any past table is a fold of the stream up to that point.</p><p><strong>Grounding.</strong> Time-travel is free if the stream is retained.</p><p><strong>In the wild.</strong> Event-sourced systems are the production form.</p>' }
     ],
@@ -74,8 +98,8 @@ registerChapter({
   },
 
   interview: [
-    { scenario: "A service stores account balances in a database but also needs a real-time feed of balance changes for fraud detection; the two systems keep drifting out of sync.", q: "How do you keep a table of balances and a stream of balance changes as two consistent views of the same data?", solution: "Treat them as the stream-table duality: capture the database's changes into a changelog stream (CDC), and derive the table as the materialized fold of that stream.", components: ["Table — the database state", "Changelog stream — CDC output", "Fold — rebuilds the table from the stream", "Retraction — (old, new) pairs"],  code: "// table balance 7 -> 12\n//   CDC emits (7,12) to the changelog\n//   consumer folds -> table 12 (matches source)\n//   stream = source of truth, table = derived view", tieback: "This is exactly the stream-table duality material in this chapter.", refs: ["5. Table -> stream", "6. The round-trip", "8. Stream as source of truth"], problems: ["26-payment-system"] },
-    { scenario: "An ad-click pipeline needs both a per-minute event feed and a per-campaign running total, but the team built two separate systems that disagree.", q: "How do you model the event feed and the running total so they never disagree?", solution: "Keep the event feed as the stream of truth and derive the per-campaign total as a table by aggregating the stream — one system, two views.", components: ["Stream — the event feed", "Table — the per-campaign total", "Aggregation — stream -> table"],  code: "// clicks [ +1, +1, +1 ] campaign C\n//   stream: 3 events, table: total 3\n//   both from the same source -> cannot disagree", tieback: "This is exactly the stream -> table material in this chapter.", refs: ["4. Stream -> table", "7. Materialize vs recompute"], problems: ["21-ad-click-aggregation"] }
+    { scenario: "A service stores account balances in a database but also needs a real-time feed of balance changes for fraud detection; the two systems keep drifting out of sync.", q: "How do you keep a table of balances and a stream of balance changes as two consistent views of the same data?", solution: "Treat them as the stream-table duality: capture the database's changes into a changelog stream (CDC), and derive the table as the materialized fold of that stream.", components: ["Table — the database state", "Changelog stream — CDC output", "Fold — rebuilds the table from the stream", "Retraction — (old, new) pairs"],  code: `// table balance for "${CH06.K}" ${CH06.FROM} -> ${CH06.TO}\n//   CDC emits (${CH06.FROM},${CH06.TO}) to the changelog\n//   consumer folds -> table ${CH06.TABLE} (matches source)\n//   stream = source of truth, table = derived view`, tieback: "This is exactly the stream-table duality material in this chapter.", refs: ["5. Table -> stream", "6. The round-trip", "8. Stream as source of truth"], problems: ["26-payment-system"] },
+    { scenario: "An ad-click pipeline needs both a per-minute event feed and a per-campaign running total, but the team built two separate systems that disagree.", q: "How do you model the event feed and the running total so they never disagree?", solution: "Keep the event feed as the stream of truth and derive the per-campaign total as a table by aggregating the stream — one system, two views.", components: ["Stream — the event feed", "Table — the per-campaign total", "Aggregation — stream -> table"],  code: `// events ${CH06.DELTAS}\n//   stream: ${CH06.N} events, table: ${CH06.TABLE} (total ${CH06.TOTAL})\n//   both from the same source -> cannot disagree`, tieback: "This is exactly the stream -> table material in this chapter.", refs: ["4. Stream -> table", "7. Materialize vs recompute"], problems: ["21-ad-click-aggregation"] }
   ],
   systemDesign: {
     walkthroughs: ['ch06-system', 'ch06-system-memory'],
@@ -84,26 +108,26 @@ registerChapter({
     decomposition: [
       { box: 'database (table)', role: 'database — holds the source table',
         parts: [
-          'account 42 balance is 7, then updates to 12',
+          `key "${CH06.K}" balance is ${CH06.FROM}, then updates to ${CH06.TO}`,
           'the database is table-centric state',
           'the update is the event that CDC will capture'
         ] },
       { box: 'change capture (CDC)', role: 'change capture — turns table writes into a changelog',
         parts: [
-          'the update 7 -> 12 emits the changelog record (7,12)',
+          `the update ${CH06.FROM} -> ${CH06.TO} emits the changelog record (${CH06.FROM},${CH06.TO})`,
           'the record carries the old value for retraction',
           'the changelog is append-only and ordered'
         ] },
       { box: 'changelog stream', role: 'changelog stream — the stream view of the data',
         parts: [
-          'the stream is [ (0,10), (10,7), (7,12) ]',
+          `the stream for "${CH06.K}" is [ ${CH06.PAIRS} ]`,
           'it is the source of truth — history is retained',
           'any past table is a fold up to that point'
         ] },
       { box: 'stream processor (fold)', role: 'stream processor — derives tables from the stream',
         parts: [
           'the fold applies each (old, new) pair',
-          'after (7,12) the materialized balance is 12',
+          `after (${CH06.FROM},${CH06.TO}) the materialized balance is ${CH06.TO}, and the table reads ${CH06.TABLE}`,
           'the derived table matches the source database'
         ] }
     ],
@@ -117,11 +141,11 @@ registerChapter({
     { question: "Why keep the stream as the source of truth?", options: ["A. It is faster to query", "B. Any past table is recoverable by folding the stream", "C. It uses less storage", "D. It never needs retractions"], answer: 2, explanation: "The stream is the full history, so any past table is a fold up to that point.", conceptRef: "8. Stream as source of truth" }
   ],
   seeAlso: [
-    { to: 1, section: 'Three shapes of data', depth: 'the bounded/unbounded distinction is the raw material of the duality — a bounded dataset is a table, an unbounded feed is a stream.', example: 'ch06\'s "table is the fold of the stream" is ch01\'s "bounded dataset processed to completion"; ch06\'s changelog [ +10, -3, +5 ] folds to a table of 12, the same shape ch01 names as streaming.' },
-    { to: 2, section: 'How — accumulation', depth: 'accumulation mode is the "how" that relates successive stream panes — i.e. how a stream becomes a table over time.', example: 'ch06\'s changelog fold 10 − 3 + 5 = 12 is ch02\'s accumulating mode; ch06\'s (old, new) retraction pair is ch02\'s accumulating-and-retracting (3 − 3 + 4 = 4).' },
-    { to: 5, section: 'Side effects — the hard part', depth: 'a changelog that carries retractions is what lets a downstream sink apply an effect exactly once — ch05 connects the duality to the exactly-once guarantee.', example: 'ch06\'s changelog record (7,12) retracts 7 before setting 12; ch05\'s idempotent sink SET 42 -> 10 uses that same retract-then-set so a retry leaves one value.' },
-    { to: 8, section: 'SQL as a stream language', depth: 'append-only vs updating results is the SQL vocabulary for the duality — an updating query emits retractions, an append-only one emits new facts.', example: 'ch06\'s table update (7,12) is ch08\'s "updating result" that retracts (C1, 3) before adding (C1, 4); ch06\'s append-only changelog is ch08\'s append-only query mode.' },
-    { to: 10, section: 'Lambda and Kappa', depth: 'the stream as source of truth is the premise of the Kappa architecture — keep the log, derive tables, replay to reprocess.', example: 'ch06\'s "any past table is a fold of the stream" is ch10\'s Kappa replay: rewind the log to offset 0 and fold r1, r2, r3 through the new pipeline to rebuild the corrected table.' }
+    { to: 1, section: 'Three shapes of data', depth: 'the bounded/unbounded distinction is the raw material of the duality — a bounded dataset is a table, an unbounded feed is a stream.', example: `ch06's "table is the fold of the stream" is ch01's bounded case: the ${CH06.N}-entry changelog ${CH06.LOG} is a finite file, and folding it to completion gives the table ${CH06.TABLE}; read as an unbounded feed, the same fold is ch01's streaming shape and only ever holds the table so far.` },
+    { to: 2, section: 'How — accumulation', depth: 'accumulation mode is the "how" that relates successive stream panes — i.e. how a stream becomes a table over time.', example: `ch06's changelog record (${CH06.FROM} → ${CH06.TO}) is ch02's accumulating-and-retracting pane pair: ch02 emits ${CH06.ON_TIME}, −${CH06.ON_TIME}, ${CH06.W0_ALL} for window ${CH06.W0}; ch06 carries old ${CH06.FROM} and new ${CH06.TO}, so a summing consumer computes ${CH06.FROM} − ${CH06.FROM} + ${CH06.TO} = ${CH06.TO}, not ${CH06.FROM + CH06.TO}.` },
+    { to: 5, section: 'Idempotency and deduplication', depth: 'a changelog record that names the value a key became is a SET, not an ADD — ch05 shows why that is what makes a retried write safe, and why a log of deltas is not.', example: `ch06's changelog record (${CH06.FROM},${CH06.TO}) names the value key "${CH06.K}" became, so applying it is ch05's SET: like ch05's SET window ${CH06.WL} = ${CH06.WL_SUM}, writing ${CH06.K} = ${CH06.TO} twice still reads ${CH06.TO}, while re-applying the delta +${CH06.DELTA} that produced it is ch05's ADD and reads ${CH06.TO + CH06.DELTA}.` },
+    { to: 8, section: 'SQL as a stream language', depth: 'append-only vs updating results is the SQL vocabulary for the duality — an updating query emits retractions, an append-only one emits new facts.', example: `ch06's table update (${CH06.FROM},${CH06.TO}) is ch08's updating result, where window ${CH06.W0} emits ${CH06.ON_TIME} and later becomes ${CH06.W0_ALL}, so the sink needs the old value as well as the new; ch06's append-only stream of events is ch08's append-only WHERE v > 5, ${CH06.FILTER_N} rows that can never be revised.` },
+    { to: 10, section: 'Lambda and Kappa', depth: 'the stream as source of truth is the premise of the Kappa architecture — keep the log, derive tables, replay to reprocess.', example: `ch06's "any past table is a fold of the stream" is ch10's Kappa replay: rewind the log to offset 0 and fold all ${CH06.N} events through the corrected pipeline, and key "${CH06.K}" goes from ${CH06.BUG_K} to ${CH06.K_TO} and the total from ${CH06.BUG_TOTAL} to ${CH06.TOTAL}, while key "${CH06.K2}" reads ${CH06.K2_TO} before and after.` }
   ],
   sources: [
     { name: 'Michael Noll — "Of Streams and Tables in Kafka and Stream Processing, Part 1"', url: 'https://www.confluent.io/blog/kafka-streams-tables-part-1-event-streaming/', note: 'The stream-table duality as implemented in Kafka Streams' },

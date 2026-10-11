@@ -71,8 +71,8 @@ gap, spans one minute apart leave a one-minute gap), a zero-length meeting, a on
 both busy and free, spans that start before or end after the window, a nested meeting, a window
 whose start is after its end, the chapter's own calendar, and two generated years of 525,600
 minutes.  Each row prints the spans the one pass reads beside the minutes the per-minute walk
-would examine, and on a crowded ten-minute window the walk is the cheaper of the two.  Every row
-is ASSERTED -- against the answer below, against free plus busy summing to the whole window,
+would examine, and on a crowded eleven-minute window (0..10) the walk is the cheaper of the
+two.  Every row is ASSERTED -- against the answer below, against free plus busy summing to the whole window,
 and wherever the range is small enough against free_by_walking() minute by minute -- so the
 table cannot drift from the code.
 
@@ -191,9 +191,9 @@ def free_spans_unsorted(busy, start, end):
 def free_by_walking(busy, start, end):
     """The reference: ask of every single minute whether it is busy, and group the runs.
 
-    Correct, trivially, and O(end - start) -- at a year of minutes that is 525,600 questions to
-    report a handful of spans, which is why it is the thing the one pass replaces and not the
-    thing that ships.  It is also the only implementation here that cannot have an off-by-one,
+    Correct, trivially, and it asks one question per minute in the window -- at a year of minutes
+    that is 525,600 questions to report a handful of spans, which is why it is the thing the one
+    pass replaces and not the thing that ships.  It is also the only implementation here that cannot have an off-by-one,
     which is exactly what makes it the right reference.
     """
     out, run = [], None
@@ -231,8 +231,9 @@ def show_examples():
     whole window, which is the one check that catches an off-by-one at either end.  On every row
     whose range is short enough to walk, the spans themselves are compared minute by minute with
     free_by_walking(), the reference that cannot have an off-by-one.  The two cost columns say
-    why the pass exists and also where it does not pay: on a crowded ten-minute window the walk
-    examines fewer minutes than the pass reads spans, and on a one-minute window they tie.
+    why the pass exists and also where it does not pay: on a crowded eleven-minute window (0..10)
+    the walk examines fewer minutes than the pass reads spans, and on a one-minute window they
+    tie.
     """
     print(f"{'what it exercises':33s} {'spans':>6} {'window':>10} {'free':>5} {'free min':>9} "
           f"{'walk min':>9}  gaps")

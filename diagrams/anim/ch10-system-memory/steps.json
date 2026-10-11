@@ -88,7 +88,9 @@
     {
       "t": "so two assumptions carry the whole architecture",
       "line": [
-        61
+        66,
+        67,
+        68
       ],
       "stack": [
         {
@@ -97,14 +99,6 @@
             "healthy = @0x100",
             "short = @0x200",
             "loose = @0x300"
-          ]
-        },
-        {
-          "name": "verify",
-          "locals": [
-            "log = Log(9 events, retained 9)",
-            "pipe = Pipeline(true, true)",
-            "t = 45"
           ]
         }
       ]

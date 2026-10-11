@@ -22,15 +22,15 @@ Then the two things the follow-ups are for.
 
 **The warm-up.** Before `W` values exist there is no average of `W` values, so **W − 1 answers must be withheld** — here 2. Dividing by `W` from the first arrival is the standard bug, and it reports figures that are quietly too low rather than obviously wrong.
 
-**The exactness.** The two methods are not the same computation: one adds `W` numbers from scratch, the other adds and subtracts forever. With small integers they agree, asserted answer by answer. Replace one value with 10000000000000000 and they stop agreeing — 6 of 7 answers differ, while scaling **every** value equally drifts on none, because the values then share an exponent and the arithmetic stays exact — because a double cannot hold the total and one value to the same precision, so **adding a value and later subtracting it does not return to where you started**, and nothing ever corrects the residue. The fixes are to use exact arithmetic (count in pence, not pounds) or to recompute periodically, which bounds the residue.
+**The exactness.** The two methods are not the same computation: one adds `W` numbers from scratch, the other adds and subtracts forever. With small integers they agree, asserted answer by answer. Replace one value with 10000000000000000 and they stop agreeing — 6 of 7 answers differ — because a double cannot hold the total and one value to the same precision, so **adding a value and later subtracting it does not return to where you started**, and nothing ever corrects the residue. Scaling **every** value equally drifts on none, because the values then share an exponent and the arithmetic stays exact. The fixes are to use exact arithmetic (count in pence, not pounds) or to recompute periodically, which bounds the residue.
 
-And one overstatement to avoid: the subtraction needs the **departing value**, so the last `W` values must be retained. The time is O(1) and the space is **O(W)** — the total is one number and the window is still `W` values.
+And one overstatement to avoid: the subtraction needs the **departing value**, so the last `W` values must be retained. Each arrival costs two operations whatever `W` is, but the memory is `W` values plus one total — 4 numbers here, 100,001 at the stated W = 10⁵. The total is one number and the window is still `W` values.
 
 #### The same problem, asked 3 other ways
 
 Each of these is the program below with different nouns. The reason to read them is not the
-answer — it is the *recognition*. 4 surfaces (weather station, risk, monitoring, reliability), one shape, and in every
-case the appealing first answer is to materialise a sequence you cannot afford.
+answer — it is the *recognition*. 4 surfaces (rolling average, risk, monitoring, reliability), one shape, and in every
+case the appealing first answer is to treat the window as one running number: true of what an update costs, false of what must be kept — the subtraction needs the departing value, a maximum cannot be recovered from it, a time window needs its live count beside it, and a restart needs the W values behind it.
 
 <details>
 <summary><b>Variation 2</b> — the rolling maximum <i>(looks like risk)</i></summary>
@@ -526,7 +526,7 @@ all assertions passed
 
 > Average everything from **the last 60 seconds** rather than the last `W` values. Arrivals are irregular.
 
-**Why it is not obvious.** The count stops being fixed, so "exactly one leaves when one arrives" is false — zero or many may expire — and the divisor changes on every arrival, which means the count must be maintained alongside the total. The subtler part is that the answer changes **with no arrival at all**: values age out while the stream is quiet, so a correct implementation must be able to recompute on a timer rather than only on input. That is the same clock-versus-arrival distinction the batching problem turns on.
+**Why it is not obvious.** The count stops being fixed, so "exactly one leaves when one arrives" is false — zero or many may expire — and the divisor changes on every arrival, which means the count must be maintained alongside the total. The subtler part is that the answer changes **with no arrival at all**: values age out while the stream is quiet, so a correct implementation must be able to recompute on a timer rather than only on input. That is the chapter's event-time vs processing-time split in miniature: an arrival-driven answer is keyed to when data came in, a timer-driven one to the clock.
 
 **Where it lands.** `onArrival` looping the subtraction and maintaining a count, plus a timer-driven recompute — `report` dividing by the live count rather than by W.
 
@@ -551,18 +551,18 @@ This is **the time-based window** solved on its own: a complete file, every help
     average -- the mean of the v's of the samples in that window.  A window holding no
                samples has no average at all, which is not the same as an average of 0.
 
-  A dashboard is fed nine samples: (1, 5), (3, 3), (50, 7), (90, 2), (130, 6), (220, 1),
-  (245, 9), (260, 4), (540, 8) -- so one at second 1 measuring 5ms, and so on.  Probes
+  A dashboard is fed nine samples: (1, 5), (3, 3), (50, 4), (90, 7), (130, 2), (220, 9),
+  (245, 6), (260, 1), (540, 8) -- so one at second 1 measuring 5ms, and so on.  Probes
   report whenever they feel like it, so the gaps are uneven: two land within two seconds of
-  each other, then nothing arrives for four and a half minutes.
+  each other, the rest are 15 to 90 seconds apart, and the last gap is 280 seconds.
 
   GIVEN AN INSTANT `now`, WHAT IS THE AVERAGE LATENCY OVER THE PRECEDING 60 SECONDS?
 
   Worked, on the nine samples above -- which between them run from second 1 to second 540:
     now = 0    -> None     the earliest instant: nothing has been reported yet
     now = 3    -> 4.0      (1,5) and (3,3) are both inside (-57, 3], so (5 + 3) / 2
-    now = 191  -> None     an instant with NO arrival, and the last sample (130, 6) has just
-                           aged out at 190.  The answer is "no average", not 6.0 and not 0.0
+    now = 191  -> None     an instant with NO arrival, and the last sample (130, 2) has just
+                           aged out at 190.  The answer is "no average", not 2.0 and not 0.0
     now = 540  -> 8.0      the last arrival of all; only (540, 8) is still in the window
     now = 10000 -> None    far past the end.  "Undefined", NOT the last value seen -- a
                            dashboard that shows 8.0 forever is reporting a latency nobody
@@ -585,7 +585,8 @@ is false in both directions -- zero, one or many may expire -- and the divisor t
 has to be maintained beside the total instead of being the constant W.  The subtler one is
 that the answer changes WITH NO ARRIVAL AT ALL: values age out while the stream is quiet,
 so a correct implementation must be able to recompute on a timer and not only on input.
-That is the same clock-versus-arrival split the batching problem turns on, and a dashboard
+That is the chapter's event-time vs processing-time split in miniature -- an arrival-driven
+answer is keyed to when data came in, a timer-driven one to the clock -- and a dashboard
 driven only by arrivals shows a number that was true minutes ago.
 
 WORKED EXAMPLES: the EXAMPLES table below holds 19 input/output pairs -- the instant before
@@ -603,12 +604,12 @@ Run it:  python3 programs/ch01_v3.py
 
 import random
 
-# The chapter's nine values, now carrying the seed's nine event TIMES (in event-time
-# order, which is what a time window needs) instead of positions.  Times in seconds,
+# The seed's nine events as (event time, value), sorted by event time, which is what a
+# time window needs -- each value stays with its own event's time (tools/stream_seed.js).  Times in seconds,
 # values in milliseconds.  The gaps are the seed's own and they are what makes this
 # worth running: between 3 and 50 nothing expires, at 90 two expire at once, and at 540
 # three do, so every case the statement names appears in one trace.
-SAMPLES = [(1, 5), (3, 3), (50, 7), (90, 2), (130, 6), (220, 1), (245, 9), (260, 4), (540, 8)]
+SAMPLES = [(1, 5), (3, 3), (50, 4), (90, 7), (130, 2), (220, 9), (245, 6), (260, 1), (540, 8)]
 
 # SPAN = 60 seconds: the statement's own number.  It also happens to be the chapter's
 # watermark lag, which is not a coincidence -- both are "how far back do I still care".
@@ -648,9 +649,9 @@ EXAMPLES = [
     ("before anything arrives -> None",      SAMPLES,      0,      60,     (None, 0)),
     ("the first sample's own instant",       SAMPLES,      1,      60,     (5.0, 1)),
     ("ordinary arrival, two in window",      SAMPLES,      3,      60,     (4.0, 2)),
-    ("three samples in the window",          SAMPLES,      50,     60,     (5.0, 3)),
-    ("the arrival that retires TWO",         SAMPLES,      90,     60,     (4.5, 2)),
-    ("quiet stream, one survivor",           SAMPLES,      180,    60,     (6.0, 1)),
+    ("three samples in the window",          SAMPLES,      50,     60,     (4.0, 3)),
+    ("the arrival that retires TWO",         SAMPLES,      90,     60,     (5.5, 2)),
+    ("quiet stream, one survivor",           SAMPLES,      180,    60,     (2.0, 1)),
     ("quiet stream, window EMPTY -> None",   SAMPLES,      191,    60,     (None, 0)),
     ("the last arrival of all",              SAMPLES,      540,    60,     (8.0, 1)),
     ("far future -> None, not the last v",   SAMPLES,      10_000, 60,     (None, 0)),
@@ -873,12 +874,12 @@ def main():
     # including 130 and 245 where only one sample was due to leave.  The reason is that the
     # error does not heal: once an arrival retires one of the two it owed, each later
     # arrival adds one and retires one, so the backlog is carried forever and the count
-    # pins at 3.  The second wrong expectation was the DIRECTION -- stale samples do not
-    # reliably drag the average up: at t=90 it reads 4.000 against 4.500 and at t=130 it
-    # reads 5.000 against 4.000.  Whether the error is high or low depends on the stale
-    # values, so there is no safe side to err on.
+    # pins at 3.  The second point is the DIRECTION: on these nine every wrong answer reads
+    # LOW, because every stale sample it keeps (3, 4, 7, 2, 6, 1) is below the true average
+    # at the instant it is wrongly counted.  That is a property of these values, not of the bug -- the random
+    # streams below measure the error going HIGH as well, so there is no safe side to err on.
     assert [t for t, _, _ in bad_one] == [90, 130, 220, 245, 540], bad_one
-    assert one[3][1] < fast[3][1] and one[4][1] > fast[4][1], "the error must go BOTH ways"
+    assert all(one[i][1] < fast[i][1] for i in (3, 4, 5, 6, 8)), "on the seed every error reads low"
     assert [c for _, _, c in one[3:]] == [3, 3, 3, 3, 3, 3], (
         "once behind, the count must pin at the first stale size and never recover")
     assert all(g <= 1 for g in expiries[4:5]) and abs(one[4][1] - fast[4][1]) > 1e-12, (
@@ -907,8 +908,8 @@ def main():
         assert timed[now] == (truth, tc), (now, timed[now])
     assert average_at(SAMPLES, 130)[1] == 2 and average_at(SAMPLES, 180)[1] == 1
     assert average_at(SAMPLES, 191) == (None, 0), average_at(SAMPLES, 191)
-    assert quiet(191) == quiet(130) == (4.0, 2), (quiet(191), quiet(130))
-    assert average_at(SAMPLES, 180)[0] == 6.0, "the single surviving sample is the 6ms one"
+    assert quiet(191) == quiet(130) == (4.5, 2), (quiet(191), quiet(130))
+    assert average_at(SAMPLES, 180)[0] == 2.0, "the single surviving sample is the 2ms one"
     # the last arrival is the worst case: the dashboard holds 8.0 forever
     assert quiet(10_000) == (8.0, 1) and average_at(SAMPLES, 10_000) == (None, 0)
     assert timed[10_000] == (None, 0), timed[10_000]
@@ -941,7 +942,7 @@ def main():
 
     # ---- many irregular streams, against the rescan
     rng = random.Random(20260303)
-    disagreements = 0
+    disagreements = reads_high = reads_low = 0
     for _ in range(600):
         n = rng.randint(1, 18)
         t = 0
@@ -961,13 +962,19 @@ def main():
             got_a, got_c = scan[now]
             assert got_c == rc and ((got_a is None and ra is None)
                                     or abs(got_a - ra) < 1e-9), (samples, span, now)
-        if any(abs(a - ra) > 1e-9 for (_, a, _), (_, ra, _, _) in
-               zip(expire_one_per_arrival(samples, span), got)):
+        errs = [a - ra for (_, a, _), (_, ra, _, _) in
+                zip(expire_one_per_arrival(samples, span), got) if abs(a - ra) > 1e-9]
+        if errs:
             disagreements += 1
+        reads_high += any(e > 0 for e in errs)
+        reads_low += any(e < 0 for e in errs)
     print(f"\n  600 irregular streams x 4 spans: the incremental total+count equals the rescan at")
     print(f"  every arrival and at every probed clock instant; the one-expiry version differs on")
     print(f"  {disagreements} of 600, which is how often a stream has a gap big enough to retire two.")
+    print(f"  Of those, {reads_high} streams have a wrong answer reading HIGH and {reads_low} one reading LOW,")
+    print(f"  so the all-low errors on the nine samples above are a property of their values.")
     assert disagreements > 100, f"only {disagreements} streams exposed the one-expiry bug"
+    assert reads_high > 0 and reads_low > 0, (reads_high, reads_low, "the error must go BOTH ways")
 
     print("\nall assertions passed")
 
@@ -983,9 +990,9 @@ what it exercises                         now    span      n    average  count  
 before anything arrives -> None             0      60      9       None      0       9       1
 the first sample's own instant              1      60      9      5.000      1       9       2
 ordinary arrival, two in window             3      60      9      4.000      2       9       4
-three samples in the window                50      60      9      5.000      3       9      51
-the arrival that retires TWO               90      60      9      4.500      2       9      91
-quiet stream, one survivor                180      60      9      6.000      1       9     181
+three samples in the window                50      60      9      4.000      3       9      51
+the arrival that retires TWO               90      60      9      5.500      2       9      91
+quiet stream, one survivor                180      60      9      2.000      1       9     181
 quiet stream, window EMPTY -> None        191      60      9       None      0       9     192
 the last arrival of all                   540      60      9      8.000      1       9     541
 far future -> None, not the last v      10000      60      9       None      0       9     101
@@ -1001,17 +1008,17 @@ flat stream, six identical samples         60      60      7      4.000      6  
 20,000 samples, past the end            20100      60  20000       None      0   20000     202
 all 19 examples agree with the rescan and the timer-driven scan
 
-SAMPLES (t seconds, v ms) = [(1, 5), (3, 3), (50, 7), (90, 2), (130, 6), (220, 1), (245, 9), (260, 4), (540, 8)]
+SAMPLES (t seconds, v ms) = [(1, 5), (3, 3), (50, 4), (90, 7), (130, 2), (220, 9), (245, 6), (260, 1), (540, 8)]
 SPAN = 60s   window = (now - 60, now]
 
   t=  1s  window [5]            count 1  avg  5.000   expired here: 0
   t=  3s  window [5, 3]         count 2  avg  4.000   expired here: 0
-  t= 50s  window [5, 3, 7]      count 3  avg  5.000   expired here: 0
-  t= 90s  window [7, 2]         count 2  avg  4.500   expired here: 2
-  t=130s  window [2, 6]         count 2  avg  4.000   expired here: 1
-  t=220s  window [1]            count 1  avg  1.000   expired here: 2
-  t=245s  window [1, 9]         count 2  avg  5.000   expired here: 0
-  t=260s  window [1, 9, 4]      count 3  avg  4.667   expired here: 0
+  t= 50s  window [5, 3, 4]      count 3  avg  4.000   expired here: 0
+  t= 90s  window [4, 7]         count 2  avg  5.500   expired here: 2
+  t=130s  window [7, 2]         count 2  avg  4.500   expired here: 1
+  t=220s  window [9]            count 1  avg  9.000   expired here: 2
+  t=245s  window [9, 6]         count 2  avg  7.500   expired here: 0
+  t=260s  window [9, 6, 1]      count 3  avg  5.333   expired here: 0
   t=540s  window [8]            count 1  avg  8.000   expired here: 3
 
   counts   : [1, 2, 3, 2, 2, 1, 2, 3, 1]
@@ -1020,21 +1027,21 @@ SPAN = 60s   window = (now - 60, now]
   samples at once and another retires none -- so 'one in, one out' is false both ways.
 
   one-expiry-per-arrival is wrong at t = [90, 130, 220, 245, 540]
-    t= 90s reports 4.000 over 3 samples; the truth is 4.500 over 2
-    t=130s reports 5.000 over 3 samples; the truth is 4.000 over 2
-    t=220s reports 3.000 over 3 samples; the truth is 1.000 over 1
-    t=245s reports 5.333 over 3 samples; the truth is 5.000 over 2
-    t=540s reports 7.000 over 3 samples; the truth is 8.000 over 1
+    t= 90s reports 4.667 over 3 samples; the truth is 5.500 over 2
+    t=130s reports 4.333 over 3 samples; the truth is 4.500 over 2
+    t=220s reports 6.000 over 3 samples; the truth is 9.000 over 1
+    t=245s reports 5.667 over 3 samples; the truth is 7.500 over 2
+    t=540s reports 5.000 over 3 samples; the truth is 8.000 over 1
   ...right at the first 3 arrivals, where nothing had expired yet, and right again
   at t=260 BY ACCIDENT -- the stale window happens to hold the correct three samples.
   the fixed divisor 3 is wrong at 7 of 9 arrivals -- right only when the
   live count happens to equal 3, which it does 2 times.
 
   nothing arrives between t=130 and t=220, and the answer moves anyway:
-    now=130s  truth  4.000 over 2 samples;  arrival-driven dashboard still shows 4.000 over 2
-    now=180s  truth  6.000 over 1 samples;  arrival-driven dashboard still shows 4.000 over 2
-    now=191s  truth   NONE over 0 samples;  arrival-driven dashboard still shows 4.000 over 2
-    now=219s  truth   NONE over 0 samples;  arrival-driven dashboard still shows 4.000 over 2
+    now=130s  truth  4.500 over 2 samples;  arrival-driven dashboard still shows 4.500 over 2
+    now=180s  truth  2.000 over 1 samples;  arrival-driven dashboard still shows 4.500 over 2
+    now=191s  truth   NONE over 0 samples;  arrival-driven dashboard still shows 4.500 over 2
+    now=219s  truth   NONE over 0 samples;  arrival-driven dashboard still shows 4.500 over 2
     now=10000s truth   NONE over 0 samples;  arrival-driven still shows 8.000 over 1
   so the quiet-stream error is unbounded in TIME, not in value: the number is simply old.
 
@@ -1051,6 +1058,8 @@ SPAN = 60s   window = (now - 60, now]
   600 irregular streams x 4 spans: the incremental total+count equals the rescan at
   every arrival and at every probed clock instant; the one-expiry version differs on
   445 of 600, which is how often a stream has a gap big enough to retire two.
+  Of those, 400 streams have a wrong answer reading HIGH and 393 one reading LOW,
+  so the all-low errors on the nine samples above are a property of their values.
 
 all assertions passed
 ```
@@ -1063,9 +1072,9 @@ all assertions passed
 
 > The process is restarted. **The running average must continue**, not start again.
 
-**Why it is not obvious.** The total is one number and looks trivially checkpointable, and that is the trap: restoring the total without the last `W` values makes the next subtraction impossible, so the state that must be saved is the whole window rather than the accumulator. And the checkpoint must be consistent with the input position, or restoring an older total against a newer position double-counts. Recognising that the thing to persist is **larger than the thing being reported** is the content.
+**Why it is not obvious.** The total is one number and looks trivially checkpointable, and that is the trap: restoring the total without the last `W` values makes the next subtraction impossible, so the state that must be saved is the whole window rather than the accumulator. And the checkpoint must be consistent with the input position, or the restart is silently wrong: a position ahead of the saved state (an older total against a newer position) skips input, and a position behind it double-counts. Recognising that the thing to persist is **larger than the thing being reported** is the content.
 
-**Where it lands.** 0x200 and the retained window both persisted, with the input position — the O(W) space from the traced frames becoming the checkpoint size.
+**Where it lands.** The retained window (0x100's last W values) persisted together with the input position, and 0x200 rebuilt from it on restart — W + 1 numbers to report one.
 
 
 <details>
@@ -1108,8 +1117,10 @@ Standalone and runnable.
                                               that edge, and both sides must come out alike
     crash at 8, keep the window -> (7, 7.0)   the last input there is
     crash at 4, keep the TOTAL  -> (7, 11.0)  the right NUMBER of answers and a wrong final
-                                              one: with the window gone, nothing can be
-                                              subtracted, so the total can only read high
+                                              one: the restored total has no window entry
+                                              behind it, so it is never subtracted and the
+                                              answer is off by the restored total over W --
+                                              high here, where every value is positive
     crash at 4, position AHEAD  -> (6, 7.0)   one input lost: the final value still looks
                                               right, and there are six answers, not seven
     crash at 4, position BEHIND -> (8, 7.0)   one input read twice: eight answers
@@ -1238,8 +1249,9 @@ def run(xs, w=W, crash_at=None, policy="window", skew=0):
     policy:
       "window"  -- persist the window and the position together.  Exact.
       "total"   -- persist the accumulator and the position.  On restart the window is
-                   gone, so the departing value is unknown and nothing can be subtracted;
-                   the total only ever reads too high.
+                   gone, so the restored total is never subtracted; the answer is off by
+                   exactly the restored total over W: high for a positive total, low for
+                   a negative one.
       "replay"  -- persist the accumulator, and on restart RE-READ the last w inputs from
                    the source to reconstitute the window.  Exact, and it is persisting the
                    window by another name: the cost moved from the checkpoint to the
@@ -1290,7 +1302,7 @@ def show_examples():
     Each row is checked TWO ways.  The first is the expected (count, final answer) written
     in the table.  The second is the from-scratch reference: for a policy that is supposed
     to be exact, EVERY answer must equal exact_answers(), not just the last one; for the
-    total-only policy, the final answer must be high by exactly the restored total over W,
+    total-only policy, the final answer must be off by exactly the restored total over W,
     which is the law the rest of this file measures.  Integer streams are compared exactly;
     the two rows whose values exceed 2**53 cannot be, and are compared to a tolerance,
     which is the float finding showing up in the test harness rather than in the program.
@@ -1475,7 +1487,7 @@ def main():
                 # sum rather than the restored total, so the transient is wrong either way.
                 assert (abs(got[-1] - want[-1]) < 1e-9) == (ck["total"] == 0), (xs, w, c, ck)
     print(f"\n  300 random streams x every crash point: the window checkpoint and the replay")
-    print(f"  recover exactly, and the total-only checkpoint's final answer is high by exactly")
+    print(f"  recover exactly, and the total-only checkpoint's final answer is off by exactly")
     print(f"  the restored total over W -- so it is right only when that total happens to be")
     print(f"  zero, which negative values do occasionally arrange.")
 
@@ -1549,7 +1561,7 @@ VALUES = 0:5  1:3  2:7  3:2  4:6  5:1  6:9  7:4  8:8    W = 3
   process that never crashed -- the checkpoint is also a re-grounding.
 
   300 random streams x every crash point: the window checkpoint and the replay
-  recover exactly, and the total-only checkpoint's final answer is high by exactly
+  recover exactly, and the total-only checkpoint's final answer is off by exactly
   the restored total over W -- so it is right only when that total happens to be
   zero, which negative values do occasionally arrange.
 
@@ -1630,8 +1642,8 @@ def running(xs, w=W):
     average of w values before w values exist.
 
     Returns (answers, trace, adds, subs).  The subtraction reads xs[i - w], which
-    is why the SPACE is O(w) even though the TIME is O(1): the departing value
-    must still be reachable.
+    is why the memory is w values even though each arrival costs two operations:
+    the departing value must still be reachable.
     """
     total = 0
     answers, trace = [], []
@@ -1665,7 +1677,7 @@ def drift_at(xs, i, w=W):
 # The three variations.
 
 def the_rolling_maximum(xs, w=W):
-    """Variation 1, surface: risk.  The same window, but the MAXIMUM.
+    """Variation 2, surface: risk.  The same window, but the MAXIMUM.
 
     Non-obvious point: the trick does not transfer.  `running`'s subtraction is
     the line that cannot be written -- addition is invertible and max is not, so
@@ -1685,13 +1697,16 @@ def the_rolling_maximum(xs, w=W):
     return out
 
 def the_time_based_window(stamped, span):
-    """Variation 2, surface: monitoring.  Average everything from the last `span`.
+    """Variation 3, surface: monitoring.  Average everything from the last `span`.
 
     Non-obvious point: "exactly one leaves when one arrives" becomes false -- zero
     or many expire -- so the COUNT must be maintained beside the total and the
     divisor changes every arrival.  Subtler: the answer changes with no arrival at
     all, as values age out while the stream is quiet, so a real implementation
     needs a timer-driven recompute as well as an input-driven one.
+
+    The window at arrival t is the half-open (t - span, t]: a sample exactly span
+    seconds old has just left, the same definition the standalone variation uses.
 
     `stamped` is [(t, v), ...] in time order.  Returns [(t, avg, count), ...].
     """
@@ -1702,13 +1717,13 @@ def the_time_based_window(stamped, span):
     for t, v in stamped:
         win.append((t, v))
         total += v
-        while win and win[0][0] < t - span:   # zero, one or many expire
+        while win and win[0][0] <= t - span:  # zero, one or many expire
             total -= win.popleft()[1]
         out.append((t, total / len(win), len(win)))
     return out
 
 def the_average_that_must_survive_a_restart(xs, crash_after, w=W):
-    """Variation 3, surface: reliability.  The process restarts mid-stream.
+    """Variation 4, surface: reliability.  The process restarts mid-stream.
 
     Non-obvious point: the total is one number and looks trivially
     checkpointable, and that is the trap -- restoring the total WITHOUT the last w
@@ -1717,8 +1732,11 @@ def the_average_that_must_survive_a_restart(xs, crash_after, w=W):
     reported.
 
     Returns (answers_from_full_checkpoint, answers_from_total_only_checkpoint).
-    The second is what a checkpoint of the accumulator alone produces: it has to
-    guess the departing value, and guessing zero leaves the total too high.
+    The second is what a checkpoint of the accumulator alone produces: the window
+    restarts empty, refills, and subtraction resumes once it holds more than w
+    values -- but the restored total has no window entries behind it, so it is
+    never taken out, and the final answer is off by exactly the restored total
+    over w (high here, where every value is positive).
     """
     total, window, out_good = 0, [], []
     for i in range(crash_after):            # before the crash
@@ -1728,14 +1746,17 @@ def the_average_that_must_survive_a_restart(xs, crash_after, w=W):
             total -= window.pop(0)
         if i >= w - 1:
             out_good.append(total / w)
-    out_bad, bad_total = list(out_good), total   # the crash: only `total` was saved
+    out_bad, bad_total, bad_window = list(out_good), total, []   # the crash: only `total` was saved
     for i in range(crash_after, len(xs)):
         total += xs[i]                      # restored WITH the window: can subtract
         window.append(xs[i])
         if len(window) > w:
             total -= window.pop(0)
         out_good.append(total / w)
-        bad_total += xs[i]                  # restored without it: nothing to subtract
+        bad_total += xs[i]                  # restored without it: the window refills
+        bad_window.append(xs[i])
+        if len(bad_window) > w:
+            bad_total -= bad_window.pop(0)
         out_bad.append(bad_total / w)
     return out_good, out_bad
 
@@ -1798,12 +1819,14 @@ def main():
     stamped = [(0, 10.0), (10, 20.0), (70, 30.0), (71, 40.0), (200, 50.0)]
     tb = the_time_based_window(stamped, 60)
     print(f"\n  time-based window (span 60): {[(t, round(a, 3), c) for t, a, c in tb]}")
-    # MEASURED, and not what a first reading expects: the count is 1,2,2,2,1 -- at
-    # t=71 one value arrives and one expires (so the count holds), and at t=200 TWO
-    # expire at once and none would have expired on a timer tick at t=140 either.
-    # So "exactly one leaves when one arrives" is false in both directions here.
-    assert [c for _, _, c in tb] == [1, 2, 2, 2, 1], f"measured counts {[c for *_, c in tb]}"
-    assert tb[2][1] == 25.0, "the divisor did not follow the count"
+    # MEASURED, and not what a first reading expects: the count is 1,2,1,2,1 -- at
+    # t=70 one value arrives and TWO expire (the one at 10 is exactly 60 old, and the
+    # window is (t-60, t]), at t=71 one arrives and none expire, and at t=200 TWO
+    # expire at once on the arrival path -- a timer would have retired them one by one
+    # at t=130 and t=131, which is why the arrival-driven count is stale between 71
+    # and 200.  So "exactly one leaves when one arrives" is false in both directions.
+    assert [c for _, _, c in tb] == [1, 2, 1, 2, 1], f"measured counts {[c for *_, c in tb]}"
+    assert tb[2][1] == 30.0, "the divisor did not follow the count"
     assert tb[4][1] == 50.0, "two values expiring at once left the total too high"
     assert min(c for *_, c in tb) < max(c for *_, c in tb), "the count must rise AND fall"
     good, bad = the_average_that_must_survive_a_restart(VALUES, crash_after=5)
@@ -1811,7 +1834,10 @@ def main():
     print(f"  restart, total only          : {[round(v, 4) for v in bad]}")
     assert good == exact, "a full checkpoint must continue exactly"
     assert bad != exact, "a total-only checkpoint must NOT come out right"
+    restored = sum(VALUES[5 - W:5])         # the total the crash left behind
     assert bad[-1] > exact[-1], "the un-subtracted total has to read too high"
+    assert abs((bad[-1] - exact[-1]) - restored / W) < 1e-12, (
+        f"the error must be exactly the restored total {restored} over {W}")
 
     # ---- brute force over many inputs, not just the one example
     rng = random.Random(20260303)
@@ -1853,9 +1879,9 @@ W = 3 -> 7 windows, 2 answers withheld
     so drift_at(1) = 0.666666666666667;  6 of 7 drift, worst 0.666666666666667 (= 2/3)
   EVERY value multiplied by 1e+16: 0 of 7 answers drift
 
-  time-based window (span 60): [(0, 10.0, 1), (10, 15.0, 2), (70, 25.0, 2), (71, 35.0, 2), (200, 50.0, 1)]
+  time-based window (span 60): [(0, 10.0, 1), (10, 15.0, 2), (70, 30.0, 1), (71, 35.0, 2), (200, 50.0, 1)]
   restart, window checkpointed : [5.0, 4.0, 5.0, 3.0, 5.3333, 4.6667, 7.0]
-  restart, total only          : [5.0, 4.0, 5.0, 5.3333, 8.3333, 9.6667, 12.3333]
+  restart, total only          : [5.0, 4.0, 5.0, 5.3333, 8.3333, 9.6667, 12.0]
 
   600 random (values, W) pairs: running total == recomputation, and the
   rolling maximum == max of every window.
@@ -1958,7 +1984,7 @@ Integer addition and subtraction are exact and reversible, so the drift disappea
 
 <img src="../diagrams/anim/ch01-interview-memory/frames/step-11.svg" alt="Step 11: and what else the window needs" width="980">
 
-The subtraction reads index 0, so the last W values must be retained — a ring buffer of W entries, not the whole stream. So the real cost is O(1) **time** and O(W) **space**, and claiming O(1) for both is the overstatement to avoid: the total is one number and the window is still W values.
+The subtraction reads index 0, so the last W values must be retained — a ring buffer of W entries, not the whole stream. So the real cost is two operations per arrival, whatever W is, and W retained values (3 here) plus the total. Claiming "one number" for the memory as well is the overstatement to avoid: the total is one number and the window is still W values.
 
 </details>
 <details>
@@ -1966,10 +1992,10 @@ The subtraction reads index 0, so the last W values must be retained — a ring 
 
 <img src="../diagrams/anim/ch01-interview-memory/frames/step-12.svg" alt="Step 12: the bill" width="980">
 
-Two operations per arrival instead of 3, W values retained, and 2 answers withheld at the start. Three things to volunteer: the warm-up is **W − 1 answers**, not a rounding detail; the space is **O(W)** even though the time is O(1); and the running total is **exact only for exact arithmetic** — 6 of 7 answers drift as soon as one value is large enough to swamp the others, and no step ever corrects it.
+Two operations per arrival instead of 3, W values retained, and 2 answers withheld at the start. Three things to volunteer: the warm-up is **W − 1 answers**, not a rounding detail; the memory is **W values** (3 here) plus the total, even though each arrival costs only two operations; and the running total is **exact only for exact arithmetic** — 6 of 7 answers drift as soon as one value is large enough to swamp the others, and no step ever corrects it.
 
 </details>
 
-<sub>Locals live in the frame and vanish when it is popped; 0x200 is the single number the design is famous for, and 0x100 is the W values the subtraction still needs — which is why the space is O(W) and not O(1). The large value is a declared parameter used only to make the drift measurable on this machine, and the no-drift case is asserted alongside it so "it is the mixture, not the magnitude" cannot silently become false. Every figure is asserted — including that the running total agrees with recomputation exactly on the small values, that it is cheaper, that the warm-up is exactly W − 1 arrivals long, that something really does leave the window, that the mixed-magnitude version really does drift, that **not every** such answer drifts (so the small-value case is visibly the exact one), and that uniformly scaling every value drifts on **none**. Generated by `node tools/gen_ch01_interview.js` on `tools/interviewkit.js`.</sub>
+<sub>Locals live in the frame and vanish when it is popped; 0x200 is the single number the design is famous for, and 0x100 is the W values the subtraction still needs — which is why the memory is W values plus the total, not one number. The large value is a declared parameter used only to make the drift measurable on this machine, and the no-drift case is asserted alongside it so "it is the mixture, not the magnitude" cannot silently become false. Every figure is asserted — including that the running total agrees with recomputation exactly on the small values, that it is cheaper, that the warm-up is exactly W − 1 arrivals long, that something really does leave the window, that the mixed-magnitude version really does drift, that **not every** such answer drifts (so the small-value case is visibly the exact one), and that uniformly scaling every value drifts on **none**. Generated by `node tools/gen_ch01_interview.js` on `tools/interviewkit.js`.</sub>
 
 <!-- ch01-interview-memory:end -->

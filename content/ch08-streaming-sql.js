@@ -1,3 +1,30 @@
+const CH08 = (() => {
+  const S = require(require('path').resolve('tools', 'stream_seed.js'));
+  const hm = (t) => S.hhmmss(t), mm = (t) => S.hhmmss(t).slice(0, 5);
+  const W0 = S.WIN_STARTS[0], W0_END = W0 + S.WIN;
+  const CI = S.closedAt(W0), CE = S.EVENTS[CI], L = S.LATE[0];
+  const ONTIME = S.SUM(S.EVENTS.filter((e, i) => i <= CI && S.winOf(e.et) === W0).map(e => e.id));
+  const TRUE = S.SUM(S.WINDOWS[W0]);
+  const PERIOD = S.WIN / 2;
+  const hopStarts = (et) => { const o = []; for (let st = 0; st <= et; st += PERIOD) if (et < st + S.WIN) o.push(st); return o; };
+  const HOPS = hopStarts(CE.et);
+  const sideWm = (k) => Math.max(...S.EVENTS.filter(e => e.key === k).map(e => e.et)) - S.LAG;
+  const [WA, WB] = S.KEYS.map(sideWm);
+  const RUN = S.EVENTS.filter(e => e.key === S.KEYS[0]).reduce((o, e) => o.concat((o.length ? o[o.length - 1] : 0) + e.v), []);
+  const [OLD6, NEW6] = RUN.slice(-2);
+  const clicks = S.EVENTS.filter(e => e.key === S.KEYS[0]), imps = S.EVENTS.filter(e => e.key === S.KEYS[1]);
+  const MATCHES = clicks.reduce((n, c) => n + imps.filter(i => Math.abs(i.et - c.et) <= S.LAG).length, 0);
+  const STUCK = clicks.filter(c => c.et + S.LAG >= Math.min(WA, WB));
+  const STUCK_M = STUCK.reduce((n, c) => n + imps.filter(i => Math.abs(i.et - c.et) <= S.LAG).length, 0);
+  const SC = STUCK.find(c => imps.some(i => Math.abs(i.et - c.et) <= S.LAG));
+  if (ONTIME === TRUE || S.winOf(L.et) !== W0 || HOPS.length !== 2) throw new Error(`ch08 content: window ${W0} emits ${ONTIME} of ${TRUE}, late id ${L.id}, ${HOPS.length} HOP rows; the prose was checked against an on-time/late split and 2 HOP rows`);
+  return { WIN: S.WIN, LAG: S.LAG, PERIOD, W0: `[${mm(W0)}, ${mm(W0_END)})`, W0_END: hm(W0_END), ONTIME, TRUE,
+    CE_ID: CE.id, CE_KEY: CE.key, CE_ET: hm(CE.et), CE_V: CE.v, CE_PT: hm(CE.pt), CE_WM: hm(CE.et - S.LAG),
+    L_ID: L.id, L_KEY: L.key, L_ET: hm(L.et), L_V: L.v, L_PT: hm(L.pt),
+    HOP_N: HOPS.length, HOP_ROWS: HOPS.map(st => `[${mm(st)}, ${mm(st + S.WIN)})`).join(' + '),
+    KA: S.KEYS[0], KB: S.KEYS[1], WA: hm(WA), WB: hm(WB), WMIN: hm(Math.min(WA, WB)),
+    OLD6, NEW6, MATCHES, NCLICK: clicks.length, NSTUCK: STUCK.length, STUCK_M, SC_ID: SC.id, SC_BOUND: hm(SC.et + S.LAG) };
+})();
 registerChapter({
   id: 'ch08',
   num: 8,
@@ -26,7 +53,7 @@ registerChapter({
       motivation: `The key adaptation of SQL to streams is explicit windowing — batch SQL groups whole tables, while streaming SQL must say over which time slice each aggregate is computed, so this section covers the window constructs.`,
       steps: [
         { num: 1, title: 'TUMBLE — fixed windows', detail: '<strong>TUMBLE(size)</strong> is a fixed (tumbling) window: equal, non-overlapping spans. It is the SQL spelling of the fixed window from the Beam model.' },
-        { num: 2, title: 'HOP — sliding windows', detail: '<strong>HOP(size, slide)</strong> is a sliding window: fixed length, advancing by slide. It is the SQL spelling of the sliding window.' },
+        { num: 2, title: 'HOP — sliding windows', detail: '<strong>HOP(slide, size)</strong> is a sliding window: fixed length (size), advancing by slide. It is the SQL spelling of the sliding window.' },
         { num: 3, title: 'SESSION — session windows', detail: '<strong>SESSION(gap)</strong> is a session window: a burst of activity closed by a gap of inactivity. The query engine merges sessions as data arrives.' },
         { num: 4, title: 'The watermark drives emission', detail: 'A windowed aggregate emits when the <strong>watermark passes the window end</strong>. The time attribute (event time) plus the watermark is what makes SQL results correct under out-of-order data.' }
       ],
@@ -65,35 +92,35 @@ registerChapter({
   },
 
   interview: [
-    { scenario: "A team wants analysts to write ad-click aggregations in SQL over a live stream, but the results must be correct under out-of-order events.", q: "How do you expose a streaming pipeline as SQL with correct event-time semantics?", solution: "Use a streaming SQL engine with an event-time attribute; declare TUMBLE/HOP/SESSION windows and let the watermark drive when each window's result emits.", components: ["Streaming SQL engine — Flink SQL", "Time attribute — event time", "Window — TUMBLE/HOP/SESSION", "Watermark — drives emission"],  code: "SELECT window_start, campaign, COUNT(*)\nFROM clicks\nGROUP BY TUMBLE(event_time, INTERVAL '5' MINUTE), campaign\n-- emits when the watermark passes each 5-min window end", tieback: "This is exactly the streaming-SQL window material in this chapter.", refs: ["3. Time attributes", "4. TUMBLE, HOP, SESSION", "7. The watermark drives SQL emission"], problems: ["21-ad-click-aggregation", "20-metrics-monitoring"] },
-    { scenario: "A SQL query joins clicks with impressions, but it emits matches before a late impression could still arrive, producing incomplete rows.", q: "How do you make a stream-stream SQL join correct under out-of-order data?", solution: "Use a windowed (interval) join and let the watermark bound it — the join emits a match only when both sides' watermarks pass the join window.", components: ["Windowed join — interval bound", "Watermark — both sides pass", "Hold — buffer until complete"],  code: "SELECT ...\nFROM clicks c JOIN impressions i\n  ON c.campaign = i.campaign\n  AND i.event_time BETWEEN c.event_time - INTERVAL '5' MINUTE\n                      AND c.event_time + INTERVAL '5' MINUTE\n-- emits when both watermarks pass the window", tieback: "This is exactly the windowed-join material in this chapter.", refs: ["6. Windowed joins", "7. The watermark drives SQL emission"], problems: ["21-ad-click-aggregation"] }
+    { scenario: "A team wants analysts to write ad-click aggregations in SQL over a live stream, but the results must be correct under out-of-order events.", q: "How do you expose a streaming pipeline as SQL with correct event-time semantics?", solution: "Use a streaming SQL engine with an event-time attribute; declare TUMBLE/HOP/SESSION windows and let the watermark drive when each window's result emits.", components: ["Streaming SQL engine — Flink SQL", "Time attribute — event time", "Window — TUMBLE/HOP/SESSION", "Watermark — drives emission"],  code: `SELECT window_start, SUM(v)\nFROM clicks\nGROUP BY TUMBLE(et, INTERVAL '${CH08.WIN}' SECOND)\n-- ${CH08.W0} emits ${CH08.ONTIME} once the watermark reaches ${CH08.CE_WM},\n-- then ${CH08.TRUE} when late id ${CH08.L_ID} arrives at ${CH08.L_PT}`, tieback: "This is exactly the streaming-SQL window material in this chapter.", refs: ["3. Time attributes", "4. TUMBLE, HOP, SESSION", "7. The watermark drives SQL emission"], problems: ["21-ad-click-aggregation", "20-metrics-monitoring"] },
+    { scenario: "A SQL query joins clicks with impressions, but it emits matches before a late impression could still arrive, producing incomplete rows.", q: "How do you make a stream-stream SQL join correct under out-of-order data?", solution: "Use a windowed (interval) join and let the watermark bound it — the join emits a match only when both sides' watermarks pass the join window.", components: ["Windowed join — interval bound", "Watermark — both sides pass", "Hold — buffer until complete"],  code: `SELECT ...\nFROM clicks c JOIN impressions i\n  ON i.et BETWEEN c.et - INTERVAL '${CH08.LAG}' SECOND\n              AND c.et + INTERVAL '${CH08.LAG}' SECOND\n-- emits when min(${CH08.WA}, ${CH08.WB}) = ${CH08.WMIN} passes the bound`, tieback: "This is exactly the windowed-join material in this chapter.", refs: ["6. Windowed joins", "7. The watermark drives SQL emission"], problems: ["21-ad-click-aggregation"] }
   ],
   systemDesign: {
     walkthroughs: ['ch08-system', 'ch08-system-memory'],
-    question: 'Design a continuous SQL query that keeps a campaign click count current. Premise: the query buckets clicks into a TUMBLE window and updates the result only when the watermark closes the window, so the count stays correct as late clicks arrive.',
+    question: 'Design a continuous SQL query that keeps a click total current. Premise: the query buckets clicks into a TUMBLE window and updates the result only when the watermark closes the window, so the count stays correct as late clicks arrive.',
     pipeline: 'streams (clicks, impressions) -> SQL engine (continuous query) -> watermark + window -> updating result -> sink',
     decomposition: [
       { box: 'streams (clicks, impressions)', role: 'streams — feed the SQL engine with event-time data',
         parts: [
-          'a click {campaign: "C1", event_time: "12:03:00"} arrives',
-          'an impression {campaign: "C1", event_time: "12:02:00"} arrives',
+          `id ${CH08.CE_ID} {key: "${CH08.CE_KEY}", et: "${CH08.CE_ET}", v: ${CH08.CE_V}} arrives at ${CH08.CE_PT}`,
+          `id ${CH08.L_ID} {key: "${CH08.L_KEY}", et: "${CH08.L_ET}", v: ${CH08.L_V}} arrives at ${CH08.L_PT}, after its window has emitted`,
           'both carry event time for the query\'s time attribute'
         ] },
       { box: 'SQL engine (continuous query)', role: 'SQL engine — runs the query forever',
         parts: [
-          'the query groups by TUMBLE(event_time, 5 min) and campaign',
+          `the query groups by TUMBLE(et, ${CH08.WIN} s) — one total per window`,
           'the engine folds each row into the right window',
-          'updating results emit retractions for changed keys'
+          'updating results emit retractions for changed windows'
         ] },
       { box: 'watermark + window', role: 'watermark + window — decides when results emit',
         parts: [
-          'the watermark at 12:06:30 closes the [12:00, 12:05) window',
-          'a HOP window would emit the same event into multiple spans',
-          'a join waits for both sides\' watermarks'
+          `the watermark reaches ${CH08.CE_WM} after id ${CH08.CE_ID} (et ${CH08.CE_ET} − ${CH08.LAG} s) and closes ${CH08.W0}, which emits ${CH08.ONTIME}`,
+          `a HOP(${CH08.PERIOD} s, ${CH08.WIN} s) window would put id ${CH08.CE_ID} into ${CH08.HOP_N} rows, ${CH08.HOP_ROWS}`,
+          `a join waits for both sides\' watermarks: min(${CH08.WA}, ${CH08.WB}) = ${CH08.WMIN}`
         ] },
       { box: 'sink', role: 'sink — applies the updating result',
         parts: [
-          'the sink receives (C1, 3) retracted then (C1, 4) added',
+          `the sink receives ${CH08.ONTIME} for ${CH08.W0}, then ${CH08.ONTIME} retracted and ${CH08.TRUE} added when id ${CH08.L_ID} arrives at ${CH08.L_PT}`,
           'append-only sinks are simpler but wrong for updating results',
           'an upsert sink applies retractions correctly'
         ] }
@@ -108,11 +135,11 @@ registerChapter({
     { question: "When does a windowed SQL join emit a match?", options: ["A. When the first row arrives", "B. When both sides' watermarks pass the join window", "C. Every second", "D. When the query starts"], answer: 2, explanation: "The join waits until both streams are complete for the window.", conceptRef: "6. Windowed joins" }
   ],
   seeAlso: [
-    { to: 2, section: 'What and Where — transformations and windowing', depth: 'streaming SQL is a declarative spelling of the what/where/when/how model — SELECT/WHERE/GROUP BY (what), TUMBLE/HOP/SESSION (where), watermark + trigger (when), retraction (how).', example: 'ch08\'s GROUP BY TUMBLE is ch02\'s "what + where"; ch08\'s retraction of (C1, 3) before (C1, 4) is ch02\'s accumulating-and-retracting mode.' },
-    { to: 3, section: 'Propagation and correctness', depth: 'the watermark that drives SQL emission is the same completeness signal ch03 defines — and it propagates as the minimum across a query\'s inputs.', example: 'ch08\'s TUMBLE window emits when the watermark passes 12:05:00; ch03 shows that watermark = max_seen 12:08:30 − skew 120 s = 12:06:30, or min(12:06:00, 12:04:30) = 12:04:30 for a join.' },
-    { to: 4, section: 'Window shapes — fixed, sliding, session', depth: 'TUMBLE/HOP/SESSION are the SQL spellings of ch04\'s fixed/sliding/session windows, including session merging.', example: 'ch08\'s HOP(10 min, 2 min) putting one click into 3 rows is ch04\'s sliding window [12:00,12:10) + [12:02,12:12) + [12:04,12:14); ch08\'s SESSION is ch04\'s gap-based merge.' },
-    { to: 6, section: 'The duality', depth: 'append-only vs updating results is the stream/table duality in SQL — an updating query emits a changelog, an append-only query emits a stream of facts.', example: 'ch08\'s "updating result retracts (C1, 3) then adds (C1, 4)" is ch06\'s changelog (old, new) pair; ch08\'s append-only mode is ch06\'s plain stream.' },
-    { to: 9, section: 'Windowed and temporal joins', depth: 'SQL joins are where windowing, watermarks, and the stream/table duality meet — ch09 covers windowed (interval) and temporal joins in depth.', example: 'ch08\'s "match clicks and impressions within 5 min" is ch09\'s windowed join; ch08\'s "join emits when both watermarks pass" is ch09\'s hold-until-both-sides-pass rule.' }
+    { to: 2, section: 'What and Where — transformations and windowing', depth: 'streaming SQL is a declarative spelling of the what/where/when/how model — SELECT/WHERE/GROUP BY (what), TUMBLE/HOP/SESSION (where), watermark + trigger (when), retraction (how).', example: `ch08's GROUP BY TUMBLE is ch02's "what + where"; ch08's retraction of ${CH08.ONTIME} before ${CH08.TRUE} for ${CH08.W0} is ch02's accumulating-and-retracting mode.` },
+    { to: 3, section: 'Propagation and correctness', depth: 'the watermark that drives SQL emission is the same completeness signal ch03 defines — and it propagates as the minimum across a query\'s inputs.', example: `ch08's TUMBLE window ${CH08.W0} emits when the watermark passes ${CH08.W0_END}, which happens after id ${CH08.CE_ID}; ch03 shows that watermark = max_seen ${CH08.CE_ET} − ${CH08.LAG} s = ${CH08.CE_WM}, and for a join min(${CH08.WA}, ${CH08.WB}) = ${CH08.WMIN}.` },
+    { to: 4, section: 'Window shapes — fixed, sliding, session', depth: 'TUMBLE/HOP/SESSION are the SQL spellings of ch04\'s fixed/sliding/session windows, including session merging.', example: `ch08's HOP(${CH08.PERIOD} s, ${CH08.WIN} s) putting id ${CH08.CE_ID} (et ${CH08.CE_ET}) into ${CH08.HOP_N} rows is ch04's sliding window ${CH08.HOP_ROWS}; ch08's SESSION is ch04's gap-based merge.` },
+    { to: 6, section: 'The duality', depth: 'append-only vs updating results is the stream/table duality in SQL — an updating query emits a changelog, an append-only query emits a stream of facts.', example: `ch08's "updating result retracts ${CH08.ONTIME} then adds ${CH08.TRUE}" for ${CH08.W0} is ch06's changelog record carrying old → new: ch06's last update, ${CH08.OLD6} → ${CH08.NEW6}, sums to ${CH08.OLD6} − ${CH08.OLD6} + ${CH08.NEW6} = ${CH08.NEW6} only because the old value travels with it; ch08's append-only mode is ch06's plain stream.` },
+    { to: 9, section: 'Windowed and temporal joins', depth: 'SQL joins are where windowing, watermarks, and the stream/table duality meet — ch09 covers windowed (interval) and temporal joins in depth.', example: `ch08's Q2 interval join, i.et within ${CH08.LAG} s of c.et, is ch09's windowed join with its ${CH08.LAG} s bound and ${CH08.MATCHES} true matches; ch08's "join emits when both watermarks pass", min(${CH08.WA}, ${CH08.WB}) = ${CH08.WMIN}, is why ch09's click ${CH08.SC_ID} (bound ${CH08.SC_BOUND}) never emits: ${CH08.NSTUCK} of its ${CH08.NCLICK} clicks wait forever, holding ${CH08.STUCK_M} of the ${CH08.MATCHES} matches.` }
   ],
   sources: [
     { name: 'Apache Flink — Table API and SQL overview', url: 'https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/table/overview/', note: 'Continuous queries, time attributes, and window constructs in streaming SQL' },

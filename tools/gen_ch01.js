@@ -64,6 +64,13 @@ const F = { gen: 'gen_ch01.js' };
 const secs = (n) => `${n}s`;
 const ev = (id) => EVENTS.find(e => e.id === id);
 const L = LATE[0], O = NOT_LATE_BUT_OOO[0];
+const offBy = (e) => chunkOf(e.pt) - winOf(e.et);
+const winsWord = (n) => `${n} window${n === 1 ? '' : 's'}`;
+const offText = (e) => `${secs(offBy(e))} (${winsWord(offBy(e) / WIN)})`;
+if (offBy(O) % WIN || offBy(L) % WIN) fail('a misplaced event is not a whole number of windows off');
+const LAST_MIN = MINUTES[MINUTES.length - 1];
+if (WATERMARKS.some(w => w >= LAST_MIN + MIN)) fail('the last dashboard minute closes after all — "one minute never closes" would be false');
+const LAST_MIN_SPAN = `[${hhmmss(LAST_MIN).slice(0, 5)}, ${hhmmss(LAST_MIN + MIN).slice(0, 5)})`;
 
 // ============================ CONCEPT 1 — TERMINOLOGY =======================
 const MEANINGS = [
@@ -203,7 +210,7 @@ const C3 = [
         `${MISPLACED.length} of the ${EVENTS.length} events are in a chunk that is not their event-time window: ids ${MISPLACED.join(' and ')}.`,
         `From INSIDE a chunk there is no way to notice. Each chunk is internally consistent, finishes cleanly, and reports a wrong number.`,
       ], c.C.hot, c.C.hotFill); },
-    cap: `This is the pattern most "streaming" systems actually are: a batch job on a timer. It works, it is simple, and ${MISPLACED.length} of ${EVENTS.length} events land in the wrong bucket — id ${O.id} by ${secs(skewOf(O))} and id ${L.id} by ${secs(skewOf(L))}. The chunk boundary is a fact about the pipeline's clock, and it is being used to answer a question about the users' clock.` },
+    cap: `This is the pattern most "streaming" systems actually are: a batch job on a timer. It works, it is simple, and ${MISPLACED.length} of ${EVENTS.length} events land in the wrong bucket — id ${O.id} by ${offText(O)} and id ${L.id} by ${offText(L)}. The chunk boundary is a fact about the pipeline's clock, and it is being used to answer a question about the users' clock.` },
   { t: 'unbounded data as streaming: close on the watermark', draw: (c) => {
       let s = c.panel('UNBOUNDED-AS-STREAMING — each window closes when the watermark crosses its end', 'a');
       s += c.mapRows('st', c.P.main.x + 24, c.P.main.y + 52, WIN_STARTS.map(w => {
@@ -278,7 +285,7 @@ const C4 = [
   { t: 'and what this design does NOT settle', draw: (c) =>
       c.panel('SCOPE', 'p')
       + c.note('x1', c.P.main.x + 24, c.P.main.y + 46, 1040, [`The ${secs(LAG)} lag is a GUESS. It was wrong about id ${L.id} by ${secs(skewOf(L) - LAG)} and nothing in the pipeline could detect that.`], c.C.hot, c.C.hotFill)
-      + c.note('x2', c.P.main.x + 24, c.P.main.y + 112, 1040, [`One window here NEVER closes — [${hhmmss(WIN_STARTS[WIN_STARTS.length - 1]).slice(0, 5)}, …) still holds ${SUM(WINDOWS[WIN_STARTS[WIN_STARTS.length - 1]])}. Unbounded input means unbounded STATE unless something expires it.`], c.C.warn, c.C.warnFill)
+      + c.note('x2', c.P.main.x + 24, c.P.main.y + 112, 1040, [`One minute here NEVER closes — ${LAST_MIN_SPAN} still holds ${sumOf(BY_ET[LAST_MIN])}. Unbounded input means unbounded STATE unless something expires it.`], c.C.warn, c.C.warnFill)
       + c.note('x3', c.P.main.x + 24, c.P.main.y + 178, 1040, [`Nothing here is exactly-once. If the transport redelivers id ${L.id}, the ${hhmmss(M0).slice(0, 5)} minute reads ${M0_TRUE + L.v}, and this design cannot tell that from a real click.`], c.C.hot, c.C.hotFill)
       + c.note('x4', c.P.main.x + 24, c.P.main.y + 244, 1040, [`And the dashboard shows ${MINUTES.length} minutes because the seed has ${EVENTS.length} events. Nothing here says what happens at a million per second.`], c.C.blue, c.C.blueFill),
     cap: `Four honest gaps, and the first two are the ones that bite. The lag is unverifiable from inside the system; the state is unbounded unless something expires it; duplicates are indistinguishable from clicks; and the whole thing is sized for ${EVENTS.length} events. Each gets its own chapter later — which is the actual reason this book has ten of them.` },
@@ -333,7 +340,7 @@ const DIAGRAMS = [
       `A pipeline's whole design falls out of one question: **does the input end?** There are three answers in practice.`, '',
       `**1. Bounded data.** A finite dataset — one day of logs, a database snapshot. You read to the end, sort by event time, and every window is final. There is no watermark and no lateness, because "has everything arrived?" has a free answer: *the file ended*. id ${L.id}'s ${secs(skewOf(L))} of skew is harmless here — it was in the file before the job started. **This is the case where none of this book's problems exist.**`, '',
       `**2. Unbounded data, processed as batch.** The data never ends, so the pipeline slices it artificially — run every ${secs(WIN)} over whatever arrived — and each run is a little bounded job. This is what most systems called "streaming" actually are.`, '',
-      `The slices are cut on **arrival** time, so they are the wrong buckets: **${MISPLACED.length} of ${EVENTS.length} events land in a chunk that is not their event-time window** — id ${O.id} out by ${secs(skewOf(O))}, id ${L.id} out by ${secs(skewOf(L))}. And from inside a chunk there is nothing to notice: it is internally consistent, it finishes cleanly, and it reports a wrong number.`, '',
+      `The slices are cut on **arrival** time, so they are the wrong buckets: **${MISPLACED.length} of ${EVENTS.length} events land in a chunk that is not their event-time window** — id ${O.id} out by ${offText(O)}, id ${L.id} out by ${offText(L)}. And from inside a chunk there is nothing to notice: it is internally consistent, it finishes cleanly, and it reports a wrong number.`, '',
       `**3. Unbounded data, processed as streaming.** Keep the event-time windows — so the buckets are right — and make *closing* a separate, processing-time decision driven by the watermark. Window [${hhmmss(0).slice(0, 5)}, ${hhmmss(WIN).slice(0, 5)}) closes after event id ${EVENTS[closedAt(0)].id}, which is ${EVENTS.indexOf(L) - closedAt(0)} events before id ${L.id} arrives — so lateness is now a *case*, not an accident. And the last window **never closes**: nothing ever pushes the watermark past its end.`, '',
       `**The point of separating these three:** shapes 1 and 3 group identically. Run the same grouping over the bounded file and over the stream and you get the same buckets. They differ only in *when* they declare a window done. Shape 2 is the odd one out — and not because it is batch, but because it keyed on the arrival clock.`],
     whenHeading: 'When each shape is the right choice, and what "streaming generalizes batch" buys you',
@@ -368,7 +375,7 @@ const DIAGRAMS = [
       `None of the three is "the right one"; they trade accuracy, latency and downstream complexity. An answer that says "handle late data" has not chosen.`, '',
       `**What this design does NOT settle — four gaps, each a later chapter:**`, '',
       `1. **The ${secs(LAG)} lag is a guess.** It was wrong about id ${L.id} by ${secs(skewOf(L) - LAG)}, and nothing inside the pipeline could detect that. Option C's ${secs(MAX_SKEW)} was only knowable *after* id ${WORST.id} happened.`,
-      `2. **One window never closes.** [${hhmmss(WIN_STARTS[WIN_STARTS.length - 1]).slice(0, 5)}, …) still holds ${SUM(WINDOWS[WIN_STARTS[WIN_STARTS.length - 1]])}. Unbounded input means unbounded state unless something expires it.`,
+      `2. **One minute never closes.** ${LAST_MIN_SPAN} still holds ${sumOf(BY_ET[LAST_MIN])}. Unbounded input means unbounded state unless something expires it.`,
       `3. **Nothing here is exactly-once.** If the transport redelivers id ${L.id}, the ${hhmmss(M0).slice(0, 5)} minute reads ${M0_TRUE + L.v}, and this design cannot distinguish that from a real click.`,
       `4. **It is sized for ${EVENTS.length} events.** Nothing here says what happens at a million per second.`],
     diagramHeading: 'Visual walkthrough — five stages, one wrong number, three options',

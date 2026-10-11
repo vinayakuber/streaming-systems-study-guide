@@ -23,7 +23,7 @@
     "",
     "// primitive: BUG_KEY — the key the bug halves.  BUG_KEY = \"a\"",
     "// primitive: buggyV(e) — what the broken pipeline computes for an event.",
-    "//   buggyV(EVENTS[0]) = 2   (key \"a\", halved)",
+    "//   buggyV(EVENTS[0]) = 2   (key \"a\": 5 halved, rounded down)",
     "//   buggyV(EVENTS[2]) = 7   (key \"b\", untouched)",
     "",
     "// function: layerFor(name) — each Lambda layer picks the clock its own context",

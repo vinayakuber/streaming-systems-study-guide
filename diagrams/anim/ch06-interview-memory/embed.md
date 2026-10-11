@@ -28,14 +28,14 @@ Two things to volunteer. A **deletion must be an entry** saying "gone", not an a
 
 Each of these is the program below with different nouns. The reason to read them is not the
 answer — it is the *recognition*. 4 surfaces (ledger, web infrastructure, compliance, metrics), one shape, and in every
-case the appealing first answer is to materialise a sequence you cannot afford.
+case the appealing first answer is to treat the log and the table as interchangeable — to assume the table can give the changes back, or that keeping only the last entry per key loses nothing — when that holds only for the present state, and only for a log that says what each key became.
 
 <details>
 <summary><b>Variation 2</b> — the cache that must not go stale <i>(looks like web infrastructure)</i></summary>
 
 > A service keeps an in-memory copy of a table. **Keep it current** as changes happen.
 
-**Why it is not obvious.** Folding the changelog into memory is exactly the chapter's program, and the operational question is what happens at start-up: the service must fold from somewhere, and the compacted log is precisely the "somewhere" that makes that cheap — 2 entries instead of 9. The subtlety is that it must then switch from reading history to following live changes without a gap, which is the read-then-watch race from another chapter arriving here as a start-up sequence. Recognising that compaction exists for restarts as much as for disk is the content.
+**Why it is not obvious.** Folding the changelog into memory is exactly the chapter's program, and the operational question is what happens at start-up: the service must fold from somewhere, and the compacted log is precisely the "somewhere" that makes that cheap — 2 entries instead of 9. The subtlety is that it must then switch from reading history to following live changes without a gap, and that is where the work is: the fold reaches a version, and live reading has to begin at exactly that version — begin later and the changes in between are never applied, so the cache serves a stale value forever; begin earlier and they are read twice, which costs reads but is harmless only because each entry is an assignment. Recognising that compaction exists for restarts as much as for disk is the content.
 
 **Where it lands.** `fold` over the compacted log, then continuing over live entries — with the handover point being the version the fold reached.
 
@@ -529,7 +529,7 @@ Standalone and runnable.
     'a', day 500  -> 16             its surviving edge: from here on it can still answer
   And on a 5,000-change audit log over 50 records and ten years:
     'r0',  day 1825 -> 2500         mid-history, five years in
-    'r49', day 3650 -> 4999         the last day of the log
+    'r49', day 3650 -> 4999         today, the day after the log's last entry (day 3649)
 
   Every line above is a row in the EXAMPLES table below, and every row is asserted twice --
   against a maximum over the surviving entries and, wherever it is affordable, against a
@@ -964,9 +964,9 @@ all assertions passed
 
 > The entries say **what changed** — "+5" — rather than what the key became. **Fold them, and compact them.**
 
-**Why it is not obvious.** The fold now needs addition rather than assignment, which still works, and compaction **breaks**: you cannot keep "the last +5" and drop the earlier ones, because every entry contributes. The repair is to convert the log to absolute values first — fold, then emit — which is exactly the chapter's two functions composed, and it reveals why the log's format mattered in the first frame. The general rule is that a log of *deltas* cannot be compacted and a log of *states* can, so the format is a decision about retention and not about convenience.
+**Why it is not obvious.** The fold now needs addition rather than assignment, which still works, and the chapter's compaction **breaks**: you cannot keep "the last +5" and drop the earlier ones, because every entry contributes. One repair is to convert the log to absolute values first — fold, then emit — which is exactly the chapter's two functions composed, and it reveals why the log's format mattered in the first frame. The general rule is that a log of *states* can be compacted by keeping the last entry per key and a log of *deltas* cannot: it can only be compacted by summing per key, and that result is safe to apply once, to an empty state. So the format is a decision about retention and not about convenience.
 
-**Where it lands.** `fold` with `+` in place of `=`, and `compact` becoming invalid until `fold` and `emit` have converted the deltas to states.
+**Where it lands.** `fold` with `+` in place of `=`, and keep-the-last `compact` becoming invalid; summing per key, or `fold` then `emit` to convert the deltas to states, compacts it correctly.
 
 
 <details>
@@ -1029,11 +1029,13 @@ This is **the counter changelog** solved on its own: a complete file, every help
   answers cannot drift from what the program returns.
 
 The fold needs addition where the chapter's needed assignment, which still works and is
-barely a change.  Compaction BREAKS: you cannot keep "the last +5" and drop the earlier
-ones, because every entry contributes.  The repair is to turn the log into absolute values
+barely a change.  The chapter's compaction BREAKS: you cannot keep "the last +5" and drop
+the earlier ones, because every entry contributes.  The repair is to turn the log into absolute values
 first -- fold, then emit -- which is the chapter's two functions composed, and it shows that
 the log's FORMAT was the first thing stated for a reason.  A log of states can be compacted
-and replayed; a log of deltas can be neither, and both failures are the same fact: an
+by keeping the last entry and replayed; a log of deltas cannot be compacted by keeping the
+last entry, and cannot be replayed twice -- it can only be compacted by summing per key, and
+that result is safe to apply once, to an empty state.  Both failures are the same fact: an
 assignment is idempotent and an addition is not.
 
 WORKED EXAMPLES: the EXAMPLES table below holds 12 input/output pairs -- an empty log and a
@@ -1344,8 +1346,8 @@ def main():
     # the scale that makes compaction worth doing at all
     BIG_KEYS, BIG_ENTRIES = 50, 20_000
     # increments are positive here, as a counter's are: the first attempt used increments
-    # cycling through -3..3, and at 400 entries per counter they summed to exactly zero, so
-    # compact_last came out EXACT at scale and the comparison said nothing.  An accidental
+    # cycling through -3..3, and at 400 entries per counter the first 399 cancelled exactly, so
+    # the last increment equalled the total and compact_last came out EXACT at scale and the comparison said nothing.  An accidental
     # cancellation is the one case where the wrong compaction looks right, and it is easier
     # to build by accident than it sounds.
     big = [(f"m{i % BIG_KEYS}", 1 + (i % 3)) for i in range(BIG_ENTRIES)]
@@ -1520,7 +1522,7 @@ def history_of(log, k):
 # The three variations.
 
 def the_cache_that_must_not_go_stale(log, live, compacted_start=True):
-    """Variation 1, surface: web infrastructure.  Keep an in-memory copy current.
+    """Variation 2, surface: web infrastructure.  Keep an in-memory copy current.
 
     Non-obvious point: this is `fold` at start-up, and the compacted log is exactly
     the cheap "somewhere" to fold from -- 2 entries instead of 9.  The subtlety is
@@ -1532,15 +1534,17 @@ def the_cache_that_must_not_go_stale(log, live, compacted_start=True):
     """
     base = list(compact(log) if compacted_start else log)
     t = fold(base)
-    version = len(log)              # the fold consumed the whole log's history
+    handover = len(log)             # the fold consumed the whole log's history
+    version = handover
     for entry in live:              # then follow live entries from that version on
         base.append(entry)
         t = fold(base)              # the same fold, now over base + what arrived since
         version += 1
-    return t, len(base), version
+    assert version == handover + len(live)
+    return t, len(base), handover
 
 def the_audit_log_that_was_compacted(log, k, n):
-    """Variation 2, surface: compliance.  A regulator asks what a record held two
+    """Variation 3, surface: compliance.  A regulator asks what a record held two
     years ago; the log was compacted last year.
 
     Non-obvious point: the answer is that the question cannot be answered, and the
@@ -1557,14 +1561,15 @@ def the_audit_log_that_was_compacted(log, k, n):
     return value_after(state_log, k, n), value_after(audit_log, k, n)
 
 def the_counter_changelog(deltas):
-    """Variation 3, surface: metrics.  The entries say what CHANGED ("+5"), not what
+    """Variation 4, surface: metrics.  The entries say what CHANGED ("+5"), not what
     the key became.  Fold them, and compact them.
 
-    Non-obvious point: the fold still works with + in place of =, and compaction
-    BREAKS -- you cannot keep "the last +5" and drop the earlier ones, because every
-    entry contributes.  The repair is to convert deltas to absolute values first,
-    which is `fold` and `emit` composed, and it shows why the log's FORMAT was the
-    first thing stated.  A log of deltas cannot be compacted; a log of states can.
+    Non-obvious point: the fold still works with + in place of =, and keep-the-last
+    compaction BREAKS -- you cannot keep "the last +5" and drop the earlier ones,
+    because every entry contributes.  The repair is to convert deltas to absolute
+    values first, which is `fold` and `emit` composed, and it shows why the log's
+    FORMAT was the first thing stated.  A log of deltas cannot be compacted by
+    keeping the last entry; it must be summed or converted to states first.
 
     Returns (table, table_after_naive_compaction, table_after_converting_first).
     """
@@ -1630,12 +1635,12 @@ def main():
           f"resurrects b: {fold(dropped)}")
 
     # variations
-    t1, read, version = the_cache_that_must_not_go_stale(CHANGELOG, [("a", 30)])
+    t1, read, handover = the_cache_that_must_not_go_stale(CHANGELOG, [("a", 30)])
     t2, read_full, _ = the_cache_that_must_not_go_stale(CHANGELOG, [("a", 30)], compacted_start=False)
     assert t1 == t2 == {"a": 30, "b": 21}, (t1, t2)
     assert read == 3 and read_full == 10, (read, read_full)
-    assert version == N + 1, version
-    print(f"\n  cache: same table {t1} from {read} entries instead of {read_full}, handover at version {version}")
+    assert handover == N, handover
+    print(f"\n  cache: same table {t1} from {read} entries instead of {read_full}, handover at version {handover}")
 
     state_ans, audit_ans = the_audit_log_that_was_compacted(CHANGELOG, ASKED, mid)
     assert state_ans == UNANSWERABLE and audit_ans == 8, (state_ans, audit_ans)
@@ -1687,7 +1692,7 @@ CHANGELOG = a=5  a=8  b=7  a=10  a=16  b=8  b=17  b=21  a=24
   value_after(compacted, 'a', 2)     = UNANSWERABLE
   with a tombstone for 'b': {'a': 24};  compacting the tombstone away resurrects b: {'a': 24, 'b': 21}
 
-  cache: same table {'a': 30, 'b': 21} from 3 entries instead of 10, handover at version 10
+  cache: same table {'a': 30, 'b': 21} from 3 entries instead of 10, handover at version 9
   audit: the state log says UNANSWERABLE, an uncompacted audit log says 8
   deltas: fold {'a': 10, 'b': 8}, compacting the deltas gives {'a': 2, 'b': 1} (wrong), converted first {'a': 10, 'b': 8}
 

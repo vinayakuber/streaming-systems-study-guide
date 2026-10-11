@@ -18,9 +18,9 @@ W = 3 -> 7 windows, 2 answers withheld
     so drift_at(1) = 0.666666666666667;  6 of 7 drift, worst 0.666666666666667 (= 2/3)
   EVERY value multiplied by 1e+16: 0 of 7 answers drift
 
-  time-based window (span 60): [(0, 10.0, 1), (10, 15.0, 2), (70, 25.0, 2), (71, 35.0, 2), (200, 50.0, 1)]
+  time-based window (span 60): [(0, 10.0, 1), (10, 15.0, 2), (70, 30.0, 1), (71, 35.0, 2), (200, 50.0, 1)]
   restart, window checkpointed : [5.0, 4.0, 5.0, 3.0, 5.3333, 4.6667, 7.0]
-  restart, total only          : [5.0, 4.0, 5.0, 5.3333, 8.3333, 9.6667, 12.3333]
+  restart, total only          : [5.0, 4.0, 5.0, 5.3333, 8.3333, 9.6667, 12.0]
 
   600 random (values, W) pairs: running total == recomputation, and the
   rolling maximum == max of every window.

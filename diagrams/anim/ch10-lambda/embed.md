@@ -8,7 +8,7 @@ The shape is sound — it genuinely delivers both low latency and eventual corre
 
 **And the drift has a predictable direction**, which is what makes it more than a theoretical risk. The batch layer has the whole input, so event time is the obvious choice; the speed layer sees arrivals, so arrival time is the obvious choice. Follow that through and **3 of the 4 windows disagree, by 26 in total** — with both layers internally consistent and neither containing a bug.
 
-**Kappa replaces the second layer with replay.** Take a concrete bug: key "a" is halved, so it reads 11 instead of 24 and the total reads 32 instead of 45. Under Lambda the fix must land in **2 places** and both must be verified. Under Kappa it lands in **1**, and replaying 9 events restores 24 and 45.
+**Kappa replaces the second layer with replay.** Take a concrete bug: each of key "a"'s values is halved and rounded down (5→2, 3→1, 2→1, 6→3, 8→4), so it reads 11 instead of 24 and the total reads 32 instead of 45. Under Lambda the fix must land in **2 places** and both must be verified. Under Kappa it lands in **1**, and replaying 9 events restores 24 and 45.
 
 Kappa does not make the fix cheaper to *write*. It makes it **impossible to apply inconsistently**, because there is only one place to apply it.
 

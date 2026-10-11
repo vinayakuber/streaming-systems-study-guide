@@ -33,7 +33,7 @@ _Also known as: SS Ch02 · Beam Model · Transformations · Windowing · Trigger
 
 Read the sliding row twice. Its results sum to 78 over a dataset containing 45, because each event falls into up to 2 overlapping windows. Nothing was duplicated — **overlap is a property of the windowing**, and partitioning windowings (fixed, global) preserve the total while overlapping ones do not.
 
-**And the two axes are genuinely independent.** Three transforms × three windowings is nine legal pipelines; picking a row constrains no column. So "we sum purchases" leaves the answer undetermined, and so does "we use session windows".
+**And the two axes are genuinely independent.** The grid in the walkthrough below picks 3 of those transforms and 3 of those windowings — 9 legal pipelines — and picking a row constrains no column. So "we sum purchases" leaves the answer undetermined, and so does "we use session windows".
 
 #### When each windowing is the right one, and what batch was doing all along
 
@@ -76,7 +76,7 @@ Same transform throughout — `sum(v)` — and four different shapes of answer. 
 
 <img src="../diagrams/anim/ch02-whatwhere/frames/step-03.svg" alt="Step 3: the two axes really are independent" width="1040">
 
-Nine cells and every one is a real pipeline you could run. The grid is the argument for separating the questions: "we sum purchases" names a row and leaves the answer undetermined, and "we use session windows" names a column and does the same. Both are needed before any number exists.
+9 cells and every one is a real pipeline you could run. The grid is the argument for separating the questions: "we sum purchases" names a row and leaves the answer undetermined, and "we use session windows" names a column and does the same. Both are needed before any number exists.
 
 </details>
 <details>
@@ -167,7 +167,7 @@ A window is useless until something decides to emit it. That decision is a **tri
 
 15, not 19: id 7 has not arrived. **The claim of completeness and the error are the same event** — the watermark was the pipeline's best estimate and it was wrong.
 
-**So a real pipeline wants three triggers on one window,** not a choice between them: **early** (speculative, before the watermark — 8, 15, 15), **on-time** (at the watermark — 15), and **late** (once per straggler — 19 at 12:04:40). They serve three different consumers and all three fire.
+**So a real pipeline wants three triggers on one window,** not a choice between them: **early** (speculative, before the watermark — 8, 15, 15, 15 at 12:01:00, 12:02:00, 12:03:00, 12:04:00), **on-time** (at the watermark — 15), and **late** (once per straggler — 19 at 12:04:40). They serve three different consumers and all three fire.
 
 **Allowed lateness** bounds the waiting: it is how long window state is kept after the watermark passes, which is garbage collection for that state. And it has an exact threshold here. When id 7 arrives, the watermark stands at 12:03:20 (200s); state survives while the watermark is below 12:02 + allowed, so **allowed lateness must be at least 81s** for the correction to land. At 80s the state is already gone and 15 stands forever.
 
@@ -183,7 +183,7 @@ Note that 81s is *not* id 7's 230s of skew, which is the number a reader would g
 
 **Set allowed lateness from your skew tail, then price the memory.** It keeps window state alive, so the bill is (open windows × state per window). With 4 windows that is nothing; with a million open session windows it is the dominant cost of the pipeline.
 
-**What this does not settle:** "when" produced 5 separate published values for ONE window, and nothing here says what a consumer should do with the second one. If a sink stored 15 and then receives 19, does it add or replace? That question is "how", and until it is answered the pipeline's correctness is undefined — not merely unoptimised.
+**What this does not settle:** "when" produced 6 separate published values for ONE window, and nothing here says what a consumer should do with the second one. If a sink stored 15 and then receives 19, does it add or replace? That question is "how", and until it is answered the pipeline's correctness is undefined — not merely unoptimised.
 
 #### Visual walkthrough — a clock trigger, a watermark trigger, and one threshold
 
@@ -232,60 +232,68 @@ Allowed lateness is how long a window's state is kept after the watermark passes
 
 #### When — stack and heap at every step
 
-**What is being answered.** What a trigger actually is, and where allowed lateness takes effect — as one `feed` function replayed over the stream.
+**What is being answered.** What a trigger actually is, and where allowed lateness takes effect — as a clock and one `feed` function replayed over the stream.
 
-Three predicates do all the work. `onTimeDue(i)` asks whether the watermark has passed the window end. `stillOpen(i)` asks whether the window's STATE is still held — and that is the only thing that decides whether a straggler can change an answer.
+`early(st, t)` is the clock trigger, fired from `main` whenever `t` comes round before the next arrival. `onTimeDue(i)` asks whether the watermark has passed the window end. `stillOpen(i)` asks whether the window's STATE is still held — and that is the only thing that decides whether a straggler can change an answer. Every event is fed, in the window or not, because any event can move the watermark.
 
-Step 3 is the one to read closely: the comparison is `watermarkAfter(7) < 120 + ALLOWED`, which is 200 < 201. One second lower and it fails. The threshold is 81s because of where the **watermark** stood — not because of id 7's 230s of skew.
+Step 4 is the one to read closely: the comparison is `watermarkAfter(7) < 120 + ALLOWED`, which is 200 < 201. One second lower and it fails. The threshold is 81s because of where the **watermark** stood — not because of id 7's 230s of skew.
 
 The animation steps through the code, holding each line long enough to read the STACK (call frames and their locals) and the HEAP (allocated arrays and objects) as they are AT THAT MOMENT. Expand any step to study it on its own.
 
-<img src="../diagrams/anim/ch02-when-memory/ch02-when-memory.svg" alt="When — stack and heap at every step, 4 steps showing stack and heap" width="980">
+<img src="../diagrams/anim/ch02-when-memory/ch02-when-memory.svg" alt="When — stack and heap at every step, 5 steps showing stack and heap" width="980">
 
 <details>
-<summary><b>Step 1 of 4</b> — the watermark has not passed 12:02, so nothing fires</summary>
+<summary><b>Step 1 of 5</b> — the clock fires before the watermark: an EARLY pane of 8</summary>
 
-<img src="../diagrams/anim/ch02-when-memory/frames/step-01.svg" alt="Step 1: the watermark has not passed 12:02, so nothing fires" width="980">
+<img src="../diagrams/anim/ch02-when-memory/frames/step-01.svg" alt="Step 1: the clock fires before the watermark: an EARLY pane of 8" width="980">
+
+Before event id 2 (seen at 12:01:33) is fed, `t` = 60 has come round, so the clock fires first and publishes `sum([0, 1])` = 8. It fires 4 times in all — 8, 15, 15, 15 — every one before the watermark passes 120 (12:02), so every one is speculative.
+
+</details>
+<details>
+<summary><b>Step 2 of 5</b> — the watermark has not passed 12:02, so no on-time pane</summary>
+
+<img src="../diagrams/anim/ch02-when-memory/frames/step-02.svg" alt="Step 2: the watermark has not passed 12:02, so no on-time pane" width="980">
 
 `watermarkAfter(3)` is 70, and `W0 + WIN` is 120, so 70 >= 120 is false and the window holds. Its state already contains ids 0, 1, 2 — the answer exists, it is just not claimed yet.
 
 </details>
 <details>
-<summary><b>Step 2 of 4</b> — it passes, and the ON-TIME pane is published</summary>
+<summary><b>Step 3 of 5</b> — it passes, and the ON-TIME pane is published</summary>
 
-<img src="../diagrams/anim/ch02-when-memory/frames/step-02.svg" alt="Step 2: it passes, and the ON-TIME pane is published" width="980">
+<img src="../diagrams/anim/ch02-when-memory/frames/step-03.svg" alt="Step 3: it passes, and the ON-TIME pane is published" width="980">
 
-`watermarkAfter(4)` jumped to 185, so the trigger fires and publishes `sum([0, 1, 2])` = **15**. The window's true total is 19. The pane and the error are produced by the same line, because the watermark's claim was wrong.
-
-</details>
-<details>
-<summary><b>Step 3 of 4</b> — id 7 arrives — and `open` is what decides its fate</summary>
-
-<img src="../diagrams/anim/ch02-when-memory/frames/step-03.svg" alt="Step 3: id 7 arrives — and `open` is what decides its fate" width="980">
-
-`watermarkAfter(7)` is 200 and the bound is 120 + ALLOWED. With ALLOWED = 81 that is 201, so 200 < 201 holds and the state survives. With ALLOWED = 80 the bound is 200 and the comparison fails — one second of configuration decides between 19 and 15.
+Event id 4 is not in the window (`winOf(245)` = 240), but it still moves the watermark: `watermarkAfter(4)` jumped to 185, so the trigger fires and publishes `sum([0, 1, 2])` = **15**. The window's true total is 19. The pane and the error are produced by the same line, because the watermark's claim was wrong.
 
 </details>
 <details>
-<summary><b>Step 4 of 4</b> — so one window published twice, and the second one is right</summary>
+<summary><b>Step 4 of 5</b> — id 7 arrives — and `open` is what decides its fate</summary>
 
-<img src="../diagrams/anim/ch02-when-memory/frames/step-04.svg" alt="Step 4: so one window published twice, and the second one is right" width="980">
+<img src="../diagrams/anim/ch02-when-memory/frames/step-04.svg" alt="Step 4: id 7 arrives — and `open` is what decides its fate" width="980">
 
-`final` is 19 and `fired` is 2: an ON-TIME pane of 15 and a LATE pane of 19. The window produced two published values for one question, which is correct behaviour — and it is exactly the situation the next concept, "how", exists to make safe for a consumer.
+`watermarkAfter(7)` is 200 and the bound is 120 + ALLOWED. With ALLOWED = 81 that is 201, so 200 < 201 holds, the state survives and a LATE pane of 19 follows. With ALLOWED = 80 the bound is 200, the comparison fails, `feed` returns before id 7 is added — one second of configuration decides between 19 and 15.
+
+</details>
+<details>
+<summary><b>Step 5 of 5</b> — so one window published 6 times, and the last one is right</summary>
+
+<img src="../diagrams/anim/ch02-when-memory/frames/step-05.svg" alt="Step 5: so one window published 6 times, and the last one is right" width="980">
+
+`final` is 19 and `fired` is 6: 4 EARLY panes (8, 15, 15, 15), an ON-TIME pane of 15 and a LATE pane of 19. The window produced 6 published values for one question, which is correct behaviour — and it is exactly the situation the next concept, "how", exists to make safe for a consumer.
 
 </details>
 
-<sub>The trigger firings and the 81s threshold are computed from the seed's watermarks and asserted. Generated by `node tools/gen_ch02.js` on `tools/memkit.js`.</sub>
+<sub>The trigger firings (computed by running this listing's logic over the seed) and the 81s threshold are derived from the seed's watermarks and asserted. Generated by `node tools/gen_ch02.js` on `tools/memkit.js`.</sub>
 
 <!-- ch02-when-memory:end -->
 
 ### How — accumulation
 
-> **Why this matters:** When a window emits more than once, the consumer must know whether each result replaces or refines the previous one, so this section covers the four accumulation modes that relate later panes to earlier ones.
+> **Why this matters:** When a window emits more than once, the consumer must know whether each result replaces or refines the previous one, so this section covers the three accumulation modes that relate later panes to earlier ones.
 
-1. **Accumulation relates panes** — The answer to "how" is the relationship between a window's successive results. **Accumulating mode adds to the previous pane; discarding mode replaces it; accumulating-and-retracting also emits a retraction so downstream can undo the old value.**
+1. **Accumulation relates panes** — The answer to "how" is the relationship between a window's successive results. **Accumulating mode makes each pane the window's total so far (a sink must replace); discarding mode makes each pane only the new data (a sink must sum); accumulating-and-retracting also emits a retraction so downstream can undo the old value.**
 
-2. **Why retractions exist** — If a downstream system stores the first result, a later refined result would double-count unless the old value is retracted. **Accumulating-and-retracting emits the delta and a retraction of the previous pane, so a sink can stay correct.** The previous value is read from the operator's **keyed state** — the running fold for that key — never by re-scanning the stream, which is immutable history.
+2. **Why retractions exist** — If a downstream system stores the first result, a later refined result would double-count unless the old value is retracted. **Accumulating-and-retracting emits a retraction of the previous pane followed by the new total, so a sink can stay correct.** The previous value is read from the operator's **keyed state** — the running fold for that key — never by re-scanning the stream, which is immutable history.
 
 3. **The four questions are a checklist** — Ask all four — what, where, when, how — of any pipeline and its behavior is fully specified. **Omit "when" and you cannot reason about latency; omit "how" and you cannot reason about correctness under refinement.**
 
@@ -423,17 +431,17 @@ Retracting emits 15, -15, 19 — the undo `0 - ONTIME` = -15 cancels what the si
 Concepts this chapter mentions but does not fully unpack are linked below — each pointer names the chapter where the concept is covered in depth and gives a concrete example that ties the two chapters together.
 
 - **[Chapter 1: Streaming 101 → Event time vs processing time](ch01-streaming-101.md#event-time-vs-processing-time)** — the "when" axis only matters because the two clocks disagree; ch01 pins down event time vs processing time and the lag between them.
-  - _Example:_ ch02's on-time trigger fires when the watermark passes the window end; ch01 explains why the watermark is needed at all — the same click at 12:00:59 processed at 12:04:11 lands in different windows under the two clocks.
+  - _Example:_ ch02's on-time trigger fires when the watermark passes the window end; ch01 explains why the watermark is needed at all — the seed's late click (id 7) at 12:00:50, processed at 12:04:40, lands in the 12:00 minute by event time and the 12:04 minute by processing time, and its 230 s of skew is about 5× the next worst.
 - **[Chapter 3: Watermarks → Propagation and correctness](ch03-watermarks.md#propagation-and-correctness)** — the watermark that drives this chapter's on-time trigger is defined in full in ch03 — perfect vs heuristic, the skew formula, and how it propagates as the minimum across inputs.
-  - _Example:_ ch02 says "the watermark passes 12:05:00"; ch03 shows where that number comes from — max_seen 12:08:30 − skew 120 s = 12:06:30 — and that a multi-input stage takes min(12:06:00, 12:04:30) = 12:04:30.
+  - _Example:_ ch02's on-time trigger fires when the watermark passes 12:02 (at 12:04:06); ch03 shows where that comes from — max seen 12:04:05 − skew 60 s = 12:03:05 — and that a two-source stage takes min(12:08:00, 12:03:20) = 12:03:20.
 - **[Chapter 4: Advanced Windowing → The window lifecycle](ch04-advanced-windowing.md#the-window-lifecycle)** — the "where" axis (windows) is named here but its full lifecycle — assign, merge, group, trigger, accumulate, garbage-collect — lives in ch04, with session merging as the canonical dynamic case.
-  - _Example:_ ch02's session window (30-min gap) opens s1; ch04 shows two sessions [12:00,12:10) and [12:40,12:50) merging into [12:00,12:50) when a bridge event lands at 12:20:00.
+  - _Example:_ ch02's session windows (120s gap) give key a 3 sessions — [12:00:01..12:00:03], [12:02:10..12:04:05], [12:09:00]; ch04 shows the published session changing: at gap 40 s id 7 (12:00:50) extends key b's already-emitted session [12:01:30] (7), forcing retract 7, emit 11; and with keys dropped at gap 47 s the same event bridges [12:00:01, 12:00:03] (8) and [12:01:30, 12:02:10] (9) into [12:00:01, 12:02:10] (21).
 - **[Chapter 6: Streams and Tables → The duality](ch06-streams-and-tables.md#the-duality)** — the "how" axis (accumulation, retractions) is the stream-table duality in motion — each pane is a changelog record, and the table is the accumulated view.
-  - _Example:_ ch02's accumulating-and-retracting mode (3 − 3 + 4 = 4) is ch06's changelog fold: retract the old value, set the new one, so a sink never double-counts.
+  - _Example:_ ch02's accumulating-and-retracting mode (15 − 15 + 19 = 19) is ch06's old → new changelog record: key a's last update 16 → 24 folds as 16 − 16 + 24 = 24 in a summing consumer, where a new-value-only record would give 40.
 
 ## System Design Interview
 
-> **The question:** Design a purchase-counting pipeline that answers what, where, when, and how for one result. Premise: a purchase arrives late, so the pipeline must close the window on the watermark and let allowed lateness correct the already-emitted count.
+> **The question:** Design a purchase-summing pipeline that answers what, where, when, and how for one result. Premise: a purchase arrives late, so the pipeline must close the window on the watermark and let allowed lateness correct the already-emitted sum.
 
 **The pipeline:** writer (event source) -> transport (stream) -> collector (window assigner) -> aggregator/store (per-window state) -> reader (dashboard)
 
@@ -443,7 +451,7 @@ Concepts this chapter mentions but does not fully unpack are linked below — ea
 
 _Role: writer — emits events with event time_
 
-- a purchase event {user: 42, amount: 10, event_time: "12:04:00"} is emitted
+- purchase id 7 {key: "b", v: 4, event_time: "12:00:50"} is emitted, but reaches the pipeline at 12:04:40
 - event time is stamped by the source, not the pipeline
 - events are immutable once produced
 
@@ -451,15 +459,15 @@ _Role: writer — emits events with event time_
 
 _Role: transport — carries events and computes the watermark_
 
-- the stream delivers the event and tracks the watermark = 12:05:00
-- the watermark says no events earlier than 12:05:00 will arrive
+- the stream tracks the watermark = max seen - 60s: 12:01:10 -> 12:03:05 after id 4 (seen 12:04:06)
+- the watermark says no events earlier than 12:03:05 will arrive — and id 7 (12:00:50) proves it wrong
 - network delay keeps the watermark behind the wall clock
 
 ### collector (window assigner)
 
 _Role: collector — assigns events to event-time windows_
 
-- the window assigner places the event in fixed window [12:00, 12:05)
+- the window assigner places id 7 in fixed 120s window [12:00, 12:02), by event time
 - a trigger decides when the window result is emitted
 - allowed lateness keeps the window open for stragglers
 
@@ -467,16 +475,16 @@ _Role: collector — assigns events to event-time windows_
 
 _Role: aggregator/store — holds the running sum per window_
 
-- window [12:00, 12:05) sum : 0 -> 10 as the purchase folds in
-- an early pane emits {sum: 10}, an on-time pane re-emits {sum: 10}
-- a late straggler updates sum : 10 -> 20 if inside allowed lateness
+- window [12:00, 12:02) sum : 0 -> 15 as ids 0, 1, 2 fold in
+- early panes every 60s emit {sum: 8} at 12:01:00, then {sum: 15} at 12:02:00, 12:03:00 and 12:04:00; the on-time pane at 12:04:06 emits {sum: 15}
+- id 7 updates sum : 15 -> 19 if allowed lateness is at least 81s
 
 
 <!-- ch02-system:begin — generated by tools/gen_ch02.js; do not hand-edit -->
 
 #### Why one result needs all four answers before it is defined
 
-**The question.** Count purchases per window. A purchase arrives late, so the pipeline must close the window on the watermark and let allowed lateness correct the already-emitted count.
+**The question.** Sum purchase values per window. A purchase arrives late, so the pipeline must close the window on the watermark and let allowed lateness correct the already-emitted sum.
 
 **The pipeline:** writer (event source) → transport (stream, which also computes the watermark) → collector (window assigner) → aggregator/store (per-window state).
 
@@ -487,11 +495,13 @@ Note where the four questions live: **WHERE** is the collector's single rule (as
 **So here is what a consumer actually receives, in order:**
 
 - 12:01:00 — early pane **8** (ids 0, 1 had arrived)
-- 12:02:00 — early pane **15**
-- 12:04:06 — on-time pane **15**, the watermark having passed 12:02
-- 12:04:40 — retraction **-15** then late pane **19**
+- 12:02:00 — early pane **15** — published as retraction **-8** then **15**
+- 12:03:00 — early pane **15** — published as retraction **-15** then **15**
+- 12:04:00 — early pane **15** — published as retraction **-15** then **15**
+- 12:04:06 — on-time pane **15** — published as retraction **-15** then **15**, the watermark having passed 12:02
+- 12:04:40 — late pane **19** — published as retraction **-15** then **19**
 
-Five values for one question, over 220s. Every one was the right answer to "what do you know now?", and a consumer that treats the first as final is the bug.
+11 values for one question, over 220s, and an add-only sink lands on 19. Every firing was the right answer to "what do you know now?", and a consumer that treats the first as final is the bug.
 
 #### When this design is right, the two thresholds, and four gaps
 
@@ -499,7 +509,7 @@ Five values for one question, over 220s. Every one was the right answer to "what
 
 **1. Allowed lateness ≥ 81s.** Below that, window state is already collected when id 7 arrives: the event is discarded and 15 stands forever, 21% low. At or above it, the late trigger fires and corrects to 19. The threshold comes from the watermark's position (200s) when the straggler lands — **not** from its 230s of skew.
 
-**2. The accumulation mode must match the sink.** Retracting into a summing sink gives 19; accumulating into the same sink gives 34. These are independent of setting 1 — correct lateness with a mismatched sink still produces 34.
+**2. The accumulation mode must match the sink.** Retracting into a summing sink gives 19; accumulating into the same sink gives 87, because each of the 6 panes is a running total added on top of the last. These are independent of setting 1 — correct lateness with a mismatched sink still produces 87.
 
 **Use this design when the consumer can accept a moving number.** A dashboard, a cache, a downstream aggregation: all fine. An append-only ledger that bills on the first value published is not, and that is a contract problem rather than a configuration one.
 
@@ -508,13 +518,13 @@ Five values for one question, over 220s. Every one was the right answer to "what
 1. **Allowed lateness is memory.** Holding state past the watermark costs (open windows × state per window). With 4 windows it is free; with a million open windows it is the pipeline's dominant cost.
 2. **Retractions require a sink that accepts negatives.** -15 has to be representable and meaningful downstream.
 3. **The 81s threshold was computed from watermarks visible in full.** A live pipeline sets that number before observing them, and is therefore guessing.
-4. **Only one window was specified.** The window starting 12:08 is never published by ANY of the three triggers, because the watermark never passes its end — a complete answer to all four questions still says nothing about a window whose "when" never arrives.
+4. **Only one window was specified.** The window starting 12:08 is never published by the on-time or late trigger, because the watermark never passes its end — only the speculative early pane (8 at 12:10:00) ever reports it, so its only published value is one the pipeline never claims is complete. A complete answer to all four questions still says nothing about a window whose "when" never arrives.
 
-#### Visual walkthrough — four stages, five published values, two thresholds
+#### Visual walkthrough — four stages, 11 published values, two thresholds
 
 The animation loops through all 4 steps. Expand any step to study it on its own.
 
-<img src="../diagrams/anim/ch02-system/ch02-system.svg" alt="Visual walkthrough — four stages, five published values, two thresholds, 4 animated steps" width="1040">
+<img src="../diagrams/anim/ch02-system/ch02-system.svg" alt="Visual walkthrough — four stages, 11 published values, two thresholds, 4 animated steps" width="1040">
 
 <details>
 <summary><b>Step 1 of 4</b> — the pipeline, and the one window it is specified for</summary>
@@ -529,7 +539,7 @@ A deliberately small design, so every number is checkable. The four questions ar
 
 <img src="../diagrams/anim/ch02-system/frames/step-02.svg" alt="Step 2: the publish sequence, with real times" width="1040">
 
-Read the column: 8, 15, 15, then -15 and 19. One query, one window, five published values across 220s — and every one of them was the right answer to "what do you know now?". A consumer that treats the first as final is the bug, not the pipeline.
+Read the column: 8, -8, 15, -15, 15, -15, 15, -15, 15, -15, 19. One query, one window, 11 published values across 220s, summing to 19 — and every firing was the right answer to "what do you know now?". A consumer that treats the first as final is the bug, not the pipeline.
 
 </details>
 <details>
@@ -545,34 +555,34 @@ Two settings, and each has a threshold that is a number rather than a judgement.
 
 <img src="../diagrams/anim/ch02-system/frames/step-04.svg" alt="Step 4: and what this design does NOT settle" width="1040">
 
-The last gap is the sharpest: this chapter fully specified ONE window and the final window of the same dataset is never published by any of the three triggers, because the watermark never passes its end. A complete answer to all four questions still says nothing about a window whose "when" never arrives.
+The last gap is the sharpest: this chapter fully specified ONE window, and the final window of the same dataset is never published by the on-time or late trigger, because the watermark never passes its end — only the clock reports it (8 at 12:10:00), a value the pipeline never claims is complete. A complete answer to all four questions still says nothing about a window whose "when" never arrives.
 
 </details>
 
-<sub>The publish sequence, the 81s lateness threshold and the 34-vs-19 sink outcomes are all derived from the seed and asserted. Generated by `node tools/gen_ch02.js`.</sub>
+<sub>The publish sequence, the 81s lateness threshold and the 87-vs-19 sink outcomes are all derived from the seed and asserted. Generated by `node tools/gen_ch02.js`.</sub>
 
 <!-- ch02-system:end -->
 
 <!-- ch02-system-memory:begin — generated by tools/gen_ch02.js; do not hand-edit -->
 
-#### The purchase counter — stack and heap at every step
+#### The purchase summer — stack and heap at every step
 
 **What is being answered.** The four questions as four lines of one loop, with the real published values.
 
-`SPEC` holds the four answers as data: `"sum"`, `"fixed 120s"`, early every 60s with allowed lateness 81s, and `"retracting"`. Each step below highlights the line that implements one of them.
+`SPEC` holds the four answers as data: `"sum"`, `"fixed 120s"`, early every 60s with allowed lateness 81s, and `"retracting"`. Each step below highlights the line that implements one of them. Run over the seed, the window fires 6 times — EARLY 8, EARLY 15, EARLY 15, EARLY 15, ON-TIME 15, LATE 19 — and the sink receives 11 values.
 
-Two lines are worth reading twice. The `continue` in step 2 is where allowed lateness takes effect — one second lower and id 7 disappears. The retraction in step 3 is what keeps a sink that can only ADD on the right answer; skip it and `stored` ends at 34 instead of 19.
+Two lines are worth reading twice. The `break` in step 2 is where allowed lateness takes effect — one second lower and id 7 disappears. The retraction in step 3 is what keeps a sink that can only ADD on the right answer; skip it and `stored` ends at 87 instead of 19.
 
 The animation steps through the code, holding each line long enough to read the STACK (call frames and their locals) and the HEAP (allocated arrays and objects) as they are AT THAT MOMENT. Expand any step to study it on its own.
 
-<img src="../diagrams/anim/ch02-system-memory/ch02-system-memory.svg" alt="The purchase counter — stack and heap at every step, 4 steps showing stack and heap" width="980">
+<img src="../diagrams/anim/ch02-system-memory/ch02-system-memory.svg" alt="The purchase summer — stack and heap at every step, 4 steps showing stack and heap" width="980">
 
 <details>
-<summary><b>Step 1 of 4</b> — WHERE: anything outside this window is skipped</summary>
+<summary><b>Step 1 of 4</b> — WHERE: anything outside this window adds nothing</summary>
 
-<img src="../diagrams/anim/ch02-system-memory/frames/step-01.svg" alt="Step 1: WHERE: anything outside this window is skipped" width="980">
+<img src="../diagrams/anim/ch02-system-memory/frames/step-01.svg" alt="Step 1: WHERE: anything outside this window adds nothing" width="980">
 
-`winOf(130)` = 120, which is not W0 = 0, so event id 3 is skipped entirely. That one line is the whole of the collector's job — the WHERE answer — and it reads `e.et`, never the arrival time.
+`winOf(130)` = 120, which is not W0 = 0, so event id 3 is never added to `ids`. That one line is the whole of the collector's job — the WHERE answer — and it reads `e.et`, never the arrival time. The event still passes through the loop, because its arrival is what lets the clock and the watermark move.
 
 </details>
 <details>
@@ -580,7 +590,7 @@ The animation steps through the code, holding each line long enough to read the 
 
 <img src="../diagrams/anim/ch02-system-memory/frames/step-02.svg" alt="Step 2: WHEN: the allowed-lateness check is what can drop an event" width="980">
 
-For id 7 this is 200 >= 120 + 81, i.e. 200 >= 201 — false, so the event is kept. Lower `SPEC.allowed` by one second and this `continue` fires: the event vanishes and the answer stays 15 forever. One line, one config value, two different final numbers.
+For id 7 this is 200 >= 120 + 81, i.e. 200 >= 201 — false, so the event is kept. Lower `SPEC.allowed` by one second and this `break` fires: the event vanishes and the answer stays 15 forever. One line, one config value, two different final numbers.
 
 </details>
 <details>
@@ -588,7 +598,7 @@ For id 7 this is 200 >= 120 + 81, i.e. 200 >= 201 — false, so the event is kep
 
 <img src="../diagrams/anim/ch02-system-memory/frames/step-03.svg" alt="Step 3: HOW: the refinement emits an undo before the new total" width="980">
 
-`publish(dash, -15)` takes `stored` from 15 back to 0, then the fall-through publishes 19. The sink only ever adds, and still ends up correct. Change `SPEC.how` to `"accumulating"` and the retraction line is skipped — `stored` becomes 34.
+`publish(dash, -15)` takes `stored` from 15 back to 0, then the fall-through publishes 19. Every refinement before this one did the same — 5 refinements, 5 undos — so the sink only ever adds, and still ends up correct. Change `SPEC.how` to `"accumulating"` and the retraction line is skipped: the sink receives 8, 15, 15, 15, 15, 19 and `stored` becomes 87.
 
 </details>
 <details>
@@ -596,11 +606,11 @@ For id 7 this is 200 >= 120 + 81, i.e. 200 >= 201 — false, so the event is kep
 
 <img src="../diagrams/anim/ch02-system-memory/frames/step-04.svg" alt="Step 4: WHAT: and the consumer ends on the right number" width="980">
 
-`final` = 19 after `count` = 4 published values. All four answers were needed to get here: WHERE picked the 4 events, WHAT summed them, WHEN decided that 15 goes out first and that id 7 is still admissible, and HOW made the correction safe for a sink that can only add.
+`final` = 19 after `count` = 11 published values: 8, -8, 15, -15, 15, -15, 15, -15, 15, -15, 19. All four answers were needed to get here: WHERE picked the 4 events, WHAT summed them, WHEN decided that 8 goes out first and that id 7 is still admissible, and HOW made every correction safe for a sink that can only add.
 
 </details>
 
-<sub>The publish sequence, the lateness comparison and both sink outcomes are derived from the seed and asserted. Generated by `node tools/gen_ch02.js` on `tools/memkit.js`.</sub>
+<sub>The publish sequence (computed by running this listing's logic over the seed), the lateness comparison and both sink outcomes are derived from the seed and asserted. Generated by `node tools/gen_ch02.js` on `tools/memkit.js`.</sub>
 
 <!-- ch02-system-memory:end -->
 
@@ -608,7 +618,7 @@ For id 7 this is 200 >= 120 + 81, i.e. 200 >= 201 — false, so the event is kep
 
 ### Q1
 
-A real-time dashboard sums purchases per 5-minute window, but it can't say whether a number is final — an event that happened at 12:04 can still arrive after the window was shown.
+A real-time dashboard sums purchases per 2-minute window, but it can't say whether a number is final — a purchase that happened at 12:00:50 can still arrive at 12:04:40, after window [12:00, 12:02) was shown.
 
 **Interviewer's question:** How do you decide when a window's result is ready to emit, and what do you do about events that arrive later?
 
@@ -621,11 +631,11 @@ A real-time dashboard sums purchases per 5-minute window, but it can't say wheth
 - Allowed lateness — bounds late updates
 
 ```java
-// window [12:00,12:05), sum = 3
-//   watermark 12:05:00 -> on-time trigger -> emit {sum:3}
-//   straggler event_time 12:04:59 at 12:06 -> allowed lateness 1 min
-//     -> update sum 3->4, emit late pane {sum:4}
-//   beyond allowed lateness -> drop the straggler
+// window [12:00,12:02), ids 0,1,2,7, true sum 19
+//   watermark 12:03:05 (after id 4) -> on-time trigger -> emit {sum:15}
+//   id 7 (event_time 12:00:50) arrives 12:04:40, watermark 12:03:20
+//   allowed lateness >= 81s -> sum 15->19, emit late pane {sum:19}
+//   allowed lateness 80s -> state gone, id 7 dropped, 15 stands
 ```
 
 _This is exactly the When (triggers + watermarks) and How (accumulation) material in this chapter._
@@ -648,9 +658,9 @@ Two teams build 'the same' streaming aggregation, but one emits a running total 
 - Sink — applies retractions correctly
 
 ```java
-// accumulating : sink = 3 then 3+4 = 7 -> double counts
-// retracting  : pane1 {sum:3} -> retract -> pane2 {sum:4}
-//   sink sees 3, then -3 +4 = 4 -> correct
+// accumulating : sink = 15 then 15+19 = 34 -> double counts by 15
+// retracting  : pane1 {sum:15} -> retract {sum:-15} -> pane2 {sum:19}
+//   sink sees 15, then -15 +19 = 19 -> correct
 ```
 
 _This is exactly the How (accumulation) axis in this chapter._
@@ -669,14 +679,6 @@ _From the 28 problems:_ 21-ad-click-aggregation
 ### The Solution
 
 Transformations are the computations — sum, filter, join, keyed aggregation — applied to the data.
-
-```java
-// window [12:00,12:05), sum = 3
-//   watermark 12:05:00 -> on-time trigger -> emit {sum:3}
-//   straggler event_time 12:04:59 at 12:06 -> allowed lateness 1 min
-//     -> update sum 3->4, emit late pane {sum:4}
-//   beyond allowed lateness -> drop the straggler
-```
 
 
 ### Key Facts
@@ -849,7 +851,7 @@ Transformations are the computations — sum, filter, join, keyed aggregation �
 
 <details><summary>Reveal answer</summary>
 
-**C.** Accumulating-and-retracting emits the delta plus a retraction of the previous pane so sinks can undo the old value.
+**C.** Accumulating-and-retracting emits a retraction of the previous pane followed by the new total, so an add-only sink lands on the right value.
 
 </details>
 

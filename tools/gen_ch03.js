@@ -23,6 +23,8 @@ const PERFECT = EVENTS.map((_, i) => {
   return rest.length ? Math.min(...rest.map(e => e.et)) : Infinity;
 });
 const PERF_STALL = PERFECT.filter(w => w === PERFECT[1]).length;           // how long it is stuck
+const STALL_FIRST = PERFECT.indexOf(PERFECT[1]), STALL_END = PERFECT.lastIndexOf(PERFECT[1]);
+const STALL_HEUR = WATERMARKS[STALL_END];                                    // where the heuristic got to while the perfect one was stuck
 const perfCloses = PERFECT.findIndex(w => w >= W0_END);
 const heurCloses = WATERMARKS.findIndex(w => w >= W0_END);
 const PERF_VALUE = SUM(EVENTS.filter((e, i) => i <= perfCloses && winOf(e.et) === W0).map(e => e.id));
@@ -45,6 +47,12 @@ const SWEEP = LAGS.map(sweep);
 const LAG_MIN = maxEtThrough(LI - 1) - W0_END + 1;
 const CORRECT_SWEEP = sweep(LAG_MIN);
 const LAG_PRICE = CORRECT_SWEEP.closeAt - sweep(LAG).closeAt;
+// the same comparison for EVERY window: the price lands on one window, not all of them
+const closeAtFor = (lag, w) => { const i = sweep(lag).wm.findIndex(x => x >= w + WIN); return i === -1 ? null : EVENTS[i].pt; };
+const PER_WIN_PRICE = WIN_STARTS.map(w => ({ w, a: closeAtFor(LAG, w), b: closeAtFor(LAG_MIN, w) }));
+const PRICED = PER_WIN_PRICE.filter(p => p.a !== null && p.b !== null && p.b > p.a);
+const UNPRICED = PER_WIN_PRICE.filter(p => p.a !== null && p.b !== null && p.b === p.a);
+const NEVER = PER_WIN_PRICE.filter(p => p.a === null && p.b === null);
 // PER-SOURCE watermarks, then their minimum — a stage cannot claim more
 // completeness than its least-complete input
 const perSource = EVENTS.map((_, i) => {
@@ -78,11 +86,18 @@ if (LAG_MIN >= L.pt - L.et) fail(`the threshold ${LAG_MIN} is not below the stra
 if (!BLOCKED.length) fail('no window is blocked by the per-source minimum; propagation would have no observable cost');
 if (REGRESSIONS.length < 2) fail(`the naive formula regresses ${REGRESSIONS.length} times — need at least two to show why max() is in the formula`);
 if (LAG_PRICE <= 0) fail('the correct lag is not slower than the default');
+if (PRICED.length !== 1 || PRICED[0].w !== W0 || PRICED[0].b - PRICED[0].a !== LAG_PRICE) fail('the latency price is no longer confined to W0; the per-window wording needs revisiting');
+if (PRICED.length + UNPRICED.length + NEVER.length !== WIN_STARTS.length) fail('a window closes under one lag and never under the other; the per-window wording does not cover it');
+if (STALL_FIRST !== 1 || STALL_END - STALL_FIRST + 1 !== PERF_STALL) fail('the perfect watermark stall is not one contiguous run starting at index 1');
 
 const W = 1140;
 const secs = (n) => `${n}s`;
 const mm = (sec) => hhmmss(sec).slice(0, 5);
 const wmTxt = (w) => w === null ? 'no claim' : w === Infinity ? 'everything' : w < 0 ? 'none yet' : hhmmss(w);
+// a value a formula really produced, shown even when it is before 12:00:00 — 'none yet' would hide the drop
+const etTxt = (w) => { if (w >= 0) return hhmmss(w); const t = 12 * 3600 + w; return [Math.floor(t / 3600), Math.floor(t / 60) % 60, t % 60].map(n => String(n).padStart(2, '0')).join(':'); };
+const nWin = (n) => `${n} window${n === 1 ? '' : 's'}`;
+const winList = (ws) => ws.map(w => `[${mm(w)}, ${mm(w + WIN)})`).join(', ');
 
 // ======================== CONCEPT 1 — WHAT A WATERMARK IS ====================
 const C1 = [
@@ -121,9 +136,9 @@ const C1 = [
       s += c.line(c.P.main.x + 60, c.P.main.y + 170, 'heuristic (row 2) advances to ' + hhmmss(WATERMARKS[heurCloses]) + ' by event id ' + EVENTS[heurCloses].id + ' · perfect (row 3) is stuck at ' + hhmmss(PERFECT[1]), { size: 11, weight: 700, fill: c.C.line, band: 'p3' });
       return s + c.note('p4', c.P.main.x + 24, c.P.main.y + 184, 1040, [
         `The perfect watermark cannot pass ${hhmmss(PERFECT[1])} for ${PERF_STALL} consecutive events, because id ${L.id} (${hhmmss(L.et)}) is still to come.`,
-        `The heuristic advanced to ${hhmmss(WATERMARKS[heurCloses])} in that same span. It bought ${secs(WATERMARKS[heurCloses] - PERFECT[1])} of apparent progress by being wrong.`,
+        `The heuristic advanced to ${hhmmss(STALL_HEUR)} in that same span. It bought ${secs(STALL_HEUR - PERFECT[1])} of apparent progress by being wrong.`,
       ], c.C.hot, c.C.hotFill); },
-    cap: `This is the clearest statement of what a heuristic watermark is FOR. The perfect watermark is correct and useless — it sits at ${hhmmss(PERFECT[1])} for ${PERF_STALL} of the ${EVENTS.length} events, so nothing can be emitted. The heuristic reaches ${hhmmss(WATERMARKS[heurCloses])} in the same span, and every bit of that ${secs(WATERMARKS[heurCloses] - PERFECT[1])} of progress is an unverified guess.` },
+    cap: `This is the clearest statement of what a heuristic watermark is FOR. The perfect watermark is correct and useless — it sits at ${hhmmss(PERFECT[1])} for ${PERF_STALL} of the ${EVENTS.length} events, so nothing can be emitted. The heuristic reaches ${hhmmss(STALL_HEUR)} in the same span, and every bit of that ${secs(STALL_HEUR - PERFECT[1])} of progress is an unverified guess.` },
   { t: 'and that is exactly the price of the on-time answer', draw: (c) =>
       c.panel('THE SAME WINDOW, UNDER BOTH WATERMARKS', 'p')
       + c.mapRows('pr', c.P.main.x + 24, c.P.main.y + 52, [
@@ -173,14 +188,14 @@ const C2 = [
       + c.mapRows('th', c.P.main.x + 24, c.P.main.y + 52, [
         [`skew = ${secs(LAG_MIN - 1)}`, `publishes ${sweep(LAG_MIN - 1).value} at ${hhmmss(sweep(LAG_MIN - 1).closeAt)} — still wrong`],
         [`skew = ${secs(LAG_MIN)}`, `publishes ${CORRECT_SWEEP.value} at ${hhmmss(CORRECT_SWEEP.closeAt)} — correct`],
-        [`the latency added`, `${secs(LAG_PRICE)} later than the ${secs(LAG)} default, for every window`],
+        [`the latency added`, `${secs(LAG_PRICE)} later than the ${secs(LAG)} default, on ${winList(PRICED.map(p => p.w))} only`],
         [`the straggler's actual skew`, `${secs(L.pt - L.et)} — NOT the threshold, and much larger`],
       ], { w: 1040, rh: 36, hot: 1, label: 'one second of configuration separates the first two rows' })
       + c.note('t1', c.P.main.x + 24, c.P.main.y + 212, 1040, [
         `The threshold is ${secs(LAG_MIN)} because the watermark only has to stay below the WINDOW END (${mm(W0_END)}) until id ${L.id} lands — it never has to reach back to ${hhmmss(L.et)}.`,
         `So it is derived from ${hhmmss(maxEtThrough(LI - 1))} − ${mm(W0_END)}: the highest event time seen before the straggler, minus the window's end. Not from the straggler's skew.`,
       ], c.C.warn, c.C.warnFill),
-    cap: `The number a reader expects here is ${secs(L.pt - L.et)} — the straggler's skew. The actual threshold is ${secs(LAG_MIN)}, and the derivation is in the note: the watermark only needs to stay below the window's END, not below the late event's event time. Worth knowing, because tuning skew to your worst observed delay over-pays by ${secs(L.pt - L.et - LAG_MIN)} on every window.` },
+    cap: `The number a reader expects here is ${secs(L.pt - L.et)} — the straggler's skew. The actual threshold is ${secs(LAG_MIN)}, and the derivation is in the note: the watermark only needs to stay below the window's END, not below the late event's event time. Worth knowing, because tuning skew to your worst observed delay holds every watermark ${secs(L.pt - L.et - LAG_MIN)} further back than this window needs.` },
   { t: 'and per-source tracking beats one global guess', draw: (c) =>
       c.panel('ONE WATERMARK PER SOURCE, THEN THE MINIMUM', 'p')
       + c.mapRows('ps', c.P.main.x + 24, c.P.main.y + 52, [
@@ -193,7 +208,7 @@ const C2 = [
         `Per-source is SAFER and slower: window${BLOCKED.length > 1 ? 's' : ''} ${BLOCKED.map(w => `[${mm(w)}, ${mm(w + WIN)})`).join(', ')} would close under the global watermark and stay open under the minimum.`,
         `That is the cost of the correct answer here — ${BLOCKED.map(w => SUM(WINDOWS[w])).join(' + ')} withheld because an idle source cannot vouch for it.`,
       ], c.C.warn, c.C.warnFill),
-    cap: `Tracking per source means one idle source holds the whole stage back — source "${IDLE_KEY}" stops at ${wmTxt(perSource[END][IDLE_KEY])} while "${BUSY_KEY}" reaches ${wmTxt(perSource[END][BUSY_KEY])}, and the stage must claim the lower. That is correct and it costs ${BLOCKED.length} window's output (${BLOCKED.map(w => SUM(WINDOWS[w])).join(', ')}). Real systems add idleness detection precisely to escape this, and that is a decision to declare a source finished.` },
+    cap: `Tracking per source means one idle source holds the whole stage back — source "${IDLE_KEY}" stops at ${wmTxt(perSource[END][IDLE_KEY])} while "${BUSY_KEY}" reaches ${wmTxt(perSource[END][BUSY_KEY])}, and the stage must claim the lower. That is correct and it costs ${nWin(BLOCKED.length)}' output (${BLOCKED.map(w => SUM(WINDOWS[w])).join(', ')}). Real systems add idleness detection precisely to escape this, and that is a decision to declare a source finished.` },
 ];
 
 // ======================== CONCEPT 3 — PROPAGATION ===========================
@@ -241,7 +256,7 @@ const C3 = [
       + c.note('x1', c.P.main.x + 24, c.P.main.y + 46, 1040, [`With no watermark, window [${mm(W0)}, ${mm(W0_END)}) can never be emitted: on an unbounded stream there is no moment at which "everything has arrived" becomes true.`], c.C.hot, c.C.hotFill)
       + c.note('x2', c.P.main.x + 24, c.P.main.y + 112, 1040, [`The alternatives are a processing-time trigger (which answers a different question) or waiting forever (which answers none). The watermark is what converts an unbounded stream into one with a notion of PROGRESS.`], c.C.good, c.C.goodFill)
       + c.note('x3', c.P.main.x + 24, c.P.main.y + 178, 1040, [`The price, stated plainly: every on-time answer in this book is published on an estimate that was ${Math.round(100 * (W0_TRUE - HEUR_VALUE) / W0_TRUE)}% wrong for this window, and would have been correct ${secs(CORRECT_COST)} later.`], c.C.warn, c.C.warnFill)
-      + c.note('x4', c.P.main.x + 24, c.P.main.y + 244, 1040, [`And the per-source minimum shows the structural limit: ${BLOCKED.length} window (${BLOCKED.map(w => SUM(WINDOWS[w])).join(', ')}) is withheld because one source went quiet, which no amount of skew tuning fixes.`], c.C.blue, c.C.blueFill),
+      + c.note('x4', c.P.main.x + 24, c.P.main.y + 244, 1040, [`And the per-source minimum shows the structural limit: ${nWin(BLOCKED.length)} (${BLOCKED.map(w => SUM(WINDOWS[w])).join(', ')}) ${BLOCKED.length === 1 ? 'is' : 'are'} withheld because one source went quiet, which no amount of skew tuning fixes.`], c.C.blue, c.C.blueFill),
     cap: `The honest summary of the chapter: watermarks do not make event-time processing correct, they make it *possible*. Without one there is no moment to emit [${mm(W0)}, ${mm(W0_END)}) at all. With one, it is emitted ${Math.round(100 * (W0_TRUE - HEUR_VALUE) / W0_TRUE)}% wrong and correctable — and that trade is the foundation everything later in the book is built on.` },
 ];
 
@@ -264,11 +279,11 @@ const C4 = [
       let s = c.panel('WHY max() IS IN THE FORMULA', 'a');
       s += c.line(c.P.main.x + 24, c.P.main.y + 46, `row 2 = this event's own time − ${secs(LAG)} (naive)  ·  row 3 = max seen − ${secs(LAG)} (correct)`, { size: 11, weight: 700, fill: c.C.line });
       s += c.cells('g0', c.P.main.x + 60, c.P.main.y + 62, EVENTS.map(e => `id ${e.id}`), { cw: 110, ch: 24, size: 11, fill: c.C.cold });
-      s += c.cells('g1', c.P.main.x + 60, c.P.main.y + 94, NAIVE.map(w => wmTxt(w).replace('12:', '')), { cw: 110, ch: 26, size: 10,
+      s += c.cells('g1', c.P.main.x + 60, c.P.main.y + 94, NAIVE.map((w, i) => (REGRESSIONS.some(r => r.i === i) ? etTxt(w) : wmTxt(w)).replace('12:', '')), { cw: 110, ch: 26, size: 10,
         hotSet: new Set(REGRESSIONS.map(r => r.i)), hotFill: c.C.hotFill, hotEdge: c.C.hot });
       s += c.cells('g2', c.P.main.x + 60, c.P.main.y + 126, WATERMARKS.map(w => wmTxt(w).replace('12:', '')), { cw: 110, ch: 26, size: 10, fill: c.C.goodFill, edge: c.C.good });
       return s + c.note('g3', c.P.main.x + 24, c.P.main.y + 170, 1040, [
-        `The naive row regresses ${REGRESSIONS.length} times: ${REGRESSIONS.map(r => `${wmTxt(r.from)} → ${wmTxt(r.to)} (−${secs(r.from - r.to)})`).join(' and ')}.`,
+        `The naive row regresses ${REGRESSIONS.length} times: ${REGRESSIONS.map(r => `${etTxt(r.from)} → ${etTxt(r.to)} (−${secs(r.from - r.to)})`).join(' and ')}.`,
         `A watermark that moves backwards would RE-OPEN a window that had already been closed and published, so every downstream guarantee collapses. \`max()\` is what makes that impossible.`,
       ], c.C.hot, c.C.hotFill); },
     cap: `Two formulas differing by one function call. \`e.et − skew\` looks equivalent and is not: it falls back ${secs(REGRESSIONS[0].from - REGRESSIONS[0].to)} at id ${EVENTS[REGRESSIONS[0].i].id} and ${secs(REGRESSIONS[1].from - REGRESSIONS[1].to)} at id ${EVENTS[REGRESSIONS[1].i].id}. Monotonicity is not a nicety — a backwards watermark un-closes a published window, and nothing downstream is prepared for that.` },
@@ -305,7 +320,7 @@ const DIAGRAMS = [
       `Monotonicity is not an accident. Event times in this dataset go backwards ${EVENTS.filter((e, i) => i > 0 && e.et < EVENTS[i - 1].et).length} times — id ${EVENTS[6].id} at ${hhmmss(EVENTS[6].et)} arrives after id ${EVENTS[5].id} at ${hhmmss(EVENTS[5].et)}, and id ${L.id} at ${hhmmss(L.et)} arrives last of all. The watermark never decreases, because it is computed from the **maximum** event time seen, which cannot shrink.`, '',
       `**It is a claim about completeness, not a clock reading.** After event id ${EVENTS[heurCloses].id} the watermark is ${hhmmss(WATERMARKS[heurCloses])} while the wall clock says ${hhmmss(EVENTS[heurCloses].pt)}. Those are not comparable numbers: one asserts which events can still arrive, the other says what time it is. And the assertion is **false** — id ${L.id} (${hhmmss(L.et)}) has not arrived.`, '',
       `**A perfect watermark is possible in principle.** Define it as the largest time *t* for which no event with event time below *t* is still to come. Compute it over this stream and it sits at **${hhmmss(PERFECT[1])} for ${PERF_STALL} of the ${EVENTS.length} events**, because id ${L.id} is always still coming. It is correct and useless: nothing can be emitted while it is stalled.`, '',
-      `The heuristic reached ${hhmmss(WATERMARKS[heurCloses])} over that same span — **${secs(WATERMARKS[heurCloses] - PERFECT[1])} of apparent progress, all of it an unverified guess.**`, '',
+      `The heuristic reached ${hhmmss(STALL_HEUR)} over that same span — **${secs(STALL_HEUR - PERFECT[1])} of apparent progress, all of it an unverified guess.**`, '',
       `**And that is exactly the price of the on-time answer.** Window [${mm(W0)}, ${mm(W0_END)}) holds ids ${W0_IDS.join(', ')}, true sum **${W0_TRUE}**. Under the heuristic it closes after event id ${EVENTS[heurCloses].id} and publishes **${HEUR_VALUE}** at ${hhmmss(EVENTS[heurCloses].pt)} — ${Math.round(100 * (W0_TRUE - HEUR_VALUE) / W0_TRUE)}% low. Under the perfect watermark it closes after event id ${EVENTS[perfCloses].id} and publishes **${PERF_VALUE}** at ${hhmmss(EVENTS[perfCloses].pt)} — correct, and **${secs(CORRECT_COST)} later**.`],
     whenHeading: 'When a perfect watermark is actually available, and what to do otherwise',
     when: [
@@ -325,19 +340,19 @@ const DIAGRAMS = [
       ...SWEEP.concat([CORRECT_SWEEP]).map(s => `- **skew ${secs(s.lag)}** → closes at ${hhmmss(s.closeAt)}, publishes **${s.value}**, ${s.late.length} event(s) classified late${s.late.length ? ` (id ${s.late.join(', ')})` : ''}`),
       '',
       `**Too fast means real events look late.** At skew ${secs(SWEEP[0].lag)} the pipeline calls ${SWEEP[0].late.length} events late; at ${secs(LAG_MIN)} it calls ${CORRECT_SWEEP.late.length} late. Nothing about the data changed between those rows. **"Late" is a verdict the watermark passes, not a property of an event** — an over-eager watermark does not detect lateness, it creates it.`, '',
-      `**Too slow means correct and slow.** The threshold is exactly **${secs(LAG_MIN)}**: at ${secs(LAG_MIN - 1)} the window still publishes ${sweep(LAG_MIN - 1).value}, at ${secs(LAG_MIN)} it publishes ${CORRECT_SWEEP.value}. The cost is **${secs(LAG_PRICE)}** of added latency on every window.`, '',
-      `And note the threshold is **not** id ${L.id}'s ${secs(L.pt - L.et)} of skew, which is the number most readers would reach for. It is \`${hhmmss(maxEtThrough(LI - 1))} − ${mm(W0_END)} + 1\` — the highest event time seen before the straggler, minus the **window's end**. The watermark only has to stay below the window boundary until the straggler lands; it never has to reach back to ${hhmmss(L.et)}. Tuning skew to your worst observed delay over-pays by ${secs(L.pt - L.et - LAG_MIN)} per window.`],
+      `**Too slow means correct and slow.** The threshold is exactly **${secs(LAG_MIN)}**: at ${secs(LAG_MIN - 1)} the window still publishes ${sweep(LAG_MIN - 1).value}, at ${secs(LAG_MIN)} it publishes ${CORRECT_SWEEP.value}. The cost is **${secs(LAG_PRICE)}** of added latency on this window — and only on this one: ${winList(UNPRICED.map(p => p.w))} close at ${UNPRICED.map(p => hhmmss(p.a)).filter((v, i, a) => a.indexOf(v) === i).join(', ')} under both bounds, and ${winList(NEVER.map(p => p.w))} closes under neither.`, '',
+      `And note the threshold is **not** id ${L.id}'s ${secs(L.pt - L.et)} of skew, which is the number most readers would reach for. It is \`${hhmmss(maxEtThrough(LI - 1))} − ${mm(W0_END)} + 1\` — the highest event time seen before the straggler, minus the **window's end**. The watermark only has to stay below the window boundary until the straggler lands; it never has to reach back to ${hhmmss(L.et)}. Tuning skew to your worst observed delay holds every watermark ${secs(L.pt - L.et - LAG_MIN)} further back than this window needs.`],
     whenHeading: 'When to tune skew up, when to track per source, and what neither fixes',
     when: [
       `**Tune skew up when a late answer is cheaper than a wrong one** — billing, compliance, anything reconciled against another system. You are buying correctness with latency at a measurable rate: here ${secs(LAG_PRICE)} for ${W0_TRUE - HEUR_VALUE} of ${W0_TRUE}.`, '',
       `**Tune skew down when a stale answer is worse than an incomplete one** — an ops dashboard, an autoscaler. Accept that some events will be classified late and make sure something downstream can absorb a correction.`, '',
-      `**Track per source when sources have different idleness patterns.** Source "${BUSY_KEY}" reaches ${wmTxt(perSource[END][BUSY_KEY])} by the end of this stream while "${IDLE_KEY}" stops at ${wmTxt(perSource[END][IDLE_KEY])}. A single global watermark would claim ${wmTxt(WATERMARKS[END])} — **${secs(IDLE_GAP)} more completeness than source "${IDLE_KEY}" can back.** Taking the minimum is correct and costs ${BLOCKED.length} window's output (${BLOCKED.map(w => SUM(WINDOWS[w])).join(', ')}).`, '',
+      `**Track per source when sources have different idleness patterns.** Source "${BUSY_KEY}" reaches ${wmTxt(perSource[END][BUSY_KEY])} by the end of this stream while "${IDLE_KEY}" stops at ${wmTxt(perSource[END][IDLE_KEY])}. A single global watermark would claim ${wmTxt(WATERMARKS[END])} — **${secs(IDLE_GAP)} more completeness than source "${IDLE_KEY}" can back.** Taking the minimum is correct and costs ${nWin(BLOCKED.length)}' output (${BLOCKED.map(w => SUM(WINDOWS[w])).join(', ')}).`, '',
       `**What none of this fixes:** the skew bound is unverifiable from inside the pipeline. A run with zero late events is indistinguishable from a run whose late events were silently discarded, so you cannot tell a well-tuned skew from an over-eager one by looking at the output. And per-source tracking introduces its own failure: a source that goes permanently quiet pins the watermark at ${wmTxt(perSource[END][IDLE_KEY])} forever unless an idleness timeout declares it finished — which is a decision, not a measurement.`],
     diagramHeading: 'Visual walkthrough — the formula, the sweep, and the threshold',
     sub: `The sweep, the ${secs(LAG_MIN)} threshold and the per-source minimum are computed from the seed and asserted; ${secs(LAG_MIN - 1)} is checked to be still wrong.` },
   { name: 'ch03-propagation', steps: C3,
     title: 'Propagation and correctness — the minimum, and what "closed" means',
-    subtitle: `per-source min ${wmTxt(MINWM[END])} vs global ${wmTxt(WATERMARKS[END])} · ${BLOCKED.length} window withheld`,
+    subtitle: `per-source min ${wmTxt(MINWM[END])} vs global ${wmTxt(WATERMARKS[END])} · ${nWin(BLOCKED.length)} withheld`,
     heading: 'Why a stage takes the minimum, and why "closed" is not "complete"',
     why: [
       `**When a stage has several upstream inputs, its watermark is the minimum of theirs.** The reason is a one-liner: a stage cannot claim more completeness than its least-complete input.`, '',
@@ -351,13 +366,13 @@ const DIAGRAMS = [
       `**So allowed lateness is the safety net under the estimate**, and the three mechanisms layer in order: the watermark estimates completeness and is wrong; the on-time trigger acts on the estimate and publishes ${HEUR_VALUE}; allowed lateness keeps the state so id ${L.id} can correct it to ${W0_TRUE}. Each exists because the previous one is imperfect — and the horizon is bounded on purpose, because unbounded recovery means unbounded state.`],
     whenHeading: 'When the minimum rule bites, and what watermarks actually buy',
     when: [
-      `**The minimum rule bites whenever one input is slower or quieter than the others.** ${BLOCKED.length} window here — ${BLOCKED.map(w => `[${mm(w)}, ${mm(w + WIN)})`).join(', ')}, holding ${BLOCKED.map(w => SUM(WINDOWS[w])).join(', ')} — closes under a single global watermark and stays open under the minimum. The data for it has all arrived. It is withheld because one source cannot vouch for the time range.`, '',
+      `**The minimum rule bites whenever one input is slower or quieter than the others.** ${nWin(BLOCKED.length)} here — ${winList(BLOCKED)}, holding ${BLOCKED.map(w => SUM(WINDOWS[w])).join(', ')} — ${BLOCKED.length === 1 ? 'closes' : 'close'} under a single global watermark and ${BLOCKED.length === 1 ? 'stays' : 'stay'} open under the minimum. The data for ${BLOCKED.length === 1 ? 'it' : 'them'} has all arrived. It is withheld because one source cannot vouch for the time range.`, '',
       `**That is correct behaviour and it looks like a bug in production.** The symptom is output stopping while the pipeline reports healthy, and the cause is an input nobody is watching. It is the reason real systems add idleness detection — which is a decision to declare a source finished, not a measurement of anything.`, '',
       `**And the thing watermarks actually buy:** without one, window [${mm(W0)}, ${mm(W0_END)}) can **never** be emitted. On an unbounded stream there is no moment at which "everything has arrived" becomes true. The alternatives are a processing-time trigger, which answers a different question, or waiting forever, which answers none.`, '',
       `So watermarks do not make event-time processing *correct* — they make it *possible*. This window is emitted ${Math.round(100 * (W0_TRUE - HEUR_VALUE) / W0_TRUE)}% wrong and correctable, and that trade is the foundation the rest of the book builds on.`, '',
-      `**What this does not settle:** ${BLOCKED.length} window stays open because a source went quiet, and no amount of skew tuning fixes it — that is a structural property of taking the minimum. The fix is an idleness timeout, which trades the correctness the minimum was protecting.`],
+      `**What this does not settle:** ${nWin(BLOCKED.length)} ${BLOCKED.length === 1 ? 'stays' : 'stay'} open because a source went quiet, and no amount of skew tuning fixes it — that is a structural property of taking the minimum. The fix is an idleness timeout, which trades the correctness the minimum was protecting.`],
     diagramHeading: 'Visual walkthrough — the minimum, the decision, and the safety net',
-    sub: `The per-source watermarks, their minimum and the withheld window are computed from the seed and asserted.` },
+    sub: `The per-source watermarks, their minimum and the withheld ${BLOCKED.length === 1 ? 'window' : 'windows'} are computed from the seed and asserted.` },
   { name: 'ch03-system', steps: C4,
     title: 'System design — the watermark generator',
     subtitle: `max seen − ${secs(LAG)}, per source, minimum across · naive formula regresses ${REGRESSIONS.length}x`,
@@ -366,13 +381,13 @@ const DIAGRAMS = [
       `**The question.** Design the watermark generator for an event-time pipeline: it advances as max-seen event time minus a skew bound, so windows close on time and a straggler afterwards is flagged late.`, '',
       `**The pipeline:** sources → **watermark generator** → window assigner → per-window state → trigger/emitter → dashboard.`, '',
       `**First, the blast radius.** The generator emits one number, and exactly one component consumes it: the trigger. The window assigner is pure \`winOf(e.et)\` and never sees the watermark. So a watermark bug **cannot** put an event in the wrong window — it can only make a window speak too early or too late. That is why its failures present as under-counted totals rather than scattered data, and why "our numbers are low" maps back to this component.`, '',
-      `**Second, why \`max()\` is in the formula.** The naive version — this event's own time minus the skew — looks equivalent. Compute both and the naive one goes **backwards ${REGRESSIONS.length} times**: ${REGRESSIONS.map(r => `${wmTxt(r.from)} → ${wmTxt(r.to)} (−${secs(r.from - r.to)})`).join(', and ')}.`, '',
+      `**Second, why \`max()\` is in the formula.** The naive version — this event's own time minus the skew — looks equivalent. Compute both and the naive one goes **backwards ${REGRESSIONS.length} times**: ${REGRESSIONS.map(r => `${etTxt(r.from)} → ${etTxt(r.to)} (−${secs(r.from - r.to)})`).join(', and ')}.`, '',
       `A watermark that moves backwards **re-opens a window that was already closed and published.** Every downstream guarantee is built on monotonicity, and \`max()\` is the single function call that provides it.`, '',
-      `**Third, the two settings.** The skew bound: ${secs(LAG)} publishes ${HEUR_VALUE} at ${hhmmss(EVENTS[heurCloses].pt)} with ${sweep(LAG).late.length} event late; ${secs(LAG_MIN)} publishes ${CORRECT_SWEEP.value} at ${hhmmss(CORRECT_SWEEP.closeAt)} with ${CORRECT_SWEEP.late.length} late, ${secs(LAG_PRICE)} slower. And the scope: one global watermark claims ${wmTxt(WATERMARKS[END])} at the end, which is ${secs(IDLE_GAP)} more than source "${IDLE_KEY}" supports; the per-source minimum claims ${wmTxt(MINWM[END])} and withholds ${BLOCKED.map(w => SUM(WINDOWS[w])).join(', ')}.`],
+      `**Third, the two settings.** The skew bound: ${secs(LAG)} publishes ${HEUR_VALUE} at ${hhmmss(EVENTS[heurCloses].pt)} with ${sweep(LAG).late.length} event${sweep(LAG).late.length === 1 ? '' : 's'} late; ${secs(LAG_MIN)} publishes ${CORRECT_SWEEP.value} at ${hhmmss(CORRECT_SWEEP.closeAt)} with ${CORRECT_SWEEP.late.length} late, ${secs(LAG_PRICE)} slower. And the scope: one global watermark claims ${wmTxt(WATERMARKS[END])} at the end, which is ${secs(IDLE_GAP)} more than source "${IDLE_KEY}" supports; the per-source minimum claims ${wmTxt(MINWM[END])} and withholds ${BLOCKED.map(w => SUM(WINDOWS[w])).join(', ')}.`],
     whenHeading: 'When each setting is right, and the four things this does not settle',
     when: [
       `**Use a global watermark when all sources are symmetric and busy** — one Kafka topic read by one consumer group with even traffic. It is simpler and it is not wrong when no input can go quiet relative to the others.`, '',
-      `**Use per-source tracking the moment idleness is possible** — per-partition, per-device, per-region. The minimum is the safe claim, and the price is visible: ${BLOCKED.length} window withheld here.`, '',
+      `**Use per-source tracking the moment idleness is possible** — per-partition, per-device, per-region. The minimum is the safe claim, and the price is visible: ${nWin(BLOCKED.length)} withheld here.`, '',
       `**Pair per-source tracking with an idleness timeout,** always. Without one, a source that disappears pins the watermark at ${wmTxt(perSource[END][IDLE_KEY])} forever and every window stops closing. That is the single most common way this component takes a pipeline down, and it presents as a stall rather than an error.`, '',
       `**What this design does NOT settle — four gaps:**`, '',
       `1. **The ${secs(LAG)} skew bound is unverifiable from inside.** Nothing distinguishes "no late events arrived" from "late events were already discarded", so the output cannot tell you whether the bound is well tuned.`,
@@ -380,7 +395,7 @@ const DIAGRAMS = [
       `3. **Monotonicity holds only within one run.** \`max()\` guarantees it here, but a generator that restarts and recomputes from a checkpoint can emit a value below one it already published — and nothing downstream is prepared for that.`,
       `4. **Window [${mm(WIN_STARTS[WIN_STARTS.length - 1])}, …) never closes under ANY skew bound in the sweep**, because no event ever pushes the watermark past its end. The generator is working correctly and that window's ${SUM(WINDOWS[WIN_STARTS[WIN_STARTS.length - 1]])} is simply never published.`],
     diagramHeading: 'Visual walkthrough — placement, the max(), and the two knobs',
-    sub: `The naive formula's ${REGRESSIONS.length} regressions, both thresholds and the withheld window are computed from the seed and asserted.` },
+    sub: `The naive formula's ${REGRESSIONS.length} regressions, both thresholds and the withheld ${BLOCKED.length === 1 ? 'window' : 'windows'} are computed from the seed and asserted.` },
 ];
 for (const d of DIAGRAMS) {
   const Dg = buildDiagramWalkthrough({ W, name: d.name, stepSecs: 5.5,
@@ -495,9 +510,9 @@ PROGRAMS.push({
         heap: [],
         cap: `The inner loop starts at \`i + 1\` — it inspects events that have not arrived. For \`i\` = 1 it finds id ${L.id}'s \`et\` = ${L.et} and so \`smallest\` is ${PERFECT[1]}. That is the correct answer and the reason it is unavailable: a live pipeline has no \`events[j]\` for \`j > i\`.` },
       { t: `so the perfect watermark is stuck at ${PERFECT[1]} for ${PERF_STALL} events`, line: at('if (smallest == NONE || events[j].et < smallest) { smallest = events[j].et }'),
-        stack: [MAIN({ h: '@0x100' }), { name: 'perfect', locals: ['events = EVENTS', `out = (${PERF_STALL} values so far)`, `i = ${PERF_STALL - 1}`, `smallest = ${PERFECT[1]}`, `j = ${LI}`] }],
+        stack: [MAIN({ h: '@0x100' }), { name: 'perfect', locals: ['events = EVENTS', `out = (${STALL_END} values so far)`, `i = ${STALL_END}`, `smallest = ${PERFECT[1]}`, `j = ${LI}`] }],
         heap: [{ key: 'h', hot: true }],
-        cap: `For every \`i\` from 1 to ${PERF_STALL - 1} this line finds the same event — id ${L.id}, \`et\` = ${L.et} — so \`smallest\` is ${PERFECT[1]} every time. ${PERF_STALL} consecutive values, no progress. The heuristic reached ${WATERMARKS[heurCloses]} over that span, which is ${WATERMARKS[heurCloses] - PERFECT[1]}s of progress it could not justify.` },
+        cap: `For every \`i\` from ${STALL_FIRST} to ${STALL_END} this line finds the same event — id ${L.id}, \`et\` = ${L.et} — so \`smallest\` is ${PERFECT[1]} every time. ${PERF_STALL} consecutive values, no progress. The heuristic reached ${STALL_HEUR} over that span, which is ${STALL_HEUR - PERFECT[1]}s of progress it could not justify.` },
       { t: `and the window's answer differs by ${W0_TRUE - HEUR_VALUE}`, line: at('fun closeW0(wm)', 'if (wm[i] >= W0 + WIN) { return Trace(wm, i, sum(ids)) }'),
         stack: [MAIN({ h: '@0x100', p: '@0x200', price: CORRECT_COST }), { name: 'closeW0', locals: [`wm = perfect(EVENTS)`, 'ids = @0x300', `i = ${perfCloses}`] }],
         heap: [{ key: 'h' }, { key: 'p', hot: true }],

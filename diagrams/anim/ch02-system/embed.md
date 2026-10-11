@@ -2,7 +2,7 @@
 
 #### Why one result needs all four answers before it is defined
 
-**The question.** Count purchases per window. A purchase arrives late, so the pipeline must close the window on the watermark and let allowed lateness correct the already-emitted count.
+**The question.** Sum purchase values per window. A purchase arrives late, so the pipeline must close the window on the watermark and let allowed lateness correct the already-emitted sum.
 
 **The pipeline:** writer (event source) → transport (stream, which also computes the watermark) → collector (window assigner) → aggregator/store (per-window state).
 
@@ -13,11 +13,13 @@ Note where the four questions live: **WHERE** is the collector's single rule (as
 **So here is what a consumer actually receives, in order:**
 
 - 12:01:00 — early pane **8** (ids 0, 1 had arrived)
-- 12:02:00 — early pane **15**
-- 12:04:06 — on-time pane **15**, the watermark having passed 12:02
-- 12:04:40 — retraction **-15** then late pane **19**
+- 12:02:00 — early pane **15** — published as retraction **-8** then **15**
+- 12:03:00 — early pane **15** — published as retraction **-15** then **15**
+- 12:04:00 — early pane **15** — published as retraction **-15** then **15**
+- 12:04:06 — on-time pane **15** — published as retraction **-15** then **15**, the watermark having passed 12:02
+- 12:04:40 — late pane **19** — published as retraction **-15** then **19**
 
-Five values for one question, over 220s. Every one was the right answer to "what do you know now?", and a consumer that treats the first as final is the bug.
+11 values for one question, over 220s, and an add-only sink lands on 19. Every firing was the right answer to "what do you know now?", and a consumer that treats the first as final is the bug.
 
 #### When this design is right, the two thresholds, and four gaps
 
@@ -25,7 +27,7 @@ Five values for one question, over 220s. Every one was the right answer to "what
 
 **1. Allowed lateness ≥ 81s.** Below that, window state is already collected when id 7 arrives: the event is discarded and 15 stands forever, 21% low. At or above it, the late trigger fires and corrects to 19. The threshold comes from the watermark's position (200s) when the straggler lands — **not** from its 230s of skew.
 
-**2. The accumulation mode must match the sink.** Retracting into a summing sink gives 19; accumulating into the same sink gives 34. These are independent of setting 1 — correct lateness with a mismatched sink still produces 34.
+**2. The accumulation mode must match the sink.** Retracting into a summing sink gives 19; accumulating into the same sink gives 87, because each of the 6 panes is a running total added on top of the last. These are independent of setting 1 — correct lateness with a mismatched sink still produces 87.
 
 **Use this design when the consumer can accept a moving number.** A dashboard, a cache, a downstream aggregation: all fine. An append-only ledger that bills on the first value published is not, and that is a contract problem rather than a configuration one.
 
@@ -34,13 +36,13 @@ Five values for one question, over 220s. Every one was the right answer to "what
 1. **Allowed lateness is memory.** Holding state past the watermark costs (open windows × state per window). With 4 windows it is free; with a million open windows it is the pipeline's dominant cost.
 2. **Retractions require a sink that accepts negatives.** -15 has to be representable and meaningful downstream.
 3. **The 81s threshold was computed from watermarks visible in full.** A live pipeline sets that number before observing them, and is therefore guessing.
-4. **Only one window was specified.** The window starting 12:08 is never published by ANY of the three triggers, because the watermark never passes its end — a complete answer to all four questions still says nothing about a window whose "when" never arrives.
+4. **Only one window was specified.** The window starting 12:08 is never published by the on-time or late trigger, because the watermark never passes its end — only the speculative early pane (8 at 12:10:00) ever reports it, so its only published value is one the pipeline never claims is complete. A complete answer to all four questions still says nothing about a window whose "when" never arrives.
 
-#### Visual walkthrough — four stages, five published values, two thresholds
+#### Visual walkthrough — four stages, 11 published values, two thresholds
 
 The animation loops through all 4 steps. Expand any step to study it on its own.
 
-<img src="../diagrams/anim/ch02-system/ch02-system.svg" alt="Visual walkthrough — four stages, five published values, two thresholds, 4 animated steps" width="1040">
+<img src="../diagrams/anim/ch02-system/ch02-system.svg" alt="Visual walkthrough — four stages, 11 published values, two thresholds, 4 animated steps" width="1040">
 
 <details>
 <summary><b>Step 1 of 4</b> — the pipeline, and the one window it is specified for</summary>
@@ -55,7 +57,7 @@ A deliberately small design, so every number is checkable. The four questions ar
 
 <img src="../diagrams/anim/ch02-system/frames/step-02.svg" alt="Step 2: the publish sequence, with real times" width="1040">
 
-Read the column: 8, 15, 15, then -15 and 19. One query, one window, five published values across 220s — and every one of them was the right answer to "what do you know now?". A consumer that treats the first as final is the bug, not the pipeline.
+Read the column: 8, -8, 15, -15, 15, -15, 15, -15, 15, -15, 19. One query, one window, 11 published values across 220s, summing to 19 — and every firing was the right answer to "what do you know now?". A consumer that treats the first as final is the bug, not the pipeline.
 
 </details>
 <details>
@@ -71,10 +73,10 @@ Two settings, and each has a threshold that is a number rather than a judgement.
 
 <img src="../diagrams/anim/ch02-system/frames/step-04.svg" alt="Step 4: and what this design does NOT settle" width="1040">
 
-The last gap is the sharpest: this chapter fully specified ONE window and the final window of the same dataset is never published by any of the three triggers, because the watermark never passes its end. A complete answer to all four questions still says nothing about a window whose "when" never arrives.
+The last gap is the sharpest: this chapter fully specified ONE window, and the final window of the same dataset is never published by the on-time or late trigger, because the watermark never passes its end — only the clock reports it (8 at 12:10:00), a value the pipeline never claims is complete. A complete answer to all four questions still says nothing about a window whose "when" never arrives.
 
 </details>
 
-<sub>The publish sequence, the 81s lateness threshold and the 34-vs-19 sink outcomes are all derived from the seed and asserted. Generated by `node tools/gen_ch02.js`.</sub>
+<sub>The publish sequence, the 81s lateness threshold and the 87-vs-19 sink outcomes are all derived from the seed and asserted. Generated by `node tools/gen_ch02.js`.</sub>
 
 <!-- ch02-system:end -->

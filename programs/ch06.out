@@ -9,7 +9,7 @@ CHANGELOG = a=5  a=8  b=7  a=10  a=16  b=8  b=17  b=21  a=24
   value_after(compacted, 'a', 2)     = UNANSWERABLE
   with a tombstone for 'b': {'a': 24};  compacting the tombstone away resurrects b: {'a': 24, 'b': 21}
 
-  cache: same table {'a': 30, 'b': 21} from 3 entries instead of 10, handover at version 10
+  cache: same table {'a': 30, 'b': 21} from 3 entries instead of 10, handover at version 9
   audit: the state log says UNANSWERABLE, an uncompacted audit log says 8
   deltas: fold {'a': 10, 'b': 8}, compacting the deltas gives {'a': 2, 'b': 1} (wrong), converted first {'a': 10, 'b': 8}
 

@@ -33,7 +33,8 @@
     ttl = 294, cache 1      -> (29, 1)   one day tighter, the other side of that edge: 'a'
                                          restarts and 16 points of history vanish
     ttl = 100, cache 2      -> (8, 4)    four restarts, and 37 of the 45 points gone
-    ttl = 0, cache 0        -> (8, 7)    the last signal per account only
+    ttl = 0, cache 0        -> (8, 7)    the last signal only: 'b''s last point is swept
+                                         when 'a''s day-540 signal arrives
     an EMPTY stream         -> (0, 0)    no signals, so no score.  0, not an error
     a single signal         -> (7, 0)    the smallest real stream
     cache of 0 slots        -> (45, 0)   write-through: 9 store reads instead of 2, and the
@@ -50,7 +51,8 @@
   And on 2,000 accounts seen once plus one that never stops:
     ttl = 100, cache 64     -> (301, 0)      1,899 accounts out of memory and 1,899 histories
                                              thrown away; at the nine-signal size above, the
-                                             same expiry saves 0 accounts
+                                             same expiry saves 1 account ('b', whose
+                                             score is then simply gone)
     ttl = 0, cache 0        -> (1, 199)      everything saved, everything lost
 
   Every line above is a row in the EXAMPLES table below, and every row is asserted three
@@ -131,9 +133,9 @@ def show_examples():
     `true_scores` is the requirement written out, so it is the reference that cannot be wrong;
     every row is checked against it, against the store, and against the cache at that row's
     capacity.  The cost columns are printed per row so the reader can see what each answer
-    buys: `saved` is the scores the expiry stops holding -- 0 at the chapter's scale, where
-    the expiry has already cost 16 of account 'a''s 24 points, and 1,899 only on the last two
-    rows -- against the `reads` and `writes` the cache pays to be right at every one of them.
+    buys: `saved` is the scores the expiry stops holding -- at most 1 at the chapter's scale, where
+    the expiry has already cost 16 of account 'a''s 24 points, and 1,899 and 2,000 on the last
+    two rows -- against the `reads` and `writes` the cache pays to be right at every one of them.
     """
     print(f"{'what it exercises':36s} {'events':>7} {'ttl':>6} {'cap':>4} {'true':>6} "
           f"{'expiry':>7} {'restarts':>9} {'held':>6} {'+ttl':>6} {'saved':>6} "

@@ -89,17 +89,17 @@
             "good = @0x200",
             "stale = @0x300",
             "noState = @0x400",
-            "bound = 12"
+            "bound = 13"
           ]
         },
         {
           "name": "errorBound",
           "locals": [
             "k = 3",
-            "worst = 12",
-            "i = 8",
+            "worst = 13",
+            "i = 7",
             "since = 2",
-            "j = 8",
+            "j = 7",
             "run = (a partial sum)"
           ]
         }

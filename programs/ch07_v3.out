@@ -47,7 +47,7 @@ ADDITIONS = a@1:5  a@3:3  b@50:4  b@90:7  a@130:2  b@220:9  a@245:6  b@260:1  a@
   at the chapter's 294-hour allowance the saving is 0 for every hour up to the last
   addition -- the chapter's own figure -- so the correctness cost arrives before any
   memory benefit.  At the week-long allowance it is 2, reached at hour 429, and the hour
-  is the whole story: shopper 'a' expired at 413 and 'b' at 428, so the two carts the
+  is the whole story: shopper 'a' expired at 414 and 'b' at 429, so the two carts the
   bound has stopped holding are precisely the two the shoppers no longer have.  A
   saving visible only after the data is gone is the damage, measured from the other
   side.  The real case for the bound is asymptotic, and the honest thing is to go

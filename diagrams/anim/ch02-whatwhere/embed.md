@@ -13,7 +13,7 @@
 
 Read the sliding row twice. Its results sum to 78 over a dataset containing 45, because each event falls into up to 2 overlapping windows. Nothing was duplicated — **overlap is a property of the windowing**, and partitioning windowings (fixed, global) preserve the total while overlapping ones do not.
 
-**And the two axes are genuinely independent.** Three transforms × three windowings is nine legal pipelines; picking a row constrains no column. So "we sum purchases" leaves the answer undetermined, and so does "we use session windows".
+**And the two axes are genuinely independent.** The grid in the walkthrough below picks 3 of those transforms and 3 of those windowings — 9 legal pipelines — and picking a row constrains no column. So "we sum purchases" leaves the answer undetermined, and so does "we use session windows".
 
 #### When each windowing is the right one, and what batch was doing all along
 
@@ -56,7 +56,7 @@ Same transform throughout — `sum(v)` — and four different shapes of answer. 
 
 <img src="../diagrams/anim/ch02-whatwhere/frames/step-03.svg" alt="Step 3: the two axes really are independent" width="1040">
 
-Nine cells and every one is a real pipeline you could run. The grid is the argument for separating the questions: "we sum purchases" names a row and leaves the answer undetermined, and "we use session windows" names a column and does the same. Both are needed before any number exists.
+9 cells and every one is a real pipeline you could run. The grid is the argument for separating the questions: "we sum purchases" names a row and leaves the answer undetermined, and "we use session windows" names a column and does the same. Both are needed before any number exists.
 
 </details>
 <details>

@@ -54,7 +54,10 @@ const RUN = (() => { let ss = []; const trace = [];
 const FINAL = RUN.ss;
 
 const MERGE = RUN.trace.find(t => t.act === 'MERGE');
-const EXT = RUN.trace.find(t => t.act === 'extend');
+// the first arrival that merely extends a run AFTER the second run exists, so the frames
+// run in arrival order: new run, then extend, then the merge
+const EXT = RUN.trace.find(t => t.act === 'extend' && t.i > RUN.trace.filter(u => u.act === 'new')[1].i);
+const EXTENDS = RUN.trace.filter(t => t.act === 'extend');
 const NEW = RUN.trace.filter(t => t.act === 'new');
 const RETRACTED = RUN.trace.filter(t => t.gone.length).reduce((a, t) => a + t.gone.length, 0);
 const BACKWARDS = RUN.trace.filter(t => t.gone.some(g => RUN.ss.some(s => s.end === g.end && s.start < g.start)));
@@ -65,7 +68,8 @@ const BIGN = 1000000;
 const fail = (m) => { throw new Error(`gen_ch04_interview: ${m}`); };
 if (!ARRIVALS.some((t, i) => i > 0 && t < ARRIVALS[i - 1])) fail('the arrivals are in order, so the out-of-order half of the problem never happens');
 if (!MERGE) fail(`no arrival joins two runs at G = ${G} — the case this section is about has no worked example`);
-if (!EXT) fail('no arrival merely extends one run, so the ordinary case is never shown');
+if (!EXT) fail('no arrival merely extends one run after the second run exists, so the ordinary case is never shown');
+if (!(NEW[1].i < EXT.i && EXT.i < RUN.trace.indexOf(MERGE))) fail('the frames would not be in arrival order: second new run, then extend, then merge');
 if (NEW.length < 2) fail('fewer than two arrivals start a new run');
 if (ssStr(FINAL) !== ssStr(BATCH)) fail(`the incremental answer ${ssStr(FINAL)} disagrees with the sorted sweep ${ssStr(BATCH)}`);
 if (!RETRACTED) fail('no run ever stopped existing, so nothing shows that an already-reported answer has to be withdrawn');
@@ -160,7 +164,7 @@ const SRC = [
   'fun main() {',
   `    val batch = sweep(ARRIVALS)       // ${ssStr(BATCH)}`,
   ...ARRIVALS.map((t, i) => `    runs = absorb(runs, ${String(t).padEnd(3)})      // ${RUN.trace[i].act.padEnd(6)} -> ${ssStr(RUN.trace[i].ss)}`),
-  `    // ${RETRACTED} run(s) had to be withdrawn along the way`,
+  `    // ${RETRACTED} run${RETRACTED === 1 ? '' : 's'} had to be withdrawn along the way`,
   '}',
 ];
 
@@ -199,7 +203,7 @@ const steps = (at) => [
   { t: `the batch answer: sort, then walk`, line: at('if (t - endOf(last(out)) <= G) { setEnd(last(out), t) }'),
     stack: [MAIN(), SW({ sorted: `[${[...ARRIVALS].sort((a, b) => a - b).join(', ')}]`, out: ssStr(BATCH.slice(0, 1)), t: [...ARRIVALS].sort((a, b) => a - b)[1] })],
     heap: [{ key: 'batch', hot: true }],
-    cap: `Sorted, each time either extends the current run or starts a new one, and one comparison decides which: ${ssStr(BATCH)}. O(n log n) for the sort and O(n) for the walk — and it is only correct **once every time has arrived**, which the question says will not happen.` },
+    cap: `Sorted, each time either extends the current run or starts a new one, and one comparison decides which: ${ssStr(BATCH)}. One sort of all ${N} times, then one comparison per time — and it is only correct **once every time has arrived**, which the question says will not happen.` },
 
   { t: `so: which runs does one new time touch?`, line: at('if (t <= endOf(r) + G) { hit.append(r) }'),
     stack: [MAIN({ batch: ssStr(BATCH) }), TO({ t: ARRIVALS[0], hit: '[]', r: 'none yet' })],
@@ -244,7 +248,7 @@ const steps = (at) => [
   { t: 'what each arrival costs', line: at('fun absorb(runs, t)::val hit  = touching(runs, t)'),
     stack: [MAIN({ batch: ssStr(BATCH), runs: ssStr(FINAL) })],
     heap: [{ key: 'runs' }],
-    cap: `\`touching\` as written looks at every run, which is fine at ${FINAL.length} and not at ${BIGN.toLocaleString('en-US')} entries spread over thousands of runs. The runs are kept ordered by start and never overlap, so the touched ones are a **contiguous slice** — findable by bisection and then walked, giving log plus the number actually merged. The ordering is already maintained, so this costs nothing to add and is the difference between O(runs) and O(log runs) per arrival.` },
+    cap: `\`touching\` as written looks at every run, which is fine at ${FINAL.length} and not at ${BIGN.toLocaleString('en-US')} entries spread over thousands of runs. The runs are kept ordered by start and never overlap, so the touched ones are a **contiguous slice** — findable by bisection and then walked, giving log plus the number actually merged. The ordering is already maintained, so this costs nothing to add and is the difference between comparing every run and about ${Math.ceil(Math.log2(BIGN))} comparisons per arrival — even if all ${BIGN.toLocaleString('en-US')} entries were separate runs.` },
 
   { t: 'and the question nobody asked', line: at('runs = absorb(runs, ' + ARRIVALS[N - 1]),
     stack: [MAIN({ batch: ssStr(BATCH), runs: ssStr(FINAL) })],
@@ -252,14 +256,19 @@ const steps = (at) => [
     cap: `State grows with the number of open runs and nothing above ever removes one — at ${BIGN.toLocaleString('en-US')} entries over years, the runs from the first week are still in memory waiting for a time that will never arrive. So a real answer needs a point at which a run is declared finished and dropped, which is a decision about **how late a time may be** rather than an algorithm. Volunteering that is worth more than the merge, because the merge is a puzzle and this is what makes the thing run for a year.` },
 ];
 
+// gen_ch04.js reads G and the bridging arrival from here rather than retyping them.
+module.exports = { G, ARRIVALS, MERGE, MERGED_RUN };
+if (require.main !== module) return;
+
 const r = buildInterviewSection({
   name: 'ch04-interview-memory',
   out: path.join(__dirname, '..', 'diagrams', 'anim', 'ch04-interview-memory'),
   gen: 'gen_ch04_interview.js',
   title: 'Runs separated by a gap, built as they arrive — stack and heap at every step',
-  subtitle: `${N} out-of-order times, G = ${G} → ${ssStr(FINAL)} · one arrival joins ${MERGE.hit.length} runs · ${RETRACTED} run(s) withdrawn`,
+  subtitle: `${N} out-of-order times, G = ${G} → ${ssStr(FINAL)} · one arrival joins ${MERGE.hit.length} runs · ${RETRACTED} run${RETRACTED === 1 ? '' : 's'} withdrawn`,
   problem: {
     surface: 'access logs',
+    trap: 'to assume one new item touches at most one existing run, so a run once reported stays as reported — and what breaks it is the item that joins two runs (or, in the calendar, the cancellation that splits one)',
     statement: [`**A door log gives one person's entry times.** A **visit** is a run of entries with no gap longer than \`G\`.`, '',
       `The times **arrive out of order**, and they **keep arriving**. **Report the visits after each arrival.**`, '',
       `10⁶ entries.`],
@@ -278,11 +287,11 @@ const r = buildInterviewSection({
     { name: 'the calendar that will not double-book', surface: 'scheduling',
       statement: [`Meetings are booked and cancelled continuously. **Reject any booking that overlaps an existing one**, and report the free gaps.`],
       whyHard: `Insertion is the same shape with the gap set to zero, and the new operation is the hard one: **cancellation splits a run**, which nothing above can do. Merging is easy because the merged run is determined by its ends; splitting is not, because once two bookings have been merged into one span the information needed to separate them is gone. So the state cannot be the merged runs at all — it has to be the individual bookings, with the merge computed on read. Recognising that the chapter's state shape is only valid for an append-only stream is the whole answer.`,
-      maps: `\`touching\` with G = 0 for the overlap test, and \`absorb\` kept — but the stored state changes from runs to members, which is a different program with the same lookup.` },
+      maps: `\`touching\` with G = 0 and strict comparisons for the overlap test (bookings are half-open, so back-to-back meetings do not clash), and \`absorb\` kept — but the stored state changes from runs to members, which is a different program with the same lookup.` },
 
     { name: 'the island count', surface: 'puzzles',
       statement: [`Positions on a line are turned on one at a time, in any order. **After each one, report how many contiguous stretches are on.**`],
-      whyHard: `It is this problem with G = 1 and only a count wanted, and dropping the detail makes a much better answer available: a new position can join at most **two** stretches, so the count changes by exactly +1, 0 or −1 and nothing has to be searched. The non-obvious part is that this is reachable with no interval structure at all — a map from each stretch's endpoints to its length, consulted at the two neighbours, which is O(1) per position against the chapter's O(log runs). Noticing that the question asked only for a count is where the saving comes from.`,
+      whyHard: `It is this problem with G = 1 and only a count wanted, and dropping the detail makes a much better answer available: a new position can join at most **two** stretches, so the count changes by exactly +1, 0 or −1 and nothing has to be searched. The non-obvious part is that this is reachable with no interval structure at all — a map from each stretch's endpoints to its length, consulted at the two neighbours: two lookups and two writes per position, however many stretches exist, against the chapter's structure, which compares the new position with every run. Noticing that the question asked only for a count is where the saving comes from.`,
       maps: `\`touching\` reduced to checking the two adjacent positions, and \`absorb\` to arithmetic on a count. The ${MERGE.hit.length}-run merge in the trace is the −1 case.` },
 
     { name: 'the deduplicated alert', surface: 'operations',
@@ -295,7 +304,7 @@ const r = buildInterviewSection({
     heading: 'The solution as a running program — stack and heap at every step',
     intro: [
       `The reframe above is six paragraphs; this is the batch answer and then the same thing built one arrival at a time, with the two things a whiteboard cannot show — **what is allocated, and when**.`, '',
-      `Measured on [${ARRIVALS.join(', ')}] with G = ${G}: the sorted sweep gives ${ssStr(BATCH)}, and ${N} arrivals processed in order give ${ssStr(FINAL)} — asserted equal. Along the way one arrival **starts** a run, one **extends** one, and arrival ${MERGE.t} **joins ${MERGE.hit.length}** of them into ${MERGED_RUN.start}..${MERGED_RUN.end}. ${RETRACTED} run${RETRACTED === 1 ? ' that was already reported stops' : 's that were already reported stop'} existing, and one run later acquires an earlier start — which is what rules out keying the output on it.`],
+      `Measured on [${ARRIVALS.join(', ')}] with G = ${G}: the sorted sweep gives ${ssStr(BATCH)}, and ${N} arrivals processed in order give ${ssStr(FINAL)} — asserted equal. Along the way ${NEW.length} arrivals **start** a run, ${EXTENDS.length} **extend** one, and arrival ${MERGE.t} **joins ${MERGE.hit.length}** of them into ${MERGED_RUN.start}..${MERGED_RUN.end}. ${RETRACTED} run${RETRACTED === 1 ? ' that was already reported stops' : 's that were already reported stop'} existing, and ${BACKWARDS.length} run${BACKWARDS.length === 1 ? ' later acquires' : 's later acquire'} an earlier start — which is what rules out keying the output on it.`],
     sub: `Locals live in the frame and vanish when it is popped; 0x200 holds the **runs** rather than the times, which is what makes the work per arrival depend on the number of runs instead of the number of entries. G is a declared parameter of this problem rather than the chapter's, and the source says why: at the chapter's gap nothing in this dataset joins two runs, and that case is the whole section. Every figure is derived from \`tools/stream_seed.js\` and asserted — including that the arrivals are genuinely out of order, that one arrival joins two or more runs, that another merely extends one, that at least two start new ones, that the incremental answer equals the sorted sweep, that something really is withdrawn, and that some run really does acquire an earlier start. Generated by \`node tools/gen_ch04_interview.js\` on \`tools/interviewkit.js\`.`,
   },
 });

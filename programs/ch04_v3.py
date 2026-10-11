@@ -48,7 +48,8 @@ detail makes a much better answer available.  A new position can join at most TW
 the one ending at p-1 and the one starting at p+1 -- so the count changes by exactly +1, 0 or
 -1 and nothing has to be searched at all.  The non-obvious part is that this needs no interval
 structure whatsoever: a map from each stretch's ENDPOINTS to its length, consulted at the two
-neighbours, is O(1) per position against the chapter's O(log runs).  Noticing that the question
+neighbours: two lookups and two writes per position, however many stretches exist, against
+the chapter's structure, which compares the new position with every run.  Noticing that the question
 asked only for a count is where the saving comes from.
 
 WORKED EXAMPLES: the EXAMPLES table below holds 15 input/output pairs -- an empty stream with
@@ -199,7 +200,7 @@ def show_examples():
     two lookups and two writes per position, `rescan` is the reference's set reads, and `runs`
     is the chapter's run comparisons.  The endpoint map LOSES on short streams (4 ops for one
     position against the rescan's 1) and TIES at exactly seven positions, where 4n = n(n+1)/2;
-    only past that does it win, and at 10,000 it wins by four orders of magnitude.  A rescan
+    only past that does it win, and at 10,000 it wins by a factor of (n+1)/8, about 1,250.  A rescan
     count marked * was not run -- the identity main() asserts, n(n+1)/2, is reported instead,
     because actually running it at 10,000 would take longer than everything else here.
     """
@@ -271,7 +272,10 @@ def main():
     assert count_by_runs(SPARSE)[0] == sparse_counts
     print(f"\n  SPARSE = {SPARSE} (the chapter's arrival times, G = 1):")
     print(f"    {sparse_counts} -- no two are within 1, so every position is its own island and")
-    print(f"    the count only ever rises.  The same data merged four runs at the chapter's G = 47.")
+    ordered = sorted(SPARSE)
+    runs_at_47 = 1 + sum(1 for a, b in zip(ordered, ordered[1:]) if b - a > 47)
+    assert runs_at_47 == 3, runs_at_47
+    print(f"    the count only ever rises.  At the chapter's G = 47 the same {len(SPARSE)} times collapse into {runs_at_47} runs.")
     # the opposite outcome is forbidden: a DENSE sequence must end at one island
     dense = list(range(20))
     assert count_by_endpoints(dense)[0] == [1] * 20, "consecutive positions must never add an island"
@@ -322,8 +326,8 @@ def main():
     # for the new position, -1 for the neighbour it absorbs), and a repeat also gives 0,
     # which is why the two cannot be told apart from the count alone.  The second
     # expectation was that 0 would then dominate.  Measured, the three deltas each occur
-    # close to n/3 times on a shuffle, because each of the two neighbours is already on with
-    # probability about a half and the three outcomes are the three ways that can land.
+    # close to n/3 times on a shuffle, because among p-1, p and p+1 each is equally likely to
+    # arrive first: p first gives +1, p last gives -1, p in the middle gives 0.
     thirds = [deltas_big.count(d) / BIG for d in (1, 0, -1)]
     assert all(abs(f - 1 / 3) < 0.02 for f in thirds), thirds
     assert sum(deltas_big) == 1, sum(deltas_big)

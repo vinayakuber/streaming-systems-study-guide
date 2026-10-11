@@ -41,7 +41,7 @@
     "",
     "// function: restore(cp, useOffset) — resume. With the checkpoint's own offset the",
     "//   total is right; with a stale offset the prefix is applied twice.",
-    "//   restore(take(CHK), CHK) = 45      restore(take(CHK), 0) = 68",
+    "//   restore(take(CHK), CHK) = 45      restore(take(CHK), -1) = 68",
     "fun restore(cp, useOffset) {",
     "    var total = 0",
     "    for (id in cp.entries) { total = total + cp.entries[id] }",
@@ -71,7 +71,7 @@
     "fun main() {",
     "    val cp      = take(CHK)",
     "    val correct = restore(cp, CHK)",
-    "    val stale   = restore(cp, 0)",
+    "    val stale   = restore(cp, -1)",
     "    val cost    = uploadVolume()",
     "}"
   ]

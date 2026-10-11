@@ -75,7 +75,7 @@ const fail = (m) => { throw new Error(`gen_ch03_interview: ${m}`); };
 if (X.every((v, i) => i === 0 || v >= X[i - 1])) fail('the values arrive in increasing order, so nothing is ever evicted and the deque looks pointless');
 if (MAXR.out.join() !== BRUTE.map(b => b.max).join()) fail('the deque answer disagrees with the brute-force scan; the program is wrong');
 if (BOTH.map(b => b.min).join() !== BRUTE.map(b => b.min).join()) fail('the second deque disagrees with the brute-force minimum');
-if (!MAXR.trace.some(t => t.evicted.length >= 2)) fail('no arriving value ever evicts two or more from the back — the case that shows why this is amortised O(1) has no worked example');
+if (!MAXR.trace.some(t => t.evicted.length >= 2)) fail('no arriving value ever evicts two or more from the back — the case that shows why the average stays constant has no worked example');
 if (!MAXR.trace.some(t => t.dropped !== null)) fail('nothing ever leaves the window from the front, so the half a heap cannot do is never shown');
 if (!MAXR.trace.some(t => t.evicted.length === 0 && t.i > 0)) fail('every push evicts something, so the cheap path is never shown');
 if (!OVER.length || !UNDER.length) fail(`${OVER.length} of ${BOTH.length} windows exceed L = ${L}; some must and some must not, or the spread test is not discriminating`);
@@ -83,6 +83,7 @@ if (!(MAXR.ops < BRUTE_OPS)) fail(`the deque did ${MAXR.ops} operations and the 
 if (MAXR.pushes !== N) fail('a value was pushed more than once; the amortised argument depends on exactly one push each');
 if (new Set(X).size !== N) fail('two values are equal, so an eviction cannot be attributed to the newer one');
 
+const frontWord = (n) => `front-expir${n === 1 ? 'y' : 'ies'}`;
 const dqStr = (idx) => `[${idx.map(i => `${i}:${X[i]}`).join(' ')}]`;
 const xStr = () => X.map((v, i) => `${i}:${v}`).join('  ');
 const BIGEV = MAXR.trace.find(t => t.evicted.length >= 2);
@@ -265,7 +266,7 @@ const steps = (at) => [
   { t: `${MAXR.ops} steps against ${BRUTE_OPS} reads`, line: at('fun slideMax(xs)::return out'),
     stack: [MAIN({ slow: `${BRUTE_OPS} reads`, fast: `[${MAXR.out.join(', ')}]` }), SM({ out: `[${MAXR.out.join(', ')}]`, i: N })],
     heap: [{ key: 'maxq' }, { key: 'ticks' }],
-    cap: `[${MAXR.out.join(', ')}] — asserted equal to the scan, window by window. The cost: ${MAXR.pushes} pushes, ${MAXR.pops} back-evictions, ${MAXR.fronts} front-expiries = ${MAXR.ops} steps. **Each index is pushed exactly once and removed at most once**, which caps the total at 2${N} however the values are arranged — so the per-tick cost is amortised constant and does not depend on W at all. At W = ${BIGW.toLocaleString('en-US')} that is the difference between 2 steps a tick and ${BIGW.toLocaleString('en-US')}.` },
+    cap: `[${MAXR.out.join(', ')}] — asserted equal to the scan, window by window. The cost: ${MAXR.pushes} pushes, ${MAXR.pops} back-evictions, ${MAXR.fronts} ${frontWord(MAXR.fronts)} = ${MAXR.ops} steps. **Each index is pushed exactly once and removed at most once**, which caps the total at ${2 * N} however the values are arranged — so the per-tick cost is amortised constant and does not depend on W at all. At W = ${BIGW.toLocaleString('en-US')} that is the difference between 2 steps a tick and ${BIGW.toLocaleString('en-US')}.` },
 
   { t: `the second half: a second list, kept INCREASING`, line: at('evictLarger(lo, xs, i)'),
     stack: [MAIN({ slow: `${BRUTE_OPS} reads`, fast: `[${MAXR.out.join(', ')}]` }), SS({ out: `${O1.at - W + 1} answers`, i: O1.at })],
@@ -291,6 +292,7 @@ const r = buildInterviewSection({
   subtitle: `${N} ticks, W = ${W} · scan ${BRUTE_OPS} reads vs ${MAXR.ops} steps · ${OVER.length} of ${BOTH.length} windows span more than ${L}`,
   problem: {
     surface: 'trading',
+    trap: 'to re-scan every candidate for every position — re-read the window, or walk forward over every later day — instead of discarding the entries a newer, better value has already ruled out',
     statement: [`**A risk screen shows the highest value among the last \`W\` ticks, and must update on every tick.**`, '',
       `Millions of ticks a day and \`W\` up to 10⁵. **You may not re-read the window on each tick.**`, '',
       `Then: the screen must also warn when the last \`W\` ticks **span more than \`L\`** — highest minus lowest.`],
@@ -298,11 +300,11 @@ const r = buildInterviewSection({
     constraints: [`Values rise and fall. Memory may be proportional to \`W\`, not to the number of ticks.`],
   },
   model: [
-    `Re-reading the window is O(W) per tick — 10⁵ reads a tick, 10¹² in a day. The next thought is a max-heap of the window, and it fails on the operation nobody looks at first: **each tick, the value leaving the window must be removed**, and a heap can only remove its top. The departing value is almost never the top. Most attempts stall here.`, '',
+    `Re-reading the window costs W reads per tick — 10⁵ reads a tick, 10¹² in a day. The next thought is a max-heap of the window, and it fails on the operation nobody looks at first: **each tick, the value leaving the window must be removed**, and a heap can only remove its top. The departing value is almost never the top. Most attempts stall here.`, '',
     `The reframe is to stop storing the window and store only the values that **could still become the maximum**. Keep a list of **indexes** — indexes, not values, because only an index says whether an entry has expired — and keep it **decreasing**, so its front is the maximum and the answer is one read.`, '',
     `Maintaining it needs one argument, and it is the whole problem: when a value arrives, **anything at the back that is no larger can be discarded**, because the newcomer is both bigger *and* newer. For as long as either is in the window the newcomer is too, and it is always the larger — so the smaller one can never be the maximum again. Not unlikely to matter: provably dead.`, '',
     `Two consequences follow. The list holds exactly the window's **suffix maxima**, so nothing has to be recomputed when the front expires — the next entry is already the right answer. And **at most one entry can expire per tick**, because the window moves by one, so that step is an \`if\` rather than a loop.`, '',
-    `The cost argument is worth stating precisely, because "O(1)" is not quite true. A single tick can evict many entries. But **each index is pushed exactly once and removed at most once**, so the total over \`n\` ticks is bounded by 2\`n\` regardless of the values — amortised constant per tick, and **independent of W entirely**.`, '',
+    `The cost argument is worth stating precisely, because "one step per tick" is not quite true. A single tick can evict many entries. But **each index is pushed exactly once and removed at most once**, so the total over \`n\` ticks is bounded by 2\`n\` regardless of the values — amortised constant per tick, and **independent of W entirely**.`, '',
     `The second half is the same machine with every comparison reversed: a second list kept *increasing* gives the minimum, the two are advanced together, and the spread is the difference of the two fronts. The limit is worth naming too: this works for max and min and **nothing else**. A sliding median has no equivalent, because no value can be ruled out by a single comparison with a newer one — which is precisely the property the eviction argument rests on.`,
   ],
   variations: [
@@ -326,7 +328,7 @@ const r = buildInterviewSection({
     heading: 'The solution as a running program — stack and heap at every step',
     intro: [
       `The reframe above is six paragraphs; this is both answers running, with the two things a whiteboard cannot show — **what is allocated, and when**.`, '',
-      `Measured on ${xStr()} with W = ${W}: the scan costs **${BRUTE_OPS} reads** (${NWIN} windows × ${W}); the deque costs **${MAXR.ops} steps** — ${MAXR.pushes} pushes, ${MAXR.pops} back-evictions, ${MAXR.fronts} front-expiries — and returns the same maxima, asserted window by window. One tick evicts **${BIGEV.evicted.length}** entries at once and another evicts none, which is the amortised argument happening rather than being claimed. The two-list version gives spreads [${BOTH.map(b => b.spread).join(', ')}], of which ${OVER.length} exceed ${L}.`],
+      `Measured on ${xStr()} with W = ${W}: the scan costs **${BRUTE_OPS} reads** (${NWIN} windows × ${W}); the deque costs **${MAXR.ops} steps** — ${MAXR.pushes} pushes, ${MAXR.pops} back-evictions, ${MAXR.fronts} ${frontWord(MAXR.fronts)} — and returns the same maxima, asserted window by window. One tick evicts **${BIGEV.evicted.length}** entries at once and another evicts none, which is the amortised argument happening rather than being claimed. The two-list version gives spreads [${BOTH.map(b => b.spread).join(', ')}], of which ${OVER.length} exceed ${L}.`],
     sub: `Locals live in the frame and vanish when it is popped; 0x200 and 0x300 hold **indexes** rather than values, which is what lets an entry be recognised as expired, and neither ever exceeds ${W} entries. Every figure is derived from \`tools/stream_seed.js\` and asserted — including that the values are NOT monotonic (or nothing is ever evicted and the whole idea is invisible), that the deque agrees with the brute-force scan for both the maxima and the minima, that at least one tick evicts two or more, that at least one tick evicts none, that something really does expire from the front, and that some windows exceed L while others do not. **Scope note:** this is the one section whose problem reaches past its chapter's existing program, at the user's explicit direction — the chapter's watermark is an unbounded running maximum, which one corrupt future timestamp raises permanently, and bounding it to the last W events is both the fix and this problem. Generated by \`node tools/gen_ch03_interview.js\` on \`tools/interviewkit.js\`.`,
   },
 });

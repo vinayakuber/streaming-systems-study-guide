@@ -24,8 +24,8 @@
             "gap = 120",
             "i = 6",
             "out = @0x100",
-            "e = EVENTS[6]",
-            "last = Session(220, ...)"
+            "e = EVENTS[5]",
+            "last = Session(220, 220, ...)"
           ]
         }
       ]

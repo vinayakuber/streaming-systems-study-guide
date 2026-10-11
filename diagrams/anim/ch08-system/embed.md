@@ -2,13 +2,13 @@
 
 #### Why the sink requirement is readable from the query, and the timing is not
 
-**The question.** A continuous SQL query that keeps a campaign click count current: it buckets clicks into a TUMBLE window and updates the result when the watermark closes the window, so the count stays correct as late clicks arrive.
+**The question.** A continuous SQL query that keeps a click total current: it buckets clicks into a TUMBLE window and updates the result when the watermark closes the window, so the count stays correct as late clicks arrive.
 
 **The pipeline:** streams → SQL engine (continuous query) → watermark + window → updating result → sink.
 
-**The query:** `SELECT key, SUM(v) FROM clicks GROUP BY key, TUMBLE(et, INTERVAL '120' SECOND)`
+**The query:** `SELECT SUM(v) FROM clicks GROUP BY TUMBLE(et, INTERVAL '120' SECOND)` — one total per window, so each window is one result row
 
-**One thing is decidable from that text alone:** a windowed `GROUP BY` produces an **updating** stream, so the sink must UPSERT or accept retractions. 2 of the 4 window rows is revised here. Had the query been a `WHERE`, an append-only sink would have been fine — and knowing which before building anything is the practical value of the distinction.
+**One thing is decidable from that text alone:** a windowed `GROUP BY` produces an **updating** stream, so the sink must UPSERT or accept retractions. 1 of the 4 window rows is revised here. Had the query been a `WHERE`, an append-only sink would have been fine — and knowing which before building anything is the practical value of the distinction.
 
 **And one thing is not.** Follow window [12:00, 12:02)\: it finally holds 19 from ids 0, 1, 2, 7. The watermark passes 12:02 after event 4, at 12:04:06, and the engine emits **15**. Then id 7 arrives at 12:04:40 and the row is updated to **19**.
 
@@ -18,7 +18,7 @@ None of 15, 19 or 12:04:06 appears anywhere in the SQL. All three come from the 
 
 #### When this design is right, and the four things it does not settle
 
-**It is right when the sink can UPSERT by (key, window).** That is the one hard requirement, and it is known from the query shape rather than discovered in testing.
+**It is right when the sink can UPSERT by window.** That is the one hard requirement, and it is known from the query shape rather than discovered in testing.
 
 **Use the SQL form rather than a hand-written pipeline for this kind of query.** Four window shapes, two clocks and the whole trigger/accumulation apparatus are available in a statement you can review in one screen — which is a real advantage, as long as the review reads the window and the clock first.
 
@@ -42,7 +42,7 @@ The animation loops through all 4 steps. Expand any step to study it on its own.
 
 <img src="../diagrams/anim/ch08-system/frames/step-01.svg" alt="Step 1: the pipeline, and the one line of SQL it runs" width="1040">
 
-The useful property of a SQL-first design is that the sink requirement falls out of the query text. A windowed `GROUP BY` is an updating stream — 2 of 4 window rows is revised here — so the sink must UPSERT. Had the query been a `WHERE`, an append-only sink would have been fine, and that is decidable before anything is built.
+The useful property of a SQL-first design is that the sink requirement falls out of the query text. A windowed `GROUP BY` is an updating stream — 1 of 4 window rows is revised here — so the sink must UPSERT. Had the query been a `WHERE`, an append-only sink would have been fine, and that is decidable before anything is built.
 
 </details>
 <details>

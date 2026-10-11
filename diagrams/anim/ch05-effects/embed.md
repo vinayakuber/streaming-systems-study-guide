@@ -10,11 +10,11 @@ Worse, the pipeline **cannot tell**: a charge that timed out after succeeding lo
 
 Note what the key does *not* do: it does not make the effect idempotent. It moves the deduplication to the only place that can see both attempts. Two requirements follow — the key must be derived from the **data** (a key generated at send time is a second charge with extra steps), and the external system has to offer the feature at all.
 
-**And here is where the previous concept's redundancy disappears.** There are three windows in which the pipeline can crash while charging order 4:
+**And here is where the previous concept's redundancy disappears.** There are 3 ways a failure after the first charge can send order 4 again, and with no guard each one charges 12:
 
-- **crash before the shuffle** — the record is re-sent and the shuffle recognises its id. Dedup: covers. Key: covers.
-- **crash after the shuffle, before the charge** — the id is already past the dedup set; the replay sends a NEW copy that dedup has not seen. Dedup: **misses**. Key: covers.
-- **crash after the charge, before the offset commit** — the charge happened; only the external system can know that. Dedup: **misses**. Key: covers.
+- **upstream crash, shuffle alive** — the upstream stage dies after sending and re-sends on restart; the shuffle never crashed, still holds the id, and drops the copy. Dedup: covers. Key: covers.
+- **charge timeout, retried by the sink** — the call succeeded but its reply was lost, so the sink retries it from AFTER the dedup point and the copy never passes the shuffle. Dedup: **misses**. Key: covers.
+- **crash after the charge, before the offset commit** — the seen-set dies with the process, the replay re-reads the record and it looks new; only the external system knows the charge happened. Dedup: **misses**. Key: covers.
 
 A deduplicating shuffle covers **1 of 3**; an idempotency key covers **3 of 3**. For a pure aggregation the two guards were interchangeable. For a side effect only the external one reaches the crash windows that matter.
 
@@ -57,7 +57,7 @@ An idempotency key does not make the effect idempotent — it moves the deduplic
 
 <img src="../diagrams/anim/ch05-effects/frames/step-03.svg" alt="Step 3: so dedup covers 1 of 3 crash windows, the key covers 3" width="1040">
 
-This is the concept's whole argument in one table. For a pure aggregation, dedup and an idempotent sink were interchangeable. For a side effect they are not: dedup covers only the crash BEFORE the dedup point, and the two crash windows after it — record in flight, and charge completed — are reachable only by the external system's own key. 1 of 3 against 3 of 3.
+This is the concept's whole argument in one table. For a pure aggregation, dedup and an idempotent sink were interchangeable. For a side effect they are not: dedup covers only a copy that comes back THROUGH a shuffle that still remembers the id. A retry issued after the dedup point, and a replay after the seen-set died with the process, are reachable only by the external system's own key. 1 of 3 against 3 of 3.
 
 </details>
 <details>

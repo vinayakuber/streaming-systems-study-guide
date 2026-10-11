@@ -30,7 +30,7 @@ Two consequences that the algorithm cannot fix, and they are what the question i
 
 Each of these is the program below with different nouns. The reason to read them is not the
 answer — it is the *recognition*. 4 surfaces (access logs, scheduling, puzzles, operations), one shape, and in every
-case the appealing first answer is to materialise a sequence you cannot afford.
+case the appealing first answer is to assume one new item touches at most one existing run, so a run once reported stays as reported — and what breaks it is the item that joins two runs (or, in the calendar, the cancellation that splits one).
 
 <details>
 <summary><b>Variation 2</b> — the calendar that will not double-book <i>(looks like scheduling)</i></summary>
@@ -39,7 +39,7 @@ case the appealing first answer is to materialise a sequence you cannot afford.
 
 **Why it is not obvious.** Insertion is the same shape with the gap set to zero, and the new operation is the hard one: **cancellation splits a run**, which nothing above can do. Merging is easy because the merged run is determined by its ends; splitting is not, because once two bookings have been merged into one span the information needed to separate them is gone. So the state cannot be the merged runs at all — it has to be the individual bookings, with the merge computed on read. Recognising that the chapter's state shape is only valid for an append-only stream is the whole answer.
 
-**Where it lands.** `touching` with G = 0 for the overlap test, and `absorb` kept — but the stored state changes from runs to members, which is a different program with the same lookup.
+**Where it lands.** `touching` with G = 0 and strict comparisons for the overlap test (bookings are half-open, so back-to-back meetings do not clash), and `absorb` kept — but the stored state changes from runs to members, which is a different program with the same lookup.
 
 
 <details>
@@ -142,7 +142,8 @@ CANCEL_START = 90
 
 # The chapter's nine requests as an operation stream, and the same stream with the cancel.
 # Below them: a single booking, the abutting pair and the one-minute-overlap pair, a tiny day,
-# a long day, and a generated stream of 600 bookings.  These are inputs for the examples
+# a long day, and a generated stream of 400 abutting bookings (and the same 400 requested
+# twice).  These are inputs for the examples
 # table, not alternative versions of the problem.
 REQUEST_OPS = [("book", r) for r in REQUESTS]
 REQUEST_OPS_CANCEL = REQUEST_OPS + [("cancel", CANCEL_START)]
@@ -399,7 +400,10 @@ def main():
     gaps_keep = [g for g in free_gaps([(r[0], r[1]) for r in runs_keep])]
     missing = [g for g in gaps_true if g not in gaps_keep]
     assert missing == [(80, 130)], missing
-    print(f"    keep never offers {missing} -- the freed 50 minutes are unbookable forever.")
+    cancelled = next(r for r in REQUESTS if r[0] == CANCEL_START)
+    freed = sum(e - s for s, e in gaps_true) - sum(e - s for s, e in gaps_keep)
+    assert freed == cancelled[1] - cancelled[0], (freed, cancelled)
+    print(f"    keep never offers {missing} as one gap -- the freed {freed} minutes are unbookable forever.")
     # and the consequence, as a booking anyone would try to make
     probe = (95, 125)
     assert run_member_calendar(full + [("book", probe)])[0][-1] is True
@@ -529,7 +533,7 @@ REQUESTS (minutes from 09:00, half-open):
     merged/keep -> busy [(1, 31), (50, 80), (90, 160), (245, 275), (540, 570)]
     drop loses [(130, 160)] from the busy view -- a meeting that was never cancelled is
     now bookable, so two parties are sent to one room.
-    keep never offers [(80, 130)] -- the freed 50 minutes are unbookable forever.
+    keep never offers [(80, 130)] as one gap -- the freed 40 minutes are unbookable forever.
     booking 95..125 afterwards: members ACCEPT, merged/keep REJECTS,
     merged/drop accepts -- and accepts it on top of the meeting it lost.
   before the cancellation all three states agree exactly, so it is the cancel --
@@ -556,7 +560,7 @@ all assertions passed
 
 > Positions on a line are turned on one at a time, in any order. **After each one, report how many contiguous stretches are on.**
 
-**Why it is not obvious.** It is this problem with G = 1 and only a count wanted, and dropping the detail makes a much better answer available: a new position can join at most **two** stretches, so the count changes by exactly +1, 0 or −1 and nothing has to be searched. The non-obvious part is that this is reachable with no interval structure at all — a map from each stretch's endpoints to its length, consulted at the two neighbours, which is O(1) per position against the chapter's O(log runs). Noticing that the question asked only for a count is where the saving comes from.
+**Why it is not obvious.** It is this problem with G = 1 and only a count wanted, and dropping the detail makes a much better answer available: a new position can join at most **two** stretches, so the count changes by exactly +1, 0 or −1 and nothing has to be searched. The non-obvious part is that this is reachable with no interval structure at all — a map from each stretch's endpoints to its length, consulted at the two neighbours: two lookups and two writes per position, however many stretches exist, against the chapter's structure, which compares the new position with every run. Noticing that the question asked only for a count is where the saving comes from.
 
 **Where it lands.** `touching` reduced to checking the two adjacent positions, and `absorb` to arithmetic on a count. The 2-run merge in the trace is the −1 case.
 
@@ -617,7 +621,8 @@ detail makes a much better answer available.  A new position can join at most TW
 the one ending at p-1 and the one starting at p+1 -- so the count changes by exactly +1, 0 or
 -1 and nothing has to be searched at all.  The non-obvious part is that this needs no interval
 structure whatsoever: a map from each stretch's ENDPOINTS to its length, consulted at the two
-neighbours, is O(1) per position against the chapter's O(log runs).  Noticing that the question
+neighbours: two lookups and two writes per position, however many stretches exist, against
+the chapter's structure, which compares the new position with every run.  Noticing that the question
 asked only for a count is where the saving comes from.
 
 WORKED EXAMPLES: the EXAMPLES table below holds 15 input/output pairs -- an empty stream with
@@ -768,7 +773,7 @@ def show_examples():
     two lookups and two writes per position, `rescan` is the reference's set reads, and `runs`
     is the chapter's run comparisons.  The endpoint map LOSES on short streams (4 ops for one
     position against the rescan's 1) and TIES at exactly seven positions, where 4n = n(n+1)/2;
-    only past that does it win, and at 10,000 it wins by four orders of magnitude.  A rescan
+    only past that does it win, and at 10,000 it wins by a factor of (n+1)/8, about 1,250.  A rescan
     count marked * was not run -- the identity main() asserts, n(n+1)/2, is reported instead,
     because actually running it at 10,000 would take longer than everything else here.
     """
@@ -840,7 +845,10 @@ def main():
     assert count_by_runs(SPARSE)[0] == sparse_counts
     print(f"\n  SPARSE = {SPARSE} (the chapter's arrival times, G = 1):")
     print(f"    {sparse_counts} -- no two are within 1, so every position is its own island and")
-    print(f"    the count only ever rises.  The same data merged four runs at the chapter's G = 47.")
+    ordered = sorted(SPARSE)
+    runs_at_47 = 1 + sum(1 for a, b in zip(ordered, ordered[1:]) if b - a > 47)
+    assert runs_at_47 == 3, runs_at_47
+    print(f"    the count only ever rises.  At the chapter's G = 47 the same {len(SPARSE)} times collapse into {runs_at_47} runs.")
     # the opposite outcome is forbidden: a DENSE sequence must end at one island
     dense = list(range(20))
     assert count_by_endpoints(dense)[0] == [1] * 20, "consecutive positions must never add an island"
@@ -891,8 +899,8 @@ def main():
     # for the new position, -1 for the neighbour it absorbs), and a repeat also gives 0,
     # which is why the two cannot be told apart from the count alone.  The second
     # expectation was that 0 would then dominate.  Measured, the three deltas each occur
-    # close to n/3 times on a shuffle, because each of the two neighbours is already on with
-    # probability about a half and the three outcomes are the three ways that can land.
+    # close to n/3 times on a shuffle, because among p-1, p and p+1 each is equally likely to
+    # arrive first: p first gives +1, p last gives -1, p in the middle gives 0.
     thirds = [deltas_big.count(d) / BIG for d in (1, 0, -1)]
     assert all(abs(f - 1 / 3) < 0.02 for f in thirds), thirds
     assert sum(deltas_big) == 1, sum(deltas_big)
@@ -978,7 +986,7 @@ POSITIONS = [5, 7, 6, 1, 2, 3, 4, 4]
 
   SPARSE = [1, 3, 90, 130, 245, 260, 220, 50, 540] (the chapter's arrival times, G = 1):
     [1, 2, 3, 4, 5, 6, 7, 8, 9] -- no two are within 1, so every position is its own island and
-    the count only ever rises.  The same data merged four runs at the chapter's G = 47.
+    the count only ever rises.  At the chapter's G = 47 the same 9 times collapse into 3 runs.
     0..19 in order -> all ones; 0,2,4,..,38 -> 1..20.  The two extremes bracket it.
 
   150 shuffles of the same 15 positions: the final count is always 3
@@ -1085,8 +1093,10 @@ later firing within G must not page again.  So the retraction from the chapter's
 a paging problem: when two already-paged incidents merge, somebody was paged twice for what
 turned out to be one.  The useful answer is that G is now TWO decisions and not one -- how long
 to wait before paging, and how long before declaring the incident over -- and they need not be
-the same number.  Measured below: at this data no single pair of numbers gives both zero double
-pages and a page for every incident.
+the same number.  Measured below: on this arrival order only 3 of 4,961 pairs -- CLOSE_AFTER
+87..89 with PAGE_AFTER 0 -- give both zero double pages and a page for every incident, and
+reordering the same nine firings breaks them, so no pair gives both for arrival orders you do
+not control.
 
 WORKED EXAMPLES: the EXAMPLES table below holds 16 input/output pairs -- an empty stream, a
 single firing that nobody is ever paged for, both sides of the quiet period (a gap of exactly
@@ -1114,8 +1124,9 @@ CLOSE_AFTER = 47
 WIDE = 120
 
 # PAGE_AFTER = 2 minutes: how long the monitor must have been firing before a human is woken.
-# Chosen because the 1..3 firings span exactly 2, so this is the smallest value at which that
-# pair pages -- and therefore the smallest value at which the double page happens.
+# Chosen because the 1..3 firings span exactly 2, so this is the LARGEST value at which that
+# pair still pages -- and therefore the largest at which the double page happens; at 3 it
+# disappears.
 PAGE_AFTER = 2
 
 # A single firing, the two pairs that straddle the quiet period, a repeated firing, the same
@@ -1578,7 +1589,7 @@ def ascending(times):
 
 def sweep(times, g=G):
     """The batch answer: sort, then walk.  Each time extends the last run or starts
-    a new one, decided by one comparison.  O(n log n) + O(n) -- and correct only
+    a new one, decided by one comparison.  One sort, then one comparison per time -- and correct only
     once every time has arrived, which the question says will not happen."""
     out = []
     for t in ascending(times):
@@ -1628,7 +1639,7 @@ def incremental(times, g=G):
 # The three variations.
 
 def the_calendar_that_will_not_double_book(ops):
-    """Variation 1, surface: scheduling.  Reject bookings that overlap; report gaps.
+    """Variation 2, surface: scheduling.  Reject bookings that overlap; report gaps.
 
     Non-obvious point: insertion is `touching` with g = 0, and CANCELLATION is the
     operation nothing above can do -- merging is easy because a merged run is
@@ -1637,31 +1648,35 @@ def the_calendar_that_will_not_double_book(ops):
     merged runs at all: it must be the individual bookings, with the merge
     computed on read.
 
-    `ops` is [("book"|"cancel", (start, end)), ...].  Returns (accepted, members).
+    Bookings are HALF-OPEN, [start, end), so back-to-back meetings do not clash.
+    `ops` is [("book", (start, end)) | ("cancel", start), ...]: a cancel names the
+    booking by its start and is accepted only if it removed one.
+    Returns (accepted, members).
     """
     members, accepted = [], []
     for kind, span in ops:
         if kind == "book":
-            clash = [m for m in members if span[0] <= m[1] and m[0] <= span[1]]
+            clash = [m for m in members if span[0] < m[1] and m[0] < span[1]]
             if clash:
                 accepted.append(False)
                 continue
             members.append(span)
             accepted.append(True)
         else:
-            members = [m for m in members if m != span]
-            accepted.append(True)
+            before = len(members)
+            members = [m for m in members if m[0] != span]
+            accepted.append(len(members) < before)
     return accepted, sorted(members)
 
 def the_island_count(positions):
-    """Variation 2, surface: puzzles.  Positions turn on in any order; after each,
+    """Variation 3, surface: puzzles.  Positions turn on in any order; after each,
     how many contiguous stretches are on?
 
     Non-obvious point: the question asked only for a COUNT, and that buys a much
     better answer -- a new position can join at most TWO stretches, so the count
     moves by exactly +1, 0 or -1 and nothing has to be searched.  A map from a
-    stretch's endpoints to its length is enough: O(1) per position, with no
-    interval structure at all.  The two-run merge in the main trace is the -1 case.
+    stretch's endpoints to its length is enough: two lookups and two writes per
+    position, with no interval structure at all.  The two-run merge in the main trace is the -1 case.
     """
     length, count, out = {}, 0, []
     on = set()
@@ -1680,7 +1695,7 @@ def the_island_count(positions):
     return out
 
 def the_deduplicated_alert(firings, page_after, close_after):
-    """Variation 3, surface: operations.  Group firings into incidents and page once.
+    """Variation 4, surface: operations.  Group firings into incidents and page once.
 
     Non-obvious point: you must page while an incident is still OPEN -- acting on a
     run before knowing it is finished -- so the withdrawal in the main trace becomes
@@ -1762,12 +1777,22 @@ def main():
     # variations
     ok, members = the_calendar_that_will_not_double_book(
         [("book", (0, 10)), ("book", (5, 15)), ("book", (11, 20)),
-         ("cancel", (0, 10)), ("book", (5, 9))])
+         ("cancel", 0), ("book", (5, 9))])
     assert ok == [True, False, True, True, True], ok
     assert members == [(5, 9), (11, 20)], members
-    # and the point: a merged-run state could not have produced that last booking,
-    # because cancelling 0..10 out of a merged 0..20 is not expressible
-    assert sweep([0, 10, 11, 20], 1) == [(0, 0), (10, 11), (20, 20)]
+    # and the point: a merged-run state could not have produced that result.  The two
+    # bookings held before the cancel abut within 1, so a gap-1 merge keeps them as ONE
+    # run 0..20, which no longer records where 0..10 ended -- cancelling the booking
+    # that starts at 0 then removes 11..20 as well, which the member state keeps.
+    held = [(0, 10), (11, 20)]
+    assert held[1][0] - held[0][1] <= 1
+    merged_state = [(held[0][0], held[1][1])]
+    assert merged_state == [(0, 20)], merged_state
+    assert [r for r in merged_state if r[0] != 0] == [], "the merged run survived the cancel"
+    assert [m for m in held if m[0] != 0] == [(11, 20)]
+    assert the_calendar_that_will_not_double_book(
+        [("book", (90, 130)), ("book", (130, 160))])[0] == [True, True], "back-to-back must not clash"
+    assert the_calendar_that_will_not_double_book([("cancel", 7)])[0] == [False], "a cancel of nothing"
     print(f"\n  calendar: accepted {ok}, members {members}")
 
     islands = the_island_count([5, 7, 6, 1, 2, 3])
@@ -1847,7 +1872,7 @@ all assertions passed
 
 The reframe above is six paragraphs; this is the batch answer and then the same thing built one arrival at a time, with the two things a whiteboard cannot show — **what is allocated, and when**.
 
-Measured on [1, 3, 90, 130, 245, 260, 220, 50, 540] with G = 47: the sorted sweep gives 1..130  220..260  540..540, and 9 arrivals processed in order give 1..130  220..260  540..540 — asserted equal. Along the way one arrival **starts** a run, one **extends** one, and arrival 50 **joins 2** of them into 1..130. 6 runs that were already reported stop existing, and one run later acquires an earlier start — which is what rules out keying the output on it.
+Measured on [1, 3, 90, 130, 245, 260, 220, 50, 540] with G = 47: the sorted sweep gives 1..130  220..260  540..540, and 9 arrivals processed in order give 1..130  220..260  540..540 — asserted equal. Along the way 4 arrivals **start** a run, 4 **extend** one, and arrival 50 **joins 2** of them into 1..130. 6 runs that were already reported stop existing, and 2 runs later acquire an earlier start — which is what rules out keying the output on it.
 
 The animation steps through the code, holding each line long enough to read the STACK (call frames and their locals) and the HEAP (allocated arrays and objects) as they are AT THAT MOMENT. Expand any step to study it on its own.
 
@@ -1866,7 +1891,7 @@ The animation steps through the code, holding each line long enough to read the 
 
 <img src="../diagrams/anim/ch04-interview-memory/frames/step-02.svg" alt="Step 2: the batch answer: sort, then walk" width="980">
 
-Sorted, each time either extends the current run or starts a new one, and one comparison decides which: 1..130  220..260  540..540. O(n log n) for the sort and O(n) for the walk — and it is only correct **once every time has arrived**, which the question says will not happen.
+Sorted, each time either extends the current run or starts a new one, and one comparison decides which: 1..130  220..260  540..540. One sort of all 9 times, then one comparison per time — and it is only correct **once every time has arrived**, which the question says will not happen.
 
 </details>
 <details>
@@ -1886,11 +1911,11 @@ A time joins a run if it is within G of either end — so the test is two compar
 
 </details>
 <details>
-<summary><b>Step 5 of 12</b> — arrival 3: extends one run</summary>
+<summary><b>Step 5 of 12</b> — arrival 130: extends one run</summary>
 
-<img src="../diagrams/anim/ch04-interview-memory/frames/step-05.svg" alt="Step 5: arrival 3: extends one run" width="980">
+<img src="../diagrams/anim/ch04-interview-memory/frames/step-05.svg" alt="Step 5: arrival 130: extends one run" width="980">
 
-3 touches exactly one run, 1..1, so that run's ends widen to cover it: 1..3. This is the case everyone implements, and it is why the next frame is the question — one touched run is the easy half.
+130 touches exactly one run, 90..90, so that run's ends widen to cover it: 1..3  90..130. This is the case everyone implements, and it is why the next frame is the question — one touched run is the easy half.
 
 </details>
 <details>
@@ -1938,7 +1963,7 @@ Run 245..260 later acquires an **earlier** start, because a time arrived before 
 
 <img src="../diagrams/anim/ch04-interview-memory/frames/step-11.svg" alt="Step 11: what each arrival costs" width="980">
 
-`touching` as written looks at every run, which is fine at 3 and not at 1,000,000 entries spread over thousands of runs. The runs are kept ordered by start and never overlap, so the touched ones are a **contiguous slice** — findable by bisection and then walked, giving log plus the number actually merged. The ordering is already maintained, so this costs nothing to add and is the difference between O(runs) and O(log runs) per arrival.
+`touching` as written looks at every run, which is fine at 3 and not at 1,000,000 entries spread over thousands of runs. The runs are kept ordered by start and never overlap, so the touched ones are a **contiguous slice** — findable by bisection and then walked, giving log plus the number actually merged. The ordering is already maintained, so this costs nothing to add and is the difference between comparing every run and about 20 comparisons per arrival — even if all 1,000,000 entries were separate runs.
 
 </details>
 <details>

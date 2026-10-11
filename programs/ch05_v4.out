@@ -56,9 +56,9 @@ ITEMS = [0, 1, 2, 3, 4, 5, 6, 7, 8], values [5, 3, 7, 2, 6, 1, 9, 4, 8]
   the same nine items, the same two programs, and the better design is opposite for
   the two messages.  Nothing in the code decides it, which is why the answer to this
   question is a question.
-  holding the cost of a loss at 20, at-least-once stops winning the moment a
-  duplicate costs 21 -- the crossover is exactly where the two costs cross,
-  because each design fails on exactly one item per crash.
+  holding the cost of a loss at 20, the two designs tie when a duplicate costs 20
+  and at-least-once starts losing at 21 -- the crossover is exactly where the
+  two costs cross, because each design fails on exactly one item per crash.
 
   boundaries: an empty queue sends nothing under either design; a one-item queue
   crashed on its only item sends it twice one way and never the other -- there is no

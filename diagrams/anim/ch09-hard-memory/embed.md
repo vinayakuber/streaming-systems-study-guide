@@ -37,9 +37,9 @@ Click 3 needs the join watermark above 130 + 60 = 190, which first happens at ro
 
 </details>
 <details>
-<summary><b>Step 4 of 4</b> — and 2 click never reaches it, holding 2 matches</summary>
+<summary><b>Step 4 of 4</b> — and 2 clicks never reach it, holding 2 matches</summary>
 
-<img src="../diagrams/anim/ch09-hard-memory/frames/step-04.svg" alt="Step 4: and 2 click never reaches it, holding 2 matches" width="980">
+<img src="../diagrams/anim/ch09-hard-memory/frames/step-04.svg" alt="Step 4: and 2 clicks never reach it, holding 2 matches" width="980">
 
 Click 4 needs the watermark above 305, and `claim` only ever reaches 200. So `when` stays NONE while `ms` holds 2 real matches. They are computed, sitting in state, and never published — and no error is raised.
 

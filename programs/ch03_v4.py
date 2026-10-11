@@ -121,7 +121,8 @@ def show_examples():
     (pushes, back-pops, front-pops and left-edge steps).  They are counts of DIFFERENT units
     and the table says which is smaller, not which program is faster: a measured run costs
     time proportional to its length, because the scan takes the max and the min of a slice,
-    while every deque op is constant work.  So the deques come out with MORE ops on short logs
+    while every deque op is constant work.  So the deques usually come out with MORE ops on
+    short logs (all but the two loose-tolerance rows, where the scan measures every run)
     -- they pay two pushes a second whether or not anything happens -- and even at 20,000
     seconds with L = 20 their op count is the larger of the two, while the work behind each of
     those ops is not.  Printing both is the only honest way to show that.
@@ -168,7 +169,7 @@ def longest_naive(xs, limit):
     return best, bstart, ops
 
 
-def longest_steady(xs, limit):
+def longest_steady(xs, limit, kinds=None):
     """The answer: two deques and a left edge that is pushed forward only as far as needed.
 
     `hi` is kept decreasing and `lo` increasing, so the spread of the current run is one
@@ -177,7 +178,8 @@ def longest_steady(xs, limit):
     only when its index has actually fallen behind the left edge, which is why the two `if`s
     are separate and tested against `left` rather than against any fixed offset.
 
-    Returns (length, start, pushes, back_pops, front_pops, left_steps)."""
+    Returns (length, start, pushes, back_pops, front_pops, left_steps).  If `kinds` is a list,
+    each left-edge step appends how many fronts it dropped (0, 1 or 2)."""
     hi, lo, left, best, bstart = [], [], 0, 0, 0
     pushes = back = front = steps = 0
     for i, v in enumerate(xs):
@@ -193,12 +195,16 @@ def longest_steady(xs, limit):
         while xs[hi[0]] - xs[lo[0]] > limit:
             left += 1
             steps += 1
+            popped = 0
             if hi[0] < left:                # the maximum may or may not be the one leaving
                 hi.pop(0)
-                front += 1
+                popped += 1
             if lo[0] < left:                # and the minimum independently may or may not
                 lo.pop(0)
-                front += 1
+                popped += 1
+            front += popped
+            if kinds is not None:
+                kinds.append(popped)
         if i - left + 1 > best:
             best, bstart = i - left + 1, left
     return best, bstart, pushes, back, front, steps
@@ -254,12 +260,13 @@ def main():
     show_examples()
     print("READINGS =", "  ".join(f"{i}:{v}" for i, v in enumerate(READINGS)), f"   L = {L}")
     want, wstart, ops = longest_naive(READINGS, L)
-    got, start, pushes, back, front, steps = longest_steady(READINGS, L)
+    kinds = []
+    got, start, pushes, back, front, steps = longest_steady(READINGS, L, kinds)
     run = READINGS[start:start + got]
     print(f"  naive  : {want} seconds from second {wstart}   ({ops} runs measured)")
     print(f"  deques : {got} seconds from second {start} -> {run}, spread "
           f"{spread(run)} <= {L}")
-    print(f"           ({pushes} pushes, {back} back-pops, {front} front-pops, "
+    print(f"           ({pushes} pushes, {back} back-pops, {front} front-pop{'' if front == 1 else 's'}, "
           f"{steps} left-edge steps)")
     assert (got, start) == (want, wstart), (got, start, want, wstart)
     assert got == 6 and start == 0, (got, start)
@@ -275,8 +282,13 @@ def main():
     assert front >= 1, "nothing ever expired from a front"
     assert front < 2 * steps, (
         "every left-edge step dropped from BOTH deques, so the separate `if`s are untested")
-    print(f"\n  {steps} left-edge steps produced only {front} front-pops: most steps drop from one")
-    print(f"  deque and not the other, which is precisely what a single shared `if` gets wrong.")
+    none, one, both = kinds.count(0), kinds.count(1), kinds.count(2)
+    assert none + one + both == steps and one + 2 * both == front, (kinds, steps, front)
+    assert one >= 1, "no step dropped from exactly one deque, so the separate `if`s are untested"
+    print(f"\n  {steps} left-edge steps produced only {front} front-pop{'' if front == 1 else 's'}: "
+          f"{none} dropped from neither deque, {one} from exactly one, {both} from both.")
+    print(f"  Each front leaves only when ITS index falls behind the left edge, and the two deques")
+    print(f"  do so independently -- which is precisely what a single shared `if` popping both gets wrong.")
 
     # ---- the two wrong answers, run
     bad_both = longest_popping_both(READINGS, L)

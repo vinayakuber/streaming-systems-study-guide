@@ -1,3 +1,22 @@
+const CH10 = (() => {
+  const S = require(require('path').resolve('tools', 'stream_seed.js'));
+  const mm = (sec) => S.hhmmss(sec).slice(0, 5);
+  const N = S.EVENTS.length;
+  const TOTAL = S.EVENTS.reduce((s, e) => s + e.v, 0);
+  const WINS = S.WIN_STARTS.map(k => `${mm(k)}: ${S.SUM(S.WINDOWS[k])}`).join(', ');
+  const VALS = S.WIN_STARTS.map(k => S.SUM(S.WINDOWS[k])).join(', ');
+  const NF = S.WIN_STARTS.find(k => S.closedAt(k) === null);
+  const BUG_KEY = S.KEYS[0], OK_KEY = S.KEYS[1];
+  const buggy = (e) => e.key === BUG_KEY ? Math.floor(e.v / 2) : e.v;
+  const per = (f, k) => S.EVENTS.filter(e => e.key === k).reduce((s, e) => s + f(e), 0);
+  const CHK = 4, ent = {};
+  S.EVENTS.slice(0, CHK + 1).forEach(e => { const k = `${e.key}@${S.winOf(e.et)}`; ent[k] = (ent[k] || 0) + e.v; });
+  const LASTV = S.SUM(S.WINDOWS[NF]);
+  return { N, TOTAL, WINS, VALS, NWIN: S.WIN_STARTS.length, NF: `[${mm(NF)}, ${mm(NF + S.WIN)})`,
+    BUG_KEY, OK_KEY, BUGGY_K: per(buggy, BUG_KEY), TRUE_K: per(e => e.v, BUG_KEY), OK_V: per(e => e.v, OK_KEY),
+    BUGGY_TOTAL: S.EVENTS.reduce((s, e) => s + buggy(e), 0),
+    CHK, CHK_N: Object.keys(ent).length, CHK_SUM: Object.values(ent).reduce((a, b) => a + b, 0), LASTV, WIN: S.WIN };
+})();
 registerChapter({
   id: 'ch10',
   num: 10,
@@ -14,7 +33,7 @@ registerChapter({
       motivation: `The evolution of data processing explains why streaming systems look the way they do, so this section traces the arc from batch to the Beam model.`,
       steps: [
         { num: 1, title: 'MapReduce made batch tractable', detail: 'MapReduce (and Hadoop) made large batch jobs <strong>scalable and fault-tolerant</strong>, but it was built for finite datasets and had high latency.' },
-        { num: 2, title: 'Streaming emerged for low latency', detail: 'Systems like MillWheel and Storm processed events as they arrived for <strong>low-latency</strong> results, but early versions lacked the correctness of batch (no event time, no watermarks).' },
+        { num: 2, title: 'Streaming emerged for low latency', detail: 'Systems like Storm processed events as they arrived for <strong>low-latency</strong> results, but without event time or watermarks. MillWheel then added low watermarks, and the Dataflow/Beam model generalised them.' },
         { num: 3, title: 'The Beam model unified the two', detail: 'The what/where/when/how model showed batch and streaming are <strong>the same computation over bounded vs unbounded data</strong> — batch is just streaming over a finite input.' },
         { num: 4, title: 'The consequence: one pipeline, both modes', detail: 'Because the model is unified, <strong>the same pipeline code can run in batch or streaming</strong> — the only difference is whether the input is bounded.' }
       ],
@@ -48,7 +67,7 @@ registerChapter({
   concepts: {
     cards: [
       { tag: 'problem', tagLabel: 'Why', title: '1. Batch and streaming were separate worlds', content: '<p><strong>Why.</strong> Batch had correctness and fault tolerance; streaming had low latency but weak correctness — and teams had to choose.</p><p><strong>Claim.</strong> The Beam model showed batch and streaming are the same computation over bounded vs unbounded data.</p><p><strong>Grounding.</strong> The book\'s thesis is that the two converge.</p><p><strong>In the wild.</strong> Beam, Flink, and Dataflow all run the same pipeline in both modes.</p>' },
-      { tag: 'solution', tagLabel: 'Architecture', title: '2. Lambda architecture', content: '<p><strong>Why.</strong> To get both correct and low-latency results, run two layers.</p><p><strong>Claim.</strong> Lambda runs a batch layer (correct) and a speed layer (low-latency) computing the same logic in two codebases.</p><p><strong>Grounding.</strong> The duplication is the core cost — the layers drift.</p><p><strong>In the wild.</strong> Nathan Marz\'s Lambda architecture from the Hadoop era.</p>' },
+      { tag: 'solution', tagLabel: 'Definition', title: '2. Lambda architecture', content: '<p><strong>Why.</strong> To get both correct and low-latency results, run two layers.</p><p><strong>Claim.</strong> Lambda runs a batch layer (correct) and a speed layer (low-latency) computing the same logic in two codebases.</p><p><strong>Grounding.</strong> The duplication is the core cost — the layers drift.</p><p><strong>In the wild.</strong> Nathan Marz\'s Lambda architecture from the Hadoop era.</p>' },
       { tag: 'solution', tagLabel: 'Architecture', title: '3. Kappa architecture', content: '<p><strong>Why.</strong> Eliminating the second codebase removes the drift.</p><p><strong>Claim.</strong> Kappa runs one streaming pipeline and reprocesses by replaying the log through the same code.</p><p><strong>Grounding.</strong> One codebase, no synchronization.</p><p><strong>In the wild.</strong> Jay Kreps\' Kappa architecture on top of Kafka.</p>' },
       { tag: 'solution', tagLabel: 'Insight', title: '4. Batch is a special case', content: '<p><strong>Why.</strong> If the model is unified, batch needs no separate machinery.</p><p><strong>Claim.</strong> Batch is streaming over a bounded input — windows, watermarks, and triggers still apply, just with an input that ends.</p><p><strong>Grounding.</strong> This is the consequence of the Beam model.</p><p><strong>In the wild.</strong> Beam runs batch pipelines with the same windowing as streaming.</p>' },
       { tag: 'solution', tagLabel: 'Operation', title: '5. Reprocessing via replay', content: '<p><strong>Why.</strong> Business logic changes, so history must be recomputed under the new logic.</p><p><strong>Claim.</strong> Reprocessing replays the retained log through the new pipeline — the Kappa pattern.</p><p><strong>Grounding.</strong> The log is the source of truth; the pipeline is disposable.</p><p><strong>In the wild.</strong> Kafka retention + replay is the production form.</p>' },
@@ -67,7 +86,7 @@ registerChapter({
 
   interview: [
     { scenario: "A team runs a batch job and a streaming job that compute the same metric, and the two numbers disagree — the batch and speed layers have drifted.", q: "How do you avoid maintaining two divergent implementations of the same computation?", solution: "Adopt the Kappa pattern: one streaming pipeline, and reprocess by replaying the retained log through the same code — batch becomes a replay of the same pipeline, not a separate codebase.", components: ["One pipeline — Kappa", "Replayable log — Kafka", "Reprocessing — replay history", "Unified model — batch = bounded streaming"],  code: "// lambda: batch code + speed code -> drift\n// kappa : one code, replay log -> no drift\n//   bug fix -> edit once -> replay history -> swap result", tieback: "This is exactly the Lambda vs Kappa material in this chapter.", refs: ["2. Lambda architecture", "3. Kappa architecture", "5. Reprocessing via replay"], problems: ["20-metrics-monitoring", "21-ad-click-aggregation"] },
-    { scenario: "An analyst asks why the company maintains separate batch and streaming pipelines when the business logic is identical.", q: "Are batch and streaming really the same thing, and how would you unify them?", solution: "Yes — batch is streaming over a bounded input. Use a unified model (Beam) so one pipeline runs both modes, and reprocess via replay when logic changes.", components: ["Unified model — Beam", "Bounded vs unbounded input", "One codebase"],  code: "// same windowed sum\n//   batch    : read 3 records -> result {12:00: 3}\n//   streaming: read 3 records as they arrive -> {12:00: 3}\n//   -> identical computation, different input", tieback: "This is exactly the batch-as-a-special-case material in this chapter.", refs: ["1. Batch and streaming were separate worlds", "4. Batch is a special case"], problems: ["20-metrics-monitoring"] }
+    { scenario: "An analyst asks why the company maintains separate batch and streaming pipelines when the business logic is identical.", q: "Are batch and streaming really the same thing, and how would you unify them?", solution: "Yes — batch is streaming over a bounded input. Use a unified model (Beam) so one pipeline runs both modes, and reprocess via replay when logic changes.", components: ["Unified model — Beam", "Bounded vs unbounded input", "One codebase"],  code: `// same windowed sum over the ${CH10.N} seed events\n//   batch    : read ${CH10.N} events, then stop -> {${CH10.WINS}}\n//   streaming: read ${CH10.N} events as they arrive -> the same ${CH10.NWIN} windows, the same values\n//   -> identical computation; only finality differs (${CH10.NF} is never final in streaming)`, tieback: "This is exactly the batch-as-a-special-case material in this chapter.", refs: ["1. Batch and streaming were separate worlds", "4. Batch is a special case"], problems: ["20-metrics-monitoring"] }
   ],
   systemDesign: {
     walkthroughs: ['ch10-system', 'ch10-system-memory'],
@@ -76,7 +95,7 @@ registerChapter({
     decomposition: [
       { box: 'log (replayable)', role: 'log — retains input history for replay',
         parts: [
-          'the log holds records [ r1, r2, r3 ] with offsets',
+          `the log holds the ${CH10.N} seed events at offsets 0..${CH10.N - 1}`,
           'retention is long enough to re-run when code changes',
           'the log is the source of truth'
         ] },
@@ -95,7 +114,7 @@ registerChapter({
       { box: 'replay path -> corrected result', role: 'replay path — recomputes history after a code change',
         parts: [
           'the log is rewound to offset 0',
-          'the same pipeline (v2) folds r1, r2, r3 again',
+          `the same pipeline (v2) folds all ${CH10.N} events again: key "${CH10.BUG_KEY}" ${CH10.BUGGY_K} → ${CH10.TRUE_K}, total ${CH10.BUGGY_TOTAL} → ${CH10.TOTAL}, key "${CH10.OK_KEY}" stays ${CH10.OK_V}`,
           'the corrected result replaces the buggy one'
         ] }
     ],
@@ -109,10 +128,10 @@ registerChapter({
     { question: "What stays distinct between batch and streaming after unification?", options: ["A. The window types", "B. When results are final — batch ends, streams wait on watermarks", "C. The transform logic", "D. The key grouping"], answer: 2, explanation: "The model unifies the how, not the fact that streams never end.", conceptRef: "8. What stays distinct" }
   ],
   seeAlso: [
-    { to: 1, section: 'Three shapes of data', depth: '"batch is streaming over a bounded input" is ch01\'s three-shapes distinction stated as a unification — bounded, unbounded-batched, and unbounded-streaming are the same computation over different inputs.', example: 'ch10\'s windowed sum over a 3-record file vs a 3-record stream (both { "12:00": 3 }) is ch01\'s "batch is a special case of streaming" made concrete.' },
-    { to: 6, section: 'Why the duality matters in practice', depth: 'the Kappa architecture\'s replayable log is the stream-as-source-of-truth principle from ch06 — the log is retained history, the table is a derived view.', example: 'ch10\'s "rewind the log to offset 0 and replay" is ch06\'s "any past table is a fold of the stream"; ch10\'s corrected table is ch06\'s materialized fold under new code.' },
-    { to: 7, section: 'Why state must persist', depth: 'replay-based reprocessing is only practical because state checkpoints let a pipeline resume without re-reading everything — ch07 covers the checkpoint machinery Kappa leans on.', example: 'ch10\'s replay folds r1, r2, r3 through v2; ch07\'s checkpoint { count: {42:13}, offset: 500 } is what avoids replaying the whole log on every crash, so reprocessing is a deliberate re-run, not a recovery tax.' },
-    { to: 2, section: 'What and Where — transformations and windowing', depth: 'the unified model that makes Lambda\'s duplication unnecessary is the what/where/when/how model — ch02 defines the four axes ch10 unifies.', example: 'ch10\'s "one pipeline, batch + streaming" is ch02\'s four-question spec applied to a bounded vs unbounded input; ch10\'s reprocessing is ch02\'s "how" (accumulation) recomputed under new logic.' }
+    { to: 1, section: 'Three shapes of data', depth: '"batch is streaming over a bounded input" is ch01\'s three-shapes distinction stated as a unification — bounded, unbounded-batched, and unbounded-streaming are the same computation over different inputs.', example: `ch10's same ${CH10.N} events give the same ${CH10.NWIN} windows (${CH10.VALS}) whether the input is bounded or unbounded; only finality differs, because ${CH10.NF} is never final in streaming. That is ch01's "shapes 1 and 3 group identically … they differ only in when they declare a window done", with ch01's last window, holding ${CH10.LASTV}, the one that never closes.` },
+    { to: 6, section: 'Why the duality matters in practice', depth: 'the Kappa architecture\'s replayable log is the stream-as-source-of-truth principle from ch06 — the log is retained history, the table is a derived view.', example: `ch10's "rewind the log to offset 0 and replay" is ch06's "any past table is recoverable by folding the stream up to that point", run to the end under new code: all ${CH10.N} events through v2 take key "${CH10.BUG_KEY}" from ${CH10.BUGGY_K} to ${CH10.TRUE_K} and the total from ${CH10.BUGGY_TOTAL} to ${CH10.TOTAL}.` },
+    { to: 7, section: 'Why state must persist', depth: 'replay-based reprocessing is only practical because state checkpoints let a pipeline resume without re-reading everything — ch07 covers the checkpoint machinery Kappa leans on.', example: `ch10's replay folds all ${CH10.N} events through v2; ch07's checkpoint taken after event ${CH10.CHK} (${CH10.CHK_N} state entries holding ${CH10.CHK_SUM}, offset ${CH10.CHK}, resumed at ${CH10.CHK + 1}) is what avoids replaying the whole log on every crash, so reprocessing is a deliberate re-run, not a recovery tax.` },
+    { to: 2, section: 'What and Where — transformations and windowing', depth: 'the unified model that makes Lambda\'s duplication unnecessary is the what/where/when/how model — ch02 defines the four axes ch10 unifies.', example: `ch10's "one pipeline, batch + streaming" is ch02's four questions held fixed while only the input changes: ch02's what and where (sum, fixed ${CH10.WIN} s windows) give ${CH10.VALS} over a bounded or an unbounded input alike, and only the when differs; ch10's reprocessing changes the what (v2) and recomputes every window.` }
   ],
   sources: [
     { name: 'Dean & Ghemawat — "MapReduce" (OSDI 2004)', url: 'https://research.google/pubs/pub62/', note: 'The batch model that streaming evolved from' },
