@@ -4,19 +4,19 @@
 
 **Skew** is the name for the gap: `skew = processing time − event time`, in seconds. It is the one quantity this concept rests on, so measure it on all 9 events rather than reasoning about it.
 
-Eight of the nine arrive within 50s. One — id 7 — takes **230s**, about 5× the next worst. **Skew is a long tail, not a constant**, and that shape is why you cannot look it up.
+Eight of the nine arrive within 50s. One — id 7 — takes **230s**, about 5× the next worst (50s), and nearly 4× the 60s lag introduced below. **Skew is a long tail, not a constant**, and that shape is why you cannot look it up.
 
 **A watermark is a claim about completeness:** "no event with an event time earlier than *t* will arrive from here on." It is what lets a pipeline decide a window is done. The usual way to produce one is a heuristic: take the highest event time seen so far and subtract an assumed worst-case lag — here **60s**.
 
 That heuristic is arithmetic on the events that *did* arrive, so it cannot know about one that has not. When id 7 shows up, the watermark already stands at 12:03:20 — it has already claimed 12:00:50 is settled. **The claim is simply false, and nothing in the pipeline detects it.**
 
-**Now price the fix.** Waiting 60s drops 1 event (id 7). Waiting 230s drops none. The difference is **170s of extra delay on every answer this pipeline ever produces** — across this seed's 4 windows, 240s of total delay becomes 920s. That is the exchange rate between completeness and latency, and it is fixed by the data, not by your cleverness.
+**Now price the fix.** Waiting 60s drops 1 event (id 7). Waiting 230s drops none. The difference is **170s of extra delay on every answer this pipeline ever produces** — counted over the seed's 4 two-minute event-time windows (the fixed 120s windows the rest of the book uses, not the one-minute buckets above), 240s of total delay becomes 920s. That is the exchange rate between completeness and latency, and it is fixed by the data, not by your cleverness.
 
 #### When to use which clock, and why the budget is a product decision
 
-**Use event time for any question about the world.** "How many clicks happened at 12:00?" is a fact about users; the answer is 12 and it does not change because your pipeline was busy. Session lengths, conversion windows, latency percentiles — all event time.
+**Use event time for any question about the world.** "How many clicks happened at 12:00?" is a fact about users; the answer is 12 clicks and it does not change because your pipeline was busy. Session lengths, conversion windows, latency percentiles — all event time.
 
-**Use processing time for any question about the system.** "What is our ingest rate right now?" is a fact about you; the answer is 8 for that minute and it is *correct*. Processing time is not the lazy choice — it is the right answer to a different question.
+**Use processing time for any question about the system.** "What is our ingest rate right now?" is a fact about you; the answer is 8 clicks received in that minute, and it is *correct*. Processing time is not the lazy choice — it is the right answer to a different question.
 
 **Use both to measure yourself:** the gap between the two clocks *is* your lag. That is the number to alert on.
 
@@ -35,7 +35,7 @@ The animation loops through all 4 steps. Expand any step to study it on its own.
 
 <img src="../diagrams/anim/ch01-eventtime/frames/step-01.svg" alt="Step 1: skew, measured: processing time minus event time" width="1040">
 
-Skew is the single measured quantity this chapter rests on. Note its SHAPE: a cluster of small values and one outlier 5× larger. Any system that picks a waiting time from the typical case is correct for eight events in nine and silently wrong about the ninth.
+Skew is the single measured quantity this chapter rests on. Note its SHAPE: a cluster of small values and one outlier about 5× the next worst (230s against 50s). Any system that picks a waiting time from the typical case is correct for eight events in nine and silently wrong about the ninth.
 
 </details>
 <details>
@@ -43,7 +43,7 @@ Skew is the single measured quantity this chapter rests on. Note its SHAPE: a cl
 
 <img src="../diagrams/anim/ch01-eventtime/frames/step-02.svg" alt="Step 2: the watermark is a GUESS about skew" width="1040">
 
-The watermark never stalls and never apologises — it is arithmetic on the events that did arrive, so it cannot know about one that has not. The 60s lag is a human guess at the skew tail, and id 7's 230s is 4x it. A heuristic watermark being wrong is its normal mode, not a failure.
+The watermark never stalls and never apologises — it is arithmetic on the events that did arrive, so it cannot know about one that has not. The 60s lag is a human guess at the skew tail, and id 7's 230s is nearly 4× it (230s against 60s) — a different ratio from the 5× above, which compares skews with each other, not with the lag. A heuristic watermark being wrong is its normal mode, not a failure.
 
 </details>
 <details>
@@ -51,7 +51,7 @@ The watermark never stalls and never apologises — it is arithmetic on the even
 
 <img src="../diagrams/anim/ch01-eventtime/frames/step-03.svg" alt="Step 3: what completeness costs: wait longer, or drop events" width="1040">
 
-Both rows are correct systems. The first is fast and loses 1 of 9 events; the second is complete and makes every answer 170s later — 680s across the 4 windows. And the second budget was only knowable AFTER seeing id 7, so in a live system you are choosing it blind.
+Both rows are correct systems. The first is fast and loses 1 of 9 events; the second is complete and makes every answer 170s later — 680s more across the seed's 4 two-minute (120s) event-time windows. And the second budget was only knowable AFTER seeing id 7, so in a live system you are choosing it blind.
 
 </details>
 <details>
@@ -59,10 +59,10 @@ Both rows are correct systems. The first is fast and loses 1 of 9 events; the se
 
 <img src="../diagrams/anim/ch01-eventtime/frames/step-04.svg" alt="Step 4: so each clock is correct for a different question" width="1040">
 
-The useful habit is to read the question for whose clock it mentions. "How many clicks happened at 12:00" names the users' clock, so the answer is 12. "How many did we receive in that minute" names ours, so the answer is 8. Both are right; only one of them is what a dashboard labelled "clicks at 12:00" is promising.
+The useful habit is to read the question for whose clock it mentions. "How many clicks happened at 12:00" names the users' clock, so the answer is 12. "How many clicks did we receive in that minute" names ours, so the answer is 8. Both are right; only one of them is what a dashboard labelled "clicks at 12:00" is promising.
 
 </details>
 
-<sub>Skews, watermarks and drop counts are computed from the seed and asserted: max skew 230s > 3× lag, and waiting 230s drops nothing. Generated by `node tools/gen_ch01.js`.</sub>
+<sub>Skews, watermarks and drop counts are computed from the seed and asserted: max skew 230s is more than 3× the 60s lag, and waiting 230s drops nothing. Generated by `node tools/gen_ch01.js`.</sub>
 
 <!-- ch01-eventtime:end -->

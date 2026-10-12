@@ -473,7 +473,7 @@ all assertions passed
 <details>
 <summary><b>Variation 3</b> — the audit log that was compacted <i>(looks like compliance)</i></summary>
 
-> A regulator asks what a record held on a date two years ago. **The log was compacted last year.**
+> A regulator asks what a record held on a date two years ago. **The log was compacted last year:** every entry older than that day was cut to the last one per record, so the entries since then survive and the history before it is gone.
 
 **Why it is not obvious.** The answer is that the question cannot be answered, and the valuable part is that this was decided a year ago by someone optimising disk. The useful framing separates two logs that were conflated: a **state** log, which may be compacted freely, and an **audit** log, which may not — and they have different retention, different access patterns and often different storage. Arriving at "these were never the same log and treating them as one was the mistake" is better than any recovery scheme, because there is no recovery scheme.
 
@@ -1502,10 +1502,12 @@ def compact(log):
     return [(k, last[k]) for k in sorted(last)]
 
 def value_after(log, k, n):
-    """What key k was after its n-th change.  Answerable from the full log and from
-    nothing else.  Returns UNANSWERABLE rather than the current value, because
-    answering "24" to a question about the 2nd change is a confident wrong answer
-    rather than a missing one."""
+    """What key k was after its n-th change.  It counts ENTRIES, so only the full log
+    can be asked: on a compacted log the n-th entry is not the n-th change (the 1st
+    entry left for "a" holds 24, while its 1st change made it 5).  Returns
+    UNANSWERABLE when fewer than n entries exist, never the current value in their
+    place, because answering "24" to a question about the 2nd change is a confident
+    wrong answer rather than a missing one."""
     seen = 0
     for key, v in log:
         if key == k:
@@ -1615,7 +1617,12 @@ def main():
     assert value_after(small, ASKED, mid) == UNANSWERABLE
     # the opposite outcome is forbidden: it must NOT quietly return the current value
     assert value_after(small, ASKED, mid) != table[ASKED], "a confident wrong answer"
-    assert value_after(small, ASKED, 1) == 24, "the present is still answerable"
+    # the present is still answerable -- by FOLDING, not by counting entries: the 1st
+    # entry left on the compacted log is not the 1st change, so value_after belongs to
+    # the full log only
+    assert fold(small)[ASKED] == 24, "the present is still answerable"
+    assert value_after(small, ASKED, 1) == 24 != value_after(CHANGELOG, ASKED, 1) == 5, \
+        "on a compacted log the 1st entry is not the 1st change"
     assert value_after(CHANGELOG, "zz", 1) == UNANSWERABLE, "an unknown key too"
 
     # a deletion must be an ENTRY, not an absence -- and it is the one entry
@@ -1667,7 +1674,7 @@ def main():
                 want = h[n - 1] if n <= len(h) else UNANSWERABLE
                 assert value_after(log, k, n) == want, (log, k, n)
             if len(h) > 1:                             # history is lost by compaction
-                assert value_after(compact(log), k, 1) == h[-1]
+                assert value_after(compact(log), k, 1) == h[-1]   # its LAST value, not its 1st
                 assert value_after(compact(log), k, 2) == UNANSWERABLE
     print("\n  800 random changelogs: folding the compacted log always reproduces the")
     print("  table, emit round-trips the present, and value_after matches a rescan --")

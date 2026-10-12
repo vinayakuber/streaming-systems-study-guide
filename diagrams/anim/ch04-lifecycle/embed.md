@@ -12,7 +12,7 @@ That last row is why step 2 exists. A fixed or sliding assignment is final; a se
 
 **3. Group and trigger.** Elements are grouped by (key, window) into the state that will be aggregated, then triggers decide when it emits. There are **5 state entries** here, one per (key, session) — and that count is data-dependent, which fixed windows never are. You cannot size session state in advance.
 
-**4. Accumulate and garbage-collect.** Each pane is accumulated per the accumulation mode, and the state is released when the watermark passes the window end plus allowed lateness. For sessions the relevant bound is end + gap: a session that has been quiet for 120s of **wall clock** may still grow, and only the watermark rules that out.
+**4. Accumulate and garbage-collect.** Each pane is accumulated per the accumulation mode, and the state is released when the watermark passes the window end plus allowed lateness. In this chapter a session's `end` is its last event time, so its window ends at end + gap; no allowed lateness is set (it is 0), so the state is released when the watermark passes end + gap, and a nonzero allowed lateness would add to that. A session that has been quiet for 120s of **wall clock** may still grow, and only the watermark rules that out.
 
 For key "b"'s session holding id 7, collection happens at event 8 — and id 7 arrived at event 7, **1 event earlier**. So at gap 120s nothing needs retracting. Shrink the gap to 40s and the order flips.
 

@@ -36,7 +36,7 @@ Note where the four questions live: **WHERE** is the collector's single rule (as
 1. **Allowed lateness is memory.** Holding state past the watermark costs (open windows × state per window). With 4 windows it is free; with a million open windows it is the pipeline's dominant cost.
 2. **Retractions require a sink that accepts negatives.** -15 has to be representable and meaningful downstream.
 3. **The 81s threshold was computed from watermarks visible in full.** A live pipeline sets that number before observing them, and is therefore guessing.
-4. **Only one window was specified.** The window starting 12:08 is never published by the on-time or late trigger, because the watermark never passes its end — only the speculative early pane (8 at 12:10:00) ever reports it, so its only published value is one the pipeline never claims is complete. A complete answer to all four questions still says nothing about a window whose "when" never arrives.
+4. **Only one window was specified.** The window starting 12:08 is never published by the on-time or late trigger, because the watermark never passes its end — only the early trigger reports it: 8 at 12:10:00, the first clock tick after its data arrives, then 8 again every 60s for as long as the pipeline runs, because no on-time pane ever fires to stop it. Every value it publishes is one the pipeline never claims is complete. A complete answer to all four questions still says nothing about a window whose "when" never arrives.
 
 #### Visual walkthrough — four stages, 11 published values, two thresholds
 
@@ -73,7 +73,7 @@ Two settings, and each has a threshold that is a number rather than a judgement.
 
 <img src="../diagrams/anim/ch02-system/frames/step-04.svg" alt="Step 4: and what this design does NOT settle" width="1040">
 
-The last gap is the sharpest: this chapter fully specified ONE window, and the final window of the same dataset is never published by the on-time or late trigger, because the watermark never passes its end — only the clock reports it (8 at 12:10:00), a value the pipeline never claims is complete. A complete answer to all four questions still says nothing about a window whose "when" never arrives.
+The sharpest gap: the final window is never published by the on-time or late trigger, because the watermark never passes its end. Only the early trigger reports it — 8 at 12:10:00, then again every 60s, since no on-time pane ever stops it — and every value is speculative. Four answered questions still say nothing about a window whose "when" never arrives.
 
 </details>
 

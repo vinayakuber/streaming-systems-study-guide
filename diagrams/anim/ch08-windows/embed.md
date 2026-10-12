@@ -2,15 +2,15 @@
 
 #### Why the three window functions are three different cost profiles
 
-**TUMBLE(size)** is the fixed window: equal, contiguous, non-overlapping. 4 output rows here (19, 11, 7, 8), every input row counted once, and the sums total 45 — the whole dataset. That reconciliation against a batch run is what makes it the easy case.
+**TUMBLE(size)** is the fixed window: equal, contiguous, non-overlapping. 4 output rows here (19, 11, 7, 8), every input row counted once, and the engine's window sums total 45 — the whole dataset. That reconciliation against a batch run is what makes it the easy case; what the sink receives is another matter, below.
 
-**HOP(slide, size)** is the sliding window: fixed length, advancing by `slide`. With 120s windows every 60s, 6 of the 9 input rows land in 2 output rows, so there are **7 rows totalling 78** against a dataset of 45. Output volume is size / slide = 2×, and a HOP total must never be compared to an input total.
+**HOP(slide, size)** is the sliding window: fixed length, advancing by `slide`. With 120s windows every 60s, 6 of the 9 input rows land in 2 output rows, so there are **7 rows totalling 78** against a dataset of 45. In steady state each row lands in size / slide = 2 windows, so plan for 2× the output; this short run sits below that because the 3 rows before 12:01 (ids 0, 1, 7) have no earlier window to land in — 7 rows against TUMBLE's 4, a total of 78 against 45. Either way a HOP total must never be compared to an input total.
 
 **SESSION(gap)** is the data-driven window, and it is the one whose **row count cannot be predicted from the query**: key "a" gets 3 rows and key "b" gets 2 over the same time range, because that is how bursty each key's activity was. The engine also **merges** sessions as rows arrive, which means a window boundary can move after the fact — so a SESSION result is always an updating stream.
 
 **And the watermark is what makes any of them correct.** The time attribute picks the bucket; the watermark picks the moment the bucket speaks. Window [12:00, 12:02) emits after event 4 holding 15, against a final 19.
 
-Without a watermark a windowed query over an unbounded stream could never emit anything, because "this window is done" would never become true. And **1 of the 4 windows here is never emitted at all** — the SQL gives no hint of that, and the sink simply never sees the row.
+Without a watermark a windowed query over an unbounded stream could never emit anything, because "this window is done" would never become true. And **1 of the 4 windows here is never emitted at all** — the SQL gives no hint of that, and the sink simply never sees the row. So the rows the sink finally holds total 37, not 45: the missing 8 is window [12:08, 12:10).
 
 #### When to use each window function, and how to capacity-plan them
 

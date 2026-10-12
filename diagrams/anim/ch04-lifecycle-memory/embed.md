@@ -33,7 +33,7 @@ This one line does both jobs: if an event is within `gap` of `last.end`, it is A
 
 <img src="../diagrams/anim/ch04-lifecycle-memory/frames/step-03.svg" alt="Step 3: collection is a watermark comparison, not an idle timer" width="980">
 
-The condition is `watermarkAfter(i) >= s.end + gap` — 90 + 120 = 210, first satisfied at index 8. Nothing here measures elapsed wall-clock silence. A session quiet for 120s of real time is still open if the watermark has not moved.
+The condition is `watermarkAfter(i) >= s.end + gap` — allowed lateness is 0 here, so a session's window end, its last event time plus the gap, is the whole bound: 90 + 120 = 210, first satisfied at index 8. Nothing here measures elapsed wall-clock silence. A session quiet for 120s of real time is still open if the watermark has not moved.
 
 </details>
 <details>

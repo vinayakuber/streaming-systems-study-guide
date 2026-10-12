@@ -1,0 +1,1666 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Joining Two Streams</title>
+<!-- OPTIONAL web fonts. Delete these three lines to be 100% offline; the deck falls back to
+     Georgia / Helvetica / Menlo and still works. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;0,6..72,700;1,6..72,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* =====================================================================
+   THEME — change colours here. Light theme first, dark theme below.
+   ===================================================================== */
+:root{--ink:#141b28;--soft:#48566e;--faint:#7b879e;--paper:#eceef3;--sheet:#fbfcfe;
+ --panel:#f3f5f9;--rule:#ccd3e0;--hair:#e0e5ee;--acc:#4338ca;--acc-soft:#ecebfb;
+ --up:#0d9488;--dn:#b45309;--upbg:#d7efec;--dnbg:#fae7d3;--nbg:#e7eaf0;--code:#f5f7fb;
+ --warn:#b42318;--warnbg:#fbe3e1;
+ /* diagram box kinds: main = in use, change = in use but changing, new = new, ext = outside */
+ --g-main:#0d9488;--g-change:#b45309;--g-new:#4338ca;--g-ext:#7b879e;
+ --shadow:0 2px 8px rgba(20,27,40,.06);
+ --f-sans:Archivo,"Helvetica Neue",Arial,sans-serif;--f-serif:Newsreader,Georgia,serif;--f-mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace}
+:root[data-theme="dark"]{--ink:#e7ebf4;--soft:#a6b0c6;--faint:#74809a;--paper:#0b1018;
+ --sheet:#161d29;--panel:#121924;--rule:#2a3444;--hair:#222b39;--acc:#a7a2ff;
+ --acc-soft:#1e1d3a;--up:#1f9e91;--dn:#cc7d12;--upbg:#0e3a35;--dnbg:#3a2a10;
+ --nbg:#222b39;--code:#101722;--warn:#e06a60;--warnbg:#3a1a18;
+ --g-main:#2dd4bf;--g-change:#f0a14a;--g-new:#a7a2ff;--g-ext:#8b97b0;--shadow:0 2px 8px rgba(0,0,0,.35)}
+
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--paper);color:var(--ink);overflow:hidden;font-family:var(--f-sans);font-size:16px;line-height:1.5;-webkit-font-smoothing:antialiased}
+/* The whole deck is drawn at 1600x900 and scaled to fit the window (see fit()). */
+#stage{position:absolute;left:50%;top:50%;width:1600px;height:900px;transform:translate(-50%,-50%) scale(var(--s,1));transform-origin:50% 50%;background:var(--paper);overflow:hidden}
+.mast{position:absolute;top:0;left:0;right:0;height:60px;background:var(--sheet);border-bottom:1px solid var(--rule);box-shadow:var(--shadow);display:flex;align-items:center;gap:18px;padding:0 28px;z-index:5}
+.eyebrow{font-family:var(--f-mono);font-size:11px;letter-spacing:.15em;text-transform:uppercase;color:var(--acc);margin:0;white-space:nowrap}
+.tabs{display:flex;gap:4px;flex:1;justify-content:center;flex-wrap:nowrap;overflow:hidden}
+.tabs button{font:inherit;font-size:11.5px;color:var(--soft);background:transparent;border:1px solid var(--hair);border-radius:999px;padding:5px 9px;cursor:pointer;white-space:nowrap}
+.tabs button i{font-style:normal;font-family:var(--f-mono);font-size:10px;color:var(--faint);margin-right:5px}
+.tabs button.on{color:var(--acc);background:var(--acc-soft);border-color:var(--acc);font-weight:600}
+.tabs button.on i{color:var(--acc)}
+.tt{font-family:var(--f-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;padding:8px 12px;border:1px solid var(--rule);color:var(--soft);background:var(--sheet)}
+.tt:hover{color:var(--acc);border-color:var(--acc)}
+.deck{position:absolute;top:60px;left:0;right:0;height:744px}
+/* slide-in / slide-out between slides */
+.slide{position:absolute;inset:0;padding:22px 40px 18px;opacity:0;pointer-events:none;transform:translateX(48px);transition:opacity .6s,transform .6s;display:flex;flex-direction:column;gap:12px}
+.slide.on{opacity:1;pointer-events:auto;transform:none}
+.slide.prev{transform:translateX(-48px)}
+.hd{display:grid;grid-template-columns:auto 1fr;align-items:end;gap:4px 36px}
+.hd .eyebrow{grid-column:1/-1}
+h1{font-family:var(--f-serif);font-weight:600;font-size:44px;line-height:1.02;letter-spacing:-.02em;margin:0;text-wrap:balance}
+.stand{font-family:var(--f-serif);font-size:18px;line-height:1.42;color:var(--soft);margin:0;max-width:70ch}
+.stand em{color:var(--ink);font-style:italic}
+.k{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--faint);margin:0 0 6px;line-height:1.4}
+.card{background:var(--sheet);border:1px solid var(--hair);box-shadow:var(--shadow);padding:14px 16px;min-width:0;min-height:0}
+.chip{display:inline-block;font-family:var(--f-mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;padding:3px 7px;background:var(--nbg);color:var(--soft);border:1px solid var(--hair);margin:0 4px 4px 0;white-space:nowrap}
+.chip.u{background:var(--upbg);color:var(--up);border-color:var(--up)}
+.chip.d{background:var(--dnbg);color:var(--dn);border-color:var(--dn)}
+.chip.a{background:var(--acc-soft);color:var(--acc);border-color:var(--acc)}
+.chip.w{background:var(--warnbg);color:var(--warn);border-color:var(--warn)}
+.src{font-family:var(--f-mono);font-size:10.5px;color:var(--faint);line-height:1.45}
+code{font-family:var(--f-mono);font-size:12px;color:var(--acc)}
+.note{font-size:12.5px;line-height:1.38;color:var(--soft)} .note b{color:var(--ink)}
+
+/* ---- BUILD STEPS: anything with data-st="N" is a ghost until step N, then fades/rises in ---- */
+[data-st]{opacity:.13;filter:grayscale(1);transition:opacity .7s,filter .7s}
+[data-st].lit{opacity:1;filter:none;animation:rise .7s ease}
+@keyframes rise{0%{transform:translateY(8px)}100%{transform:none}}
+/* counters glow while they count, then "land" */
+.ticking{color:var(--acc)!important;text-shadow:0 0 18px color-mix(in srgb,var(--acc) 35%,transparent)}
+.landed{animation:land .6s ease}
+@keyframes land{0%{transform:scale(1.06)}100%{transform:none}}
+
+/* ---- layout: title ---- */
+.tl{flex:1;min-height:0;display:grid;grid-template-columns:600px minmax(0,1fr);gap:26px}
+.tl .l,.tl .r{display:flex;flex-direction:column;gap:14px;min-height:0}
+.tl h1{font-size:54px;margin:4px 0 8px}
+.hero{position:relative;flex:none;padding:12px 18px 10px;border-left:4px solid var(--acc);overflow:hidden}
+.hero::after{content:"";position:absolute;right:0;top:0;width:200px;height:100%;background:radial-gradient(circle at 100% 0,var(--acc-soft),transparent 68%);pointer-events:none}
+.hero p{margin:0;font-family:var(--f-serif);font-size:17px;line-height:1.42;color:var(--soft)}
+.tiles{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;background:var(--rule);border:1px solid var(--rule);box-shadow:var(--shadow)}
+.tiles>div{background:var(--sheet);padding:14px 18px 12px;min-width:0}
+.tiles .v{font-family:var(--f-serif);font-size:48px;font-weight:700;line-height:1;letter-spacing:-.02em;white-space:nowrap;display:inline-block}
+.tiles .d{font-size:12.5px;color:var(--faint);line-height:1.38;margin-top:6px}
+.steps{flex:1;min-height:0;display:grid;grid-auto-rows:1fr;gap:8px}
+.steps .card{display:grid;grid-template-columns:56px 1fr;gap:14px;align-items:center;border-left:4px solid var(--acc);position:relative}
+.steps .n{font-family:var(--f-serif);font-size:40px;font-weight:700;color:var(--acc);text-align:center;line-height:1}
+.steps b{font-size:17px} .steps span.x{display:block;font-size:13.5px;color:var(--soft);line-height:1.38;margin-top:2px}
+/* the coloured bar that "runs" down a card's left edge when it lights up */
+.steps .card::after{content:"";position:absolute;left:-4px;top:0;bottom:0;width:4px;background:var(--up);transform:scaleY(0);transform-origin:top}
+.steps .card.lit::after{animation:run 1.1s ease forwards}
+@keyframes run{to{transform:scaleY(1)}}
+
+/* ---- layout: graph (system map / hub, flow / swimlane, state machine) ---- */
+.gwrap{flex:1;min-height:0;display:flex;flex-direction:column;padding:10px 14px 8px;gap:6px}
+.glegend{display:flex;align-items:center;gap:20px;font-size:12.5px;color:var(--soft);margin:0 0 2px;flex-wrap:wrap}
+.glegend span{display:inline-flex;align-items:center;gap:7px}
+.glegend i{display:inline-block;width:24px;height:0;border-top:3px solid}
+.glegend i.main{border-color:var(--g-main)} .glegend i.change{border-color:var(--g-change)} .glegend i.new{border-color:var(--g-new);border-top-style:dashed} .glegend i.ext{border-color:var(--g-ext);border-top-style:dotted}
+svg.g{flex:1;min-height:0;width:100%;display:block}
+svg.g .glane{fill:var(--panel);stroke:var(--hair)}
+svg.g .gnode rect{fill:var(--sheet);stroke:var(--rule);stroke-width:1.2;transition:fill .6s,stroke .6s}
+svg.g .gnode{opacity:.14;transition:opacity .7s}
+svg.g .gnode.lit{opacity:1}
+svg.g .gnode.k-main.lit rect{stroke:var(--g-main);fill:color-mix(in srgb,var(--g-main) 9%,var(--sheet))}
+svg.g .gnode.k-change.lit rect{stroke:var(--g-change);fill:color-mix(in srgb,var(--g-change) 10%,var(--sheet))}
+svg.g .gnode.k-new.lit rect{stroke:var(--g-new);fill:color-mix(in srgb,var(--g-new) 9%,var(--sheet));stroke-dasharray:5 3}
+svg.g .gnode.k-ext.lit rect{stroke:var(--g-ext);fill:var(--panel);stroke-dasharray:2 3}
+/* boxes introduced on the CURRENT step pulse */
+svg.g .gnode.pulse rect:not(.hubring){animation:npulse 1.8s ease-in-out infinite}
+@keyframes npulse{0%,100%{stroke-width:1.6}50%{stroke-width:3.8}}
+svg.g .gnode text{font-family:var(--f-sans);font-size:14px;font-weight:600;fill:var(--ink)}
+svg.g .gnode text.s{font-family:var(--f-mono);font-size:10.3px;font-weight:400;fill:var(--faint)}
+svg.g .gnode text.val{font-family:var(--f-serif);font-size:24px;font-weight:700;fill:var(--ink)}
+svg.g .gnode.k-hub rect{fill:var(--acc);stroke:none}
+svg.g .gnode.k-hub text{fill:#fff;font-family:var(--f-serif);font-size:28px;font-weight:700}
+svg.g .gnode.k-hub text.s{font-family:var(--f-mono);font-size:10.5px;font-weight:400;fill:#fff;opacity:.85}
+svg.g .hubring{fill:none!important;stroke:var(--acc)!important;stroke-width:2;opacity:0}
+svg.g .hubring.go{animation:ring 2.6s ease-out infinite}
+@keyframes ring{0%{opacity:.5;transform:scale(1)}100%{opacity:0;transform:scale(1.3)}}
+/* arrows "draw" themselves in (dash offset), new arrows keep marching */
+svg.g .gedge{fill:none;stroke-width:2;stroke-dasharray:var(--len);stroke-dashoffset:var(--len);transition:stroke-dashoffset 1.1s ease}
+svg.g .gedge.lit{stroke-dashoffset:0}
+svg.g .gedge.k-main{stroke:var(--g-main)} svg.g .gedge.k-change{stroke:var(--g-change)} svg.g .gedge.k-new{stroke:var(--g-new)} svg.g .gedge.k-ext{stroke:var(--g-ext)} svg.g .gedge.k-hub{stroke:var(--acc)}
+svg.g .gedge.k-new.lit{stroke-dasharray:6 5;animation:march 1.2s linear infinite}
+svg.g .gedge.hot{stroke-width:3}
+@keyframes march{to{stroke-dashoffset:-22}}
+svg.g .gah{opacity:0;transition:opacity .2s 1s} svg.g .gah.lit{opacity:1}
+svg.g .gah.k-main{fill:var(--g-main)} svg.g .gah.k-change{fill:var(--g-change)} svg.g .gah.k-new{fill:var(--g-new)} svg.g .gah.k-ext{fill:var(--g-ext)} svg.g .gah.k-hub{fill:var(--acc)}
+svg.g .glbl{font-family:var(--f-mono);font-size:10.5px;fill:var(--soft);paint-order:stroke;stroke:var(--paper);stroke-width:4px;stroke-linejoin:round;opacity:0;transition:opacity .6s .4s}
+svg.g .glbl.lit{opacity:1} svg.g .glbl.hot{fill:var(--ink);font-weight:600}
+svg.g .gcol{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.13em;text-transform:uppercase;fill:var(--faint)}
+svg.g .pkt{stroke:var(--sheet);stroke-width:1.5;pointer-events:none}
+.row2{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--rule);border:1px solid var(--rule)}
+.row2>div{background:var(--sheet);padding:7px 12px;font-size:12.3px;line-height:1.36;color:var(--soft)}
+.row2 b{color:var(--ink)}
+
+/* ---- layout: sequence ---- */
+svg.seq{flex:1;min-height:0;width:100%}
+svg.seq text{font-family:var(--f-sans);font-size:13px;fill:var(--ink)}
+svg.seq .lbl{font-family:var(--f-mono);font-size:11px;fill:var(--soft)}
+svg.seq .life{stroke:var(--hair);stroke-dasharray:3 4}
+svg.seq .msg{stroke:var(--acc);stroke-width:1.8;fill:none;stroke-dasharray:var(--len);stroke-dashoffset:var(--len);transition:stroke-dashoffset .9s}
+svg.seq .msg.lit{stroke-dashoffset:0}
+svg.seq .mt{opacity:0;transition:opacity .6s .5s} svg.seq .mt.lit{opacity:1}
+svg.seq .ah{fill:var(--acc);opacity:0} svg.seq .ah.lit{opacity:1;transition:opacity .15s .9s}
+svg.seq .actor rect{fill:var(--panel);stroke:var(--rule)}
+svg.seq .actor.new rect{fill:var(--acc-soft);stroke:var(--acc)}
+
+/* ---- layout: table / enum ---- */
+.cols{flex:1;min-height:0;display:grid;gap:12px}
+.cols .card{display:flex;flex-direction:column;gap:8px;overflow:hidden}
+table.t{width:100%;border-collapse:collapse;font-size:14px;line-height:1.35}
+table.t th{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);text-align:left;padding:0 8px 6px;font-weight:500}
+table.t td{padding:9px 8px;border-top:1px solid var(--hair);vertical-align:top;color:var(--soft)}
+table.t td:first-child{color:var(--ink);font-weight:600}
+.tag{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;padding:2px 6px;border:1px solid;margin-left:6px;vertical-align:1px;white-space:nowrap}
+.tag.ok{color:var(--g-main);border-color:var(--g-main);background:var(--upbg)}
+.tag.new{color:var(--g-new);border-color:var(--g-new);background:var(--acc-soft)}
+.tag.unv{color:var(--dn);border-color:var(--dn);background:var(--dnbg)}
+ul.l{margin:0;padding:0 0 0 18px;font-size:14px;line-height:1.45;color:var(--soft)} ul.l li{margin:0 0 6px} ul.l b{color:var(--ink)}
+
+/* ---- layout: timeline + status strip ---- */
+.tline{position:relative;height:150px;margin:18px 10px 4px}
+.tline .track,.tline .fillbar{position:absolute;left:8%;top:44px;height:6px;border-radius:3px}
+.tline .track{right:8%;background:var(--hair)}
+.tline .fillbar{width:0;background:var(--acc);transition:width 1.2s cubic-bezier(.2,.8,.2,1)}
+.ms{position:absolute;top:0;width:240px;transform:translateX(-50%);text-align:center}
+.ms .t{font-family:var(--f-mono);font-size:12px;color:var(--faint);height:18px}
+.ms .dot{position:relative;width:24px;height:24px;border-radius:50%;margin:3px auto 10px;background:var(--sheet);border:3px solid var(--rule);transition:background .5s,border-color .5s}
+.ms.done .dot{background:var(--up);border-color:var(--up)}
+.ms.now .dot{background:var(--acc);border-color:var(--acc)}
+.ms.now .dot::after{content:"";position:absolute;inset:-8px;border-radius:50%;border:2px solid var(--acc);animation:ring 2s ease-out infinite}
+.ms b{display:block;font-size:17px} .ms span{display:block;font-size:13px;color:var(--soft);line-height:1.35}
+.ms .state{display:inline-block;margin-top:6px}
+.strip{display:flex;gap:8px;align-items:stretch;margin:6px 0}
+/* tickets drop in with a little bounce */
+.tkt{flex:1;border:1px solid var(--rule);background:var(--sheet);padding:10px 12px;font-size:13px;line-height:1.3;opacity:0;transform:translateY(-18px) rotate(-3deg);transition:opacity .4s,transform .55s cubic-bezier(.3,1.6,.5,1)}
+.tkt.in{opacity:1;transform:none}
+.tkt b{display:block;font-family:var(--f-serif);font-size:28px;line-height:1;color:var(--acc)}
+.tkt.warn b{color:var(--warn)} .tkt.ok b{color:var(--up)}
+
+/* ---- layout: cards (+ token wall + bars) ---- */
+.grid{display:grid;gap:12px;flex:1;min-height:0}
+.grid .card{display:flex;flex-direction:column;gap:6px}
+.grid .card h3{margin:0;font-family:var(--f-serif);font-size:22px;line-height:1.15}
+.grid .card p{margin:0;font-size:14px;line-height:1.45;color:var(--soft)}
+.tokens{display:flex;flex-wrap:wrap;gap:6px}
+.tk{font-family:var(--f-mono);font-size:12px;padding:3px 7px;background:var(--acc-soft);color:var(--acc);border:1px solid var(--acc);opacity:0;transform:translateY(-10px);transition:opacity .35s,transform .35s,filter .6s}
+.tk.in{opacity:1;transform:none} .tk.fade{opacity:.3;filter:grayscale(1)}
+.bars{display:flex;flex-direction:column;gap:8px}
+.bars .row{display:grid;grid-template-columns:150px 1fr 70px;gap:12px;align-items:center;font-size:14px}
+.bars .track{position:relative;height:18px;background:var(--hair)}
+.bars .fill{position:absolute;left:0;top:0;bottom:0;width:0;background:var(--acc);transition:width 1.4s cubic-bezier(.2,.8,.2,1)}
+.bars .num{font-family:var(--f-mono);font-size:13px;text-align:right}
+
+/* ---- narration bar ---- */
+.narr{position:absolute;left:0;right:0;bottom:0;height:96px;background:var(--panel);border-top:1px solid var(--rule);display:grid;grid-template-columns:1fr auto;gap:24px;align-items:center;padding:0 40px;z-index:5}
+.narr .who{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--acc)}
+.narr .txt{font-family:var(--f-serif);font-size:19px;line-height:1.33;color:var(--ink);transition:opacity .35s;min-height:52px;max-width:122ch}
+.narr .prog{position:absolute;left:0;top:-1px;height:3px;background:var(--acc);width:0}
+.dots{display:flex;gap:6px;margin-top:5px}
+.dots i{width:22px;height:4px;background:var(--rule)} .dots i.on{background:var(--acc)}
+.ctl{display:flex;gap:6px}
+.ctl button{font-family:var(--f-mono);font-size:11px;padding:8px 12px;border:1px solid var(--rule);background:var(--sheet);color:var(--soft);cursor:pointer}
+.ctl button:hover,.ctl button.on{color:var(--acc);border-color:var(--acc)}
+
+/* ---- source links + unverified tags ---- */
+a.sl{display:inline-block;font-family:var(--f-mono);font-size:10px;line-height:1;color:var(--acc);text-decoration:none;margin:0 0 0 3px;padding:1px 3px;border:1px solid color-mix(in srgb,var(--acc) 40%,transparent);border-radius:3px;vertical-align:1px;background:var(--sheet)}
+a.sl:hover,a.sl:focus-visible{background:var(--acc);color:#fff;outline:none}
+a.srcl{color:inherit;text-decoration:underline dotted;text-underline-offset:2px} a.srcl:hover{color:var(--acc)}
+svg a{cursor:pointer}
+svg a:hover .gnode.lit rect{stroke-width:2.4}
+svg a .glbl,svg.seq a .lbl{text-decoration:underline dotted}
+svg text.lnk{font-family:var(--f-mono);font-size:10px;font-weight:600;fill:var(--acc)}
+svg.g .k-hub text.lnk{fill:#fff}
+svg text.unvt{font-family:var(--f-mono);font-size:8.5px;font-weight:600;letter-spacing:.06em;fill:var(--dn)}
+/* ---- extension: ask + array layouts ---- */
+.askwrap,.arrwrap{display:flex;flex-direction:column;gap:12px;flex:1;min-height:0}
+.askq .qtext{font-family:var(--f-serif);font-size:24px;line-height:1.35;color:var(--ink);margin:0 0 14px;max-width:62ch}
+.opts{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.opt{display:flex;gap:12px;align-items:flex-start;text-align:left;font:inherit;font-size:15px;line-height:1.35;color:var(--ink);background:var(--sheet);border:1.5px solid var(--rule);padding:12px 14px;cursor:pointer;transition:border-color .2s,background .2s,opacity .3s}
+.opt:hover:not(:disabled),.opt:focus-visible{border-color:var(--acc);outline:none}
+.opt i{font-style:normal;font-family:var(--f-mono);font-size:12px;font-weight:700;color:var(--acc);border:1px solid var(--acc);padding:1px 7px;flex:none}
+.opt.right{border-color:var(--up);background:var(--upbg)} .opt.right i{color:var(--up);border-color:var(--up)}
+.opt.wrong{border-color:var(--dn);background:var(--dnbg)} .opt.wrong i{color:var(--dn);border-color:var(--dn)}
+.opt.dim{opacity:.45} .opt:disabled{cursor:default}
+.fb{margin-top:12px;font-size:15px;line-height:1.45;color:var(--ink);min-height:22px} .fb p{margin:0 0 6px;max-width:100ch}
+.fb .verdict{font-family:var(--f-mono);font-size:12px;letter-spacing:.1em;text-transform:uppercase;font-weight:700}
+.fb .verdict.ok{color:var(--up)} .fb .verdict.no{color:var(--dn)} .fb .hint{color:var(--acc);font-family:var(--f-mono);font-size:12px}
+.slide.nudge .opts{animation:nudge .5s}
+@keyframes nudge{0%,100%{transform:none}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
+.arr .agrid{display:grid;gap:3px;align-items:center}
+.arr .al{font-family:var(--f-mono);font-size:11px;color:var(--soft);padding-right:8px;line-height:1.25}
+.arr .ai{font-family:var(--f-mono);font-size:9.5px;color:var(--faint);text-align:center;transition:color .25s}
+.arr .ai.pick{color:var(--acc);font-weight:700}
+.arr .ac{font-family:var(--f-mono);font-size:12px;text-align:center;padding:7px 0;background:var(--panel);border:1px solid var(--hair);color:var(--ink);opacity:0;transform:translateY(-10px);transition:opacity .35s,transform .35s,background .25s,border-color .25s,color .25s}
+.arr .ac.in{opacity:1;transform:none}
+.arr .ac.seen{background:var(--upbg);border-color:var(--up)}
+.arr .ac.hit{background:var(--dnbg);border-color:var(--dn);color:var(--dn);font-weight:600}
+.arr .ac.pick{background:var(--acc-soft);border-color:var(--acc);color:var(--acc);font-weight:700;animation:land .6s}
+.arr .ac.ptr{outline:2px solid var(--acc);outline-offset:1px}
+.ameter{display:flex;gap:12px;margin-top:14px;flex-wrap:wrap}
+.am{border:1px solid var(--hair);background:var(--panel);padding:8px 14px;min-width:170px}
+.am b{display:block;font-family:var(--f-serif);font-size:28px;line-height:1.1;color:var(--ink);font-variant-numeric:tabular-nums}
+@media (prefers-reduced-motion:reduce){.arr .ac,.opt{transition:none;animation:none}}
+/* ---- extension: code layout ---- */
+.codegrid{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);grid-template-rows:minmax(0,1fr);gap:12px;flex:1;min-height:0}
+.codegrid.solo{grid-template-columns:minmax(0,1fr)}
+.codeside{display:flex;flex-direction:column;gap:12px;min-height:0;min-width:0;overflow:hidden}
+.codeside>.card{flex:none}
+.codecard{display:flex;flex-direction:column;min-height:0;height:100%;padding:0;overflow:hidden}
+.codecard .k{padding:10px 14px 6px;margin:0;border-bottom:1px solid var(--hair)}
+.codep{flex:1;min-height:0;overflow:auto;margin:0;padding:8px 0;font-family:var(--f-mono);font-size:12.5px;line-height:1.5;background:var(--code)}
+.codep .ln{display:grid;grid-template-columns:44px 1fr;white-space:pre;color:var(--ink);padding-right:14px}
+.codep .ln i{font-style:normal;color:var(--faint);text-align:right;padding-right:12px;user-select:none}
+.codep .ln.fresh{background:var(--acc-soft);box-shadow:inset 3px 0 0 var(--acc)}
+.codep .ln.fresh[data-st]:not(.lit){opacity:0;filter:none}
+.codep .gap{color:var(--faint);padding:2px 0 2px 56px;font-style:italic;font-size:11.5px}
+.askq.compact .qtext{font-size:19px}
+.askq.compact .opts{grid-template-columns:1fr}
+</style>
+</head>
+<body>
+<div id="stage">
+ <header class="mast">
+  <span class="eyebrow" id="deckEyebrow"></span>
+  <nav class="tabs" id="tabs"></nav>
+  <button class="tt" id="tt" type="button">Dark</button>
+ </header>
+ <main class="deck" id="deck"></main>
+ <div class="narr"><div class="prog" id="nprog"></div>
+  <div><div class="who">Narration · <span id="ncount"></span></div><div class="txt" id="ntxt"></div><div class="dots" id="ndots"></div></div>
+  <div class="ctl"><button id="bprev" type="button" title="Back (left arrow)">◀</button><button id="bplay" type="button" title="Auto-play (A)">▶ auto</button><button id="bnext" type="button" title="Next (right arrow or space)">▶</button><button id="bvoice" type="button" aria-pressed="false" title="Turn the voice-over on or off (V)">Voice off</button></div>
+ </div>
+</div>
+<noscript><p style="position:fixed;top:0;left:0;padding:20px;background:#fff">This deck needs JavaScript.</p></noscript>
+
+<script>
+/* #####################################################################################
+   ###                                                                               ###
+   ###   DECK CONTENT — EDIT ONLY THIS BLOCK.                                        ###
+   ###   Everything you see and hear comes from the DECK object below.               ###
+   ###   See HOW-TO.md for every field. The engine further down never needs editing. ###
+   ###                                                                               ###
+   #####################################################################################
+
+   QUICK RULES
+   - Each slide has a "narration" list. One line = one build step (one click).
+   - Anything with  step: N  appears on step N (the first step is 0).
+   - Rich-text fields (heading, stand, text, html, label…) accept small inline codes:
+       [[src:KEY]]            ↗ link to DECK.sources[KEY]
+       [[unv:KEY|reason]]     ↗ link + an "unverified" tag (hover shows the reason)
+       [[tag:ok|text]]        small tag; kinds: ok | new | unv
+       [[count:98||%]]        number that counts up: [[count:NUMBER|before|after|decimals]]
+       \\[[ ... ]]             (two backslashes inside a JS string) shows the code literally, e.g. in a how-to
+   - Diagram box kinds: "main" (in use), "change" (in use, changing), "new", "ext" (outside), "hub".
+*/
+const DECK = {
+ "title": "Joining Two Streams",
+ "eyebrow": "Streaming · Ch 8 · Part 3",
+ "theme": "light",
+ "voice": {
+  "preferred": "Google UK English Male",
+  "fallbackLangs": [
+   "en-GB",
+   "en"
+  ],
+  "rate": {
+   "google": 0.98,
+   "microsoft": 1,
+   "other": 0.95
+  },
+  "pitch": 1,
+  "sentencePauseMs": 320,
+  "questionPauseMs": 420,
+  "sayAs": {
+   "e.g.": "for example",
+   "&": "and",
+   "→": " to ",
+   "·": ", ",
+   "×": " times ",
+   "≈": "about ",
+   "OLTP": "O L T P",
+   "OLAP": "oh-lap",
+   "SQL": "sequel",
+   "LIMIT": "limit",
+   "SUM": "sum",
+   "ORC": "O R C",
+   "RLE": "run-length encoding",
+   "ID": "I D",
+   "CPU": "C P U",
+   "JOIN": "join",
+   "BETWEEN": "between",
+   "TUMBLE": "tumble"
+  }
+ },
+ "auto": {
+  "afterSpeechMs": 700,
+  "minStepMs": 5200,
+  "msPerChar": 62,
+  "firstStepDelayMs": 1200
+ },
+ "legend": {
+  "main": "in use",
+  "change": "the stage being costed",
+  "new": "added by this design",
+  "ext": "outside this chapter"
+ },
+ "sources": {
+  "ch": [
+   "https://github.com/vinayakuber/streaming-systems-study-guide/blob/main/docs/ch08-streaming-sql.md",
+   "Chapter 8 on GitHub"
+  ],
+  "join": [
+   "https://github.com/vinayakuber/streaming-systems-study-guide/blob/main/docs/ch08-streaming-sql.md#joins-and-time-in-sql",
+   "Chapter 8 · joins and time in SQL"
+  ],
+  "why": [
+   "https://github.com/vinayakuber/streaming-systems-study-guide/blob/main/docs/ch08-streaming-sql.md#why-a-join-is-where-the-time-decisions-cost-the-most",
+   "Chapter 8 · why joins cost the most"
+  ],
+  "when": [
+   "https://github.com/vinayakuber/streaming-systems-study-guide/blob/main/docs/ch08-streaming-sql.md#when-to-join-streams-when-to-join-against-a-table-and-what-to-review-first",
+   "Chapter 8 · when to join streams"
+  ],
+  "walk": [
+   "https://github.com/vinayakuber/streaming-systems-study-guide/blob/main/docs/ch08-streaming-sql.md#visual-walkthrough--the-bound-the-minimum-the-clock-and-the-division-of-labour",
+   "Chapter 8 · the walkthrough"
+  ],
+  "prog": [
+   "https://github.com/vinayakuber/streaming-systems-study-guide/blob/main/docs/ch08-streaming-sql.md#a-join-has-two-inputs-so-it-claims-the-minimum",
+   "Chapter 8 · the join as a program"
+  ]
+ },
+ "slides": [
+  {
+   "title": "Story",
+   "layout": "title",
+   "eyebrow": "01 · Chapter 8 · Part 3",
+   "heading": "Which advert showings led to a click? Two streams, matched",
+   "hero": {
+    "step": 0,
+    "text": "A company shows adverts. Each time an advert is shown, a message is sent: an <b>impression<\/b>. Each time someone clicks one, another message: a <b>click<\/b>. Every message is an <b>event<\/b>, and each kind never stops coming: two <b>streams<\/b>. Analysts want, in <b>SQL<\/b> — the everyday language for questions about data — a <b>query<\/b> pairing each impression with the clicks that happened close to it.[[src:join]]"
+   },
+   "tiles": [
+    {
+     "step": 1,
+     "value": 5,
+     "label": "clicks in our example (the chapter’s key a)"
+    },
+    {
+     "step": 1,
+     "value": 4,
+     "label": "impressions (the chapter’s key b)"
+    },
+    {
+     "step": 2,
+     "value": 60,
+     "suffix": " s",
+     "label": "how close in time counts as “together”[[src:why]]"
+    },
+    {
+     "step": 3,
+     "value": 230,
+     "suffix": " s",
+     "label": "how late one impression arrives[[src:why]]"
+    }
+   ],
+   "cardsLabel": "Three questions this part answers",
+   "cards": [
+    {
+     "step": 4,
+     "n": 1,
+     "title": "When is a match between two endless streams final?",
+     "text": "Either side may still send one."
+    },
+    {
+     "step": 4,
+     "n": 2,
+     "title": "Which side does the query wait for?",
+     "text": "One is fast, one is slow."
+    },
+    {
+     "step": 4,
+     "n": 3,
+     "title": "What does the wrong clock do here?",
+     "text": "Something worse than a wrong total."
+    }
+   ],
+   "note": {
+    "step": 4,
+    "text": "You will be asked to answer before each explanation. Every ↗ opens the chapter on GitHub.[[src:ch]]"
+   },
+   "narration": [
+    "A company shows adverts. Each showing sends a message called an impression; each click on an advert sends one called a click. Every message is an event, and each kind keeps coming forever: two streams.",
+    "Our example has 5 clicks and 4 impressions. In the chapter they are the two sources of one table, key a and key b, split here into two streams. Analysts want a query, written in SQL, that pairs each impression with the clicks near it.",
+    "Near means: the click and the impression happened within 60 seconds of each other, going by when they happened.",
+    "But one impression arrives 230 seconds after it happened. By the end of this part you will see what that does to the pairs.",
+    "Three questions: when is a match between two endless streams final, which side does the query wait for, and what does the wrong clock do here? You will answer first, each time."
+   ]
+  },
+  {
+   "title": "Time",
+   "layout": "table",
+   "eyebrow": "02 · The nine events, and two clocks on each",
+   "heading": "When it happened is not when it was seen",
+   "stand": "All nine events in the order they arrived: clicks and impressions mixed. Each carries two times.",
+   "table": {
+    "columns": [
+     "id",
+     "kind",
+     "et · happened at",
+     "pt · seen"
+    ],
+    "rows": [
+     {
+      "step": 0,
+      "cells": [
+       "0",
+       "click",
+       "12:00:01",
+       "1 s later"
+      ]
+     },
+     {
+      "step": 0,
+      "cells": [
+       "1",
+       "click",
+       "12:00:03",
+       "1 s later"
+      ]
+     },
+     {
+      "step": 0,
+      "cells": [
+       "2",
+       "impression",
+       "12:01:30",
+       "3 s later"
+      ]
+     },
+     {
+      "step": 0,
+      "cells": [
+       "3",
+       "click",
+       "12:02:10",
+       "2 s later"
+      ]
+     },
+     {
+      "step": 1,
+      "cells": [
+       "4",
+       "click",
+       "12:04:05",
+       "1 s later · 12:04:06"
+      ]
+     },
+     {
+      "step": 1,
+      "cells": [
+       "5",
+       "impression",
+       "12:04:20",
+       "5 s later"
+      ]
+     },
+     {
+      "step": 2,
+      "cells": [
+       "6",
+       "impression",
+       "<b>12:03:40<\/b>",
+       "50 s later"
+      ]
+     },
+     {
+      "step": 2,
+      "cells": [
+       "7",
+       "impression",
+       "<b>12:00:50<\/b>",
+       "<b>230 s later<\/b> · 12:04:40"
+      ]
+     },
+     {
+      "step": 2,
+      "cells": [
+       "8",
+       "click",
+       "12:09:00",
+       "2 s later"
+      ]
+     }
+    ]
+   },
+   "side": {
+    "step": 3,
+    "title": "Two clocks, used from now on",
+    "html": "<ul class=\"l\"><li><b>Event time<\/b> (et) — when it happened.<\/li><li><b>Processing time<\/b> (pt) — when the message was seen.<\/li><li><b>Out of order<\/b> — an event that happened earlier than one already seen. Ids 6 and 7 are.[[src:why]]<\/li><\/ul>"
+   },
+   "narration": [
+    "Each event carries two times. The first, et, is when it happened: its event time. The second, pt, is when the message was seen: its processing time. Clicks 0 and 1 were each seen 1 second after they happened.",
+    "Click 4 happened at 12:04:05 and was seen at 12:04:06. Impression 5 happened at 12:04:20.",
+    "But impression 6 happened at 12:03:40, before impression 5, and arrived after it. And impression 7 happened at 12:00:50 but was seen 230 seconds later, at 12:04:40.",
+    "An event that happened earlier than one already seen is called out of order. Ids 6 and 7 are. Impression 7 will matter most in this part."
+   ]
+  },
+  {
+   "title": "Q1",
+   "layout": "ask",
+   "eyebrow": "03 · Your turn",
+   "heading": "Two finished lists end. Two streams never do.",
+   "stand": "Over two finished lists, the query compares every click with every impression, 5 × 4 pairs, and stops. Now both are endless streams.",
+   "question": {
+    "step": 0,
+    "prompt": "Over two endless streams, when can the query be sure click 0 has met all its matches?",
+    "options": [
+     {
+      "text": "Never, unless it is told how close in time a match must be.",
+      "correct": true,
+      "why": "Without a limit, an impression from any time could still arrive and match. No row is ever the last candidate."
+     },
+     {
+      "text": "After all 4 impressions so far have been compared with it.",
+      "correct": false,
+      "why": "Four is only how many have arrived so far. A fifth impression could come at any moment."
+     },
+     {
+      "text": "As soon as one impression has matched it.",
+      "correct": false,
+      "why": "A click can match several impressions. Stopping at the first would drop the others."
+     }
+    ]
+   },
+   "cards": [
+    {
+     "step": 1,
+     "title": "A join",
+     "html": "<p>Pairing rows from two inputs is a <b>join<\/b>. Over two finished lists it completes: 5 × 4 candidate pairs, then done.[[src:why]]<\/p>"
+    },
+    {
+     "step": 1,
+     "title": "Over two streams",
+     "html": "<p>It never completes on its own: either side may still produce a match. Without a time limit the query has no meaning.[[src:why]]<\/p>"
+    }
+   ],
+   "narration": [
+    "First question. Over two finished lists, the query compares every click with every impression, 5 times 4 pairs, and stops. Over two endless streams, when can it be sure click 0 has met all its matches? Choose an answer.",
+    "Never, unless it is told how close in time a match must be. Pairing rows from two inputs is called a join. Over two streams it never completes on its own, because either side may still send a match."
+   ]
+  },
+  {
+   "title": "Q2",
+   "layout": "ask",
+   "eyebrow": "04 · Your turn",
+   "heading": "Within 60 seconds of each other",
+   "stand": "So SQL insists on a limit: match a click and an impression only if their event times are within 60 seconds.",
+   "question": {
+    "step": 0,
+    "prompt": "Apart from defining what a match is, what else does that 60-second limit give the engine?",
+    "options": [
+     {
+      "text": "Faster comparisons, because 60 is a small number.",
+      "correct": false,
+      "why": "Each comparison costs the same either way. What changes is how long rows must be kept."
+     },
+     {
+      "text": "Nothing more: it only decides which pairs count.",
+      "correct": false,
+      "why": "Without it, every row of both streams would have to be kept forever in case a match arrives."
+     },
+     {
+      "text": "A point after which it can stop keeping a row and forget it.",
+      "correct": true,
+      "why": "Once nothing within 60 seconds can still arrive, the row can no longer match anything, so it can be dropped."
+     }
+    ]
+   },
+   "cards": [
+    {
+     "step": 1,
+     "title": "Windowed join",
+     "html": "<p>A join that matches rows whose times are within a limit of each other is a <b>windowed join<\/b>. SQL requires one between two streams.[[src:join]]<\/p>"
+    },
+    {
+     "step": 1,
+     "title": "Two jobs at once",
+     "html": "<p>The limit ends the wait, <b>and<\/b> it bounds the <b>buffer<\/b>: the rows kept waiting for a possible match.[[src:why]]<\/p>"
+    }
+   ],
+   "narration": [
+    "Second question. SQL insists on a limit: match only if the two event times are within 60 seconds. Apart from defining a match, what else does that limit give the engine, the program running the query? Choose an answer.",
+    "A point after which it can forget a row. A join with a time limit is a windowed join. The limit does two jobs at once: it ends the wait, and it bounds the buffer, the rows kept waiting for a possible match."
+   ]
+  },
+  {
+   "title": "Pairs",
+   "layout": "array",
+   "eyebrow": "05 · Watch every candidate pair being tested",
+   "heading": "Twenty candidate pairs, five within 60 seconds",
+   "stand": "Each slot is one click paired with one impression. The bottom row: did they happen within 60 seconds of each other?",
+   "array": {
+    "labelWidth": 150,
+    "slotLabel": "pair",
+    "rows": [
+     {
+      "label": "click id",
+      "values": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1,
+       3,
+       3,
+       3,
+       3,
+       4,
+       4,
+       4,
+       4,
+       8,
+       8,
+       8,
+       8
+      ]
+     },
+     {
+      "label": "impression id",
+      "values": [
+       2,
+       5,
+       6,
+       7,
+       2,
+       5,
+       6,
+       7,
+       2,
+       5,
+       6,
+       7,
+       2,
+       5,
+       6,
+       7,
+       2,
+       5,
+       6,
+       7
+      ]
+     },
+     {
+      "label": "within 60 s, event time?",
+      "values": [
+       "no",
+       "no",
+       "no",
+       "yes",
+       "no",
+       "no",
+       "no",
+       "yes",
+       "yes",
+       "no",
+       "no",
+       "no",
+       "no",
+       "yes",
+       "yes",
+       "no",
+       "no",
+       "no",
+       "no",
+       "no"
+      ]
+     }
+    ],
+    "meters": [
+     "pairs tested",
+     "matches"
+    ],
+    "actions": [
+     {
+      "step": 0,
+      "do": "show",
+      "rows": [
+       0,
+       1
+      ]
+     },
+     {
+      "step": 1,
+      "do": "show",
+      "rows": [
+       2
+      ]
+     },
+     {
+      "step": 1,
+      "do": "sweep",
+      "row": 2,
+      "mode": "match",
+      "match": "yes",
+      "readMeter": 0,
+      "resultMeter": 1,
+      "speed": 220
+     },
+     {
+      "step": 2,
+      "do": "pick",
+      "slots": [
+       3,
+       7
+      ]
+     }
+    ]
+   },
+   "cards": [
+    {
+     "step": 1,
+     "title": "5 true matches",
+     "html": "<p>Click–impression: 0–7, 1–7, 3–2, 4–5, 4–6.[[src:prog]]<\/p>"
+    },
+    {
+     "step": 2,
+     "title": "The late one matches too",
+     "html": "<p>Impression 7 happened at 12:00:50, 49 s after click 0. It truly belongs with clicks 0 and 1, though it arrives 230 s late.[[src:prog]]<\/p>"
+    }
+   ],
+   "narration": [
+    "Here are all 20 candidate pairs: every click, 0, 1, 3, 4 and 8, against every impression, 2, 5, 6 and 7.",
+    "Watch each pair being tested on event time: did they happen within 60 seconds? 20 tested, 5 matches: 0 with 7, 1 with 7, 3 with 2, and 4 with 5 and with 6.",
+    "Look at the two highlighted pairs. Impression 7 happened 49 seconds after click 0, so it truly belongs with clicks 0 and 1, even though it is the one that arrives 230 seconds late."
+   ]
+  },
+  {
+   "title": "Q3",
+   "layout": "ask",
+   "eyebrow": "06 · Your turn",
+   "heading": "Two streams, two estimates of “how far along”",
+   "stand": "Each stream has a watermark: the latest event time it has sent, minus 60 s, the engine’s guess that nothing earlier is still coming. At the end, clicks reach 12:08:00 and impressions 12:03:20.",
+   "question": {
+    "step": 0,
+    "prompt": "Which watermark may the join go by when deciding a match is final?",
+    "options": [
+     {
+      "text": "The higher, 12:08:00: the faster stream shows how far time has got.",
+      "correct": false,
+      "why": "The clicks stream says nothing about impressions still in transit, like impression 7 was."
+     },
+     {
+      "text": "Whichever stream sent the most recent message.",
+      "correct": false,
+      "why": "Arriving last says nothing about what is still on its way from the other stream."
+     },
+     {
+      "text": "The lower, 12:03:20: a match could still come from the slower stream.",
+      "correct": true,
+      "why": "An impression from before 12:08:00 may still be on its way. The join can claim no more than its least complete input."
+     }
+    ]
+   },
+   "cards": [
+    {
+     "step": 1,
+     "title": "The minimum rule",
+     "html": "<p>The join’s watermark is the <b>lower<\/b> of its two inputs’: 12:08:00 and 12:03:20 give <b>12:03:20<\/b>. A match is sent when that passes the match’s limit.[[src:why]]<\/p>"
+    }
+   ],
+   "narration": [
+    "Third question. Each stream has a watermark: the latest event time it has sent, minus 60 seconds, the engine’s guess that nothing earlier is still coming. Clicks reach 12:08:00; impressions 12:03:20. Which may the join go by? Choose an answer.",
+    "The lower one, 12:03:20. A match could still come from the slower stream, so the join can claim no more than its least complete input. Let us watch both watermarks move."
+   ]
+  },
+  {
+   "title": "Mark",
+   "layout": "array",
+   "eyebrow": "07 · Watch the two watermarks, and the join’s",
+   "heading": "The join always sits at the slower side",
+   "stand": "Slots are the nine events in arrival order. Each stream’s watermark after that event, and the join’s: the lower of the two.",
+   "array": {
+    "labelWidth": 170,
+    "slotLabel": "event id",
+    "rows": [
+     {
+      "label": "clicks watermark",
+      "values": [
+       "before 12:00",
+       "before 12:00",
+       "before 12:00",
+       "12:01:10",
+       "12:03:05",
+       "12:03:05",
+       "12:03:05",
+       "12:03:05",
+       "12:08:00"
+      ]
+     },
+     {
+      "label": "impressions watermark",
+      "values": [
+       "none yet",
+       "none yet",
+       "12:00:30",
+       "12:00:30",
+       "12:00:30",
+       "12:03:20",
+       "12:03:20",
+       "12:03:20",
+       "12:03:20"
+      ]
+     },
+     {
+      "label": "join watermark",
+      "values": [
+       "none yet",
+       "none yet",
+       "before 12:00",
+       "12:00:30",
+       "12:00:30",
+       "12:03:05",
+       "12:03:05",
+       "12:03:05",
+       "12:03:20"
+      ]
+     }
+    ],
+    "actions": [
+     {
+      "step": 0,
+      "do": "show",
+      "rows": [
+       0,
+       1
+      ]
+     },
+     {
+      "step": 1,
+      "do": "show",
+      "rows": [
+       2
+      ]
+     },
+     {
+      "step": 1,
+      "do": "pick",
+      "slots": [
+       0,
+       1
+      ]
+     },
+     {
+      "step": 2,
+      "do": "pick",
+      "slots": [
+       8
+      ]
+     }
+    ]
+   },
+   "cards": [
+    {
+     "step": 1,
+     "title": "A silent side blocks everything",
+     "html": "<p>After events 0 and 1 only clicks have arrived, so the join makes no claim at all.[[src:prog]]<\/p>"
+    },
+    {
+     "step": 2,
+     "title": "At the end",
+     "html": "<p>Clicks 12:08:00, impressions 12:03:20: the join claims <b>12:03:20<\/b>, however fast the clicks run.[[src:why]]<\/p>"
+    }
+   ],
+   "narration": [
+    "Top row: the clicks stream’s watermark after each event. Second row: the impressions stream’s. Notice the clicks race ahead.",
+    "Now the join’s watermark, the lower of the two. After events 0 and 1, no impression has arrived at all, so the join makes no claim whatever. A silent side blocks every result.",
+    "And at the very end, clicks reach 12:08:00 but impressions only 12:03:20. The join claims 12:03:20, however fast the clicks run."
+   ]
+  },
+  {
+   "title": "Q4",
+   "layout": "ask",
+   "eyebrow": "08 · Your turn",
+   "heading": "One stream goes quiet",
+   "stand": "Suppose no more impressions arrive after 12:04:40, while clicks keep pouring in.",
+   "question": {
+    "step": 0,
+    "prompt": "What happens to the join’s finished matches?",
+    "options": [
+     {
+      "text": "They keep flowing, driven by the busy clicks stream.",
+      "correct": false,
+      "why": "A busy side cannot vouch for the quiet one. An old impression might still be on its way."
+     },
+     {
+      "text": "They are held back: the join’s watermark stays stuck at the quiet side’s.",
+      "correct": true,
+      "why": "The join can only claim the lower watermark, and the quiet side’s never moves again."
+     },
+     {
+      "text": "The join switches to using only the clicks stream.",
+      "correct": false,
+      "why": "It has no such switch. It always takes the lower of its two inputs."
+     }
+    ]
+   },
+   "cards": [
+    {
+     "step": 1,
+     "title": "Why joins hurt most",
+     "html": "<p>A join has two inputs by construction, so one slow or idle side holds back every result, however fast the other is.[[src:why]]<\/p>"
+    }
+   ],
+   "narration": [
+    "Fourth question. Suppose no impressions arrive after 12:04:40, while clicks keep pouring in. What happens to the join’s finished matches? Choose an answer.",
+    "They are held back. The join’s watermark is the lower one, and the quiet side’s never moves again. A join always has two inputs, so one slow or idle side holds back every result."
+   ]
+  },
+  {
+   "title": "Q5",
+   "layout": "ask",
+   "eyebrow": "09 · Your turn",
+   "heading": "The same join, on the time each message was seen",
+   "stand": "Someone writes the join on pt instead of et: within 60 s of when each was seen. Impression 7 happened at 12:00:50 and was seen at 12:04:40.",
+   "question": {
+    "step": 0,
+    "prompt": "On processing time, which click is impression 7 paired with?",
+    "options": [
+     {
+      "text": "Clicks 0 and 1, the same as on event time, since the data is unchanged.",
+      "correct": false,
+      "why": "Those clicks were seen at 12:00:02 and 12:00:04, far from 12:04:40, so on this clock they no longer match."
+     },
+     {
+      "text": "Click 4, seen at 12:04:06, which happened over 3 minutes after it.",
+      "correct": true,
+      "why": "On the arrival clock, 12:04:40 sits near click 4’s 12:04:06. They never happened close together at all."
+     },
+     {
+      "text": "None: a join cannot be written on the time a message was seen.",
+      "correct": false,
+      "why": "It can. Both columns are valid, and the query runs without any complaint."
+     }
+    ]
+   },
+   "cards": [
+    {
+     "step": 1,
+     "title": "Time attribute",
+     "html": "<p>The time column a window or a join uses is its <b>time attribute<\/b>. Here it decides <b>which rows are paired<\/b>.[[src:join]]<\/p>"
+    }
+   ],
+   "narration": [
+    "Fifth question. Someone writes the same join on pt, the time each message was seen. Impression 7 happened at 12:00:50 and was seen at 12:04:40. Which click is it paired with now? Choose an answer.",
+    "Click 4, seen at 12:04:06, which happened more than 3 minutes after impression 7. The time column a join uses is called its time attribute, and here it decides which rows are paired. Watch both sets."
+   ]
+  },
+  {
+   "title": "Clock",
+   "layout": "array",
+   "eyebrow": "10 · Watch the same 20 pairs on each clock",
+   "heading": "Same data, two different sets of pairs",
+   "stand": "Row 3 tests each pair on event time, row 4 on processing time. Lit slots are matches.",
+   "array": {
+    "labelWidth": 170,
+    "slotLabel": "pair",
+    "rows": [
+     {
+      "label": "click id",
+      "values": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1,
+       3,
+       3,
+       3,
+       3,
+       4,
+       4,
+       4,
+       4,
+       8,
+       8,
+       8,
+       8
+      ]
+     },
+     {
+      "label": "impression id",
+      "values": [
+       2,
+       5,
+       6,
+       7,
+       2,
+       5,
+       6,
+       7,
+       2,
+       5,
+       6,
+       7,
+       2,
+       5,
+       6,
+       7,
+       2,
+       5,
+       6,
+       7
+      ]
+     },
+     {
+      "label": "within 60 s, event time?",
+      "values": [
+       "no",
+       "no",
+       "no",
+       "yes",
+       "no",
+       "no",
+       "no",
+       "yes",
+       "yes",
+       "no",
+       "no",
+       "no",
+       "no",
+       "yes",
+       "yes",
+       "no",
+       "no",
+       "no",
+       "no",
+       "no"
+      ]
+     },
+     {
+      "label": "within 60 s, processing time?",
+      "values": [
+       "no",
+       "no",
+       "no",
+       "no",
+       "no",
+       "no",
+       "no",
+       "no",
+       "yes",
+       "no",
+       "no",
+       "no",
+       "no",
+       "yes",
+       "yes",
+       "yes",
+       "no",
+       "no",
+       "no",
+       "no"
+      ]
+     }
+    ],
+    "meters": [
+     "pairs tested",
+     "matches on event time",
+     "matches on processing time"
+    ],
+    "actions": [
+     {
+      "step": 0,
+      "do": "show",
+      "rows": [
+       0,
+       1,
+       2
+      ]
+     },
+     {
+      "step": 0,
+      "do": "sweep",
+      "row": 2,
+      "mode": "match",
+      "match": "yes",
+      "readMeter": 0,
+      "resultMeter": 1,
+      "speed": 150
+     },
+     {
+      "step": 1,
+      "do": "show",
+      "rows": [
+       3
+      ]
+     },
+     {
+      "step": 1,
+      "do": "sweep",
+      "row": 3,
+      "mode": "match",
+      "match": "yes",
+      "readMeter": 0,
+      "resultMeter": 2,
+      "speed": 150
+     },
+     {
+      "step": 2,
+      "do": "pick",
+      "slots": [
+       3,
+       7,
+       15
+      ]
+     }
+    ]
+   },
+   "cards": [
+    {
+     "step": 2,
+     "title": "A false coincidence",
+     "html": "<p>On processing time, 0–7 and 1–7 vanish and 4–7 appears. Impression 7 is placed 230 s from when it really happened.[[src:why]]<\/p>"
+    },
+    {
+     "step": 3,
+     "title": "Worse than a wrong sum",
+     "html": "<p>A wrong clock in a total is a wrong number in a known place. In a join it asserts two things coincided when they did not, and the row looks entirely plausible.[[src:why]]<\/p>"
+    }
+   ],
+   "narration": [
+    "First, the pairs tested on event time again, when things really happened: 5 matches, the true ones.",
+    "Now processing time, on the same 20 pairs: 4 matches. Not just fewer; different.",
+    "Look at the three highlighted slots. Clicks 0 and 1 lose their real partner, impression 7, and click 4 gains it. On the arrival clock, impression 7 sits 230 seconds from when it happened.",
+    "A wrong clock in a total gives a wrong number in a known place. In a join it states that two things happened together when they did not, and that row looks entirely believable."
+   ]
+  },
+  {
+   "title": "Q6",
+   "layout": "ask",
+   "eyebrow": "11 · Your turn",
+   "heading": "What SQL takes off your hands, and what it does not",
+   "stand": "The engine handles a great deal for you: when to send results, how to correct them, how rows are stored.",
+   "question": {
+    "step": 0,
+    "prompt": "Which two decisions still belong to whoever writes the query?",
+    "options": [
+     {
+      "text": "The window, and the time attribute it uses.",
+      "correct": true,
+      "why": "They are a few characters of the query text, and they decide which window an event lands in and which rows are paired."
+     },
+     {
+      "text": "When results are sent, and how they are corrected.",
+      "correct": false,
+      "why": "Those are set by the engine. The query text never mentions them."
+     },
+     {
+      "text": "Nothing: SQL makes all the time decisions itself.",
+      "correct": false,
+      "why": "The engine cannot guess which clock you meant. Both choices are valid and give different answers."
+     }
+    ]
+   },
+   "cards": [
+    {
+     "step": 1,
+     "title": "Mechanics, not meaning",
+     "html": "<p>SQL hides the mechanics, not the semantics. Review the window and the time attribute first: most meaning per character, and no error when wrong.[[src:when]]<\/p>"
+    }
+   ],
+   "narration": [
+    "Sixth question. The engine decides when results are sent, how they are corrected and how rows are stored. Which two decisions still belong to whoever writes the query? Choose an answer.",
+    "The window, and the time attribute. SQL hides the mechanics, not the meaning. So when reviewing a query, read those two first: they carry the most meaning per character, and neither gives an error when wrong."
+   ]
+  },
+  {
+   "title": "Q7",
+   "layout": "ask",
+   "eyebrow": "12 · Your turn · check yourself",
+   "heading": "Not every join is between two streams",
+   "stand": "Now join each click with a list of advert names. The list is not a stream: it changes only now and then.",
+   "question": {
+    "step": 0,
+    "prompt": "Should this join also get a 60-second limit?",
+    "options": [
+     {
+      "text": "No: each click just looks up the current name in the list.",
+      "correct": true,
+      "why": "The list is bounded by itself, not by time. Forcing a time limit onto it is the common streaming-join bug."
+     },
+     {
+      "text": "Yes: every streaming join needs a time limit.",
+      "correct": false,
+      "why": "Only a join of two endless streams does. A slowly-changing list is not one."
+     },
+     {
+      "text": "Yes, but a longer one, such as an hour.",
+      "correct": false,
+      "why": "Any time limit would drop names that simply have not changed recently. Length is not the issue."
+     }
+    ]
+   },
+   "cards": [
+    {
+     "step": 1,
+     "title": "A lookup",
+     "html": "<p>Joining against a slowly-changing table is a <b>lookup<\/b>, bounded by the table rather than by time. Chapter 9 takes it apart.[[src:when]]<\/p>"
+    }
+   ],
+   "narration": [
+    "Last question. Now join each click with a list of advert names, which changes only now and then. Should this join also get a 60-second limit? Choose an answer.",
+    "No. Each click just looks up the current name: that is called a lookup, bounded by the list, not by time. Forcing a time window onto it is the common streaming-join bug. Chapter 9 takes it apart."
+   ]
+  },
+  {
+   "title": "Recap",
+   "layout": "table",
+   "eyebrow": "13 · What you now know",
+   "heading": "A time limit, the lower watermark, and the right clock",
+   "stand": "Everything in this part, a sentence each.",
+   "table": {
+    "columns": [
+     "Word",
+     "What it means"
+    ],
+    "rows": [
+     {
+      "step": 0,
+      "cells": [
+       "<b>Event time<\/b>, <b>processing time<\/b>",
+       "When it happened, and when it was seen. Impression 7: 230 s apart.[[src:why]]"
+      ]
+     },
+     {
+      "step": 0,
+      "cells": [
+       "<b>Windowed join<\/b>",
+       "Two streams matched within a time limit, here 60 s. The limit ends the wait and bounds the buffer.[[src:why]]"
+      ]
+     },
+     {
+      "step": 1,
+      "cells": [
+       "<b>Watermark<\/b> of a join",
+       "The lower of its two inputs: 12:08:00 and 12:03:20 give 12:03:20. A quiet side holds everything back.[[src:why]]"
+      ]
+     },
+     {
+      "step": 1,
+      "cells": [
+       "<b>Time attribute<\/b>",
+       "On event time 5 true pairs; on processing time 4, one of them a false coincidence.[[src:prog]]"
+      ]
+     },
+     {
+      "step": 2,
+      "cells": [
+       "<b>Lookup<\/b>",
+       "A join against a slowly-changing table: no time limit.[[src:when]]"
+      ]
+     }
+    ]
+   },
+   "side": {
+    "step": 3,
+    "title": "Next · part 4",
+    "html": "<p>Part 4 designs a whole query that runs forever, piece by piece, from the streams to the place its results are written.[[src:join]]<\/p>"
+   },
+   "narration": [
+    "To recap. Every event has an event time and a processing time. Two streams are joined within a time limit, here 60 seconds; the limit ends the wait and bounds the buffer.",
+    "A join’s watermark is the lower of its two inputs: 12:03:20, not 12:08:00. One quiet side holds back every result.",
+    "The time attribute decides which rows are paired: 5 true pairs on event time, and a false one on processing time. And a join against a slowly-changing table is a lookup, with no time limit.",
+    "Next, part 4 designs a whole continuous query, one piece at a time, from the incoming streams to where the results are written."
+   ]
+  }
+ ]
+};
+/* ##################################  END OF DECK CONTENT  ################################## */
+</script>
+
+<script>
+/* =====================================================================================
+   ENGINE — you should not need to edit below this line.
+   ===================================================================================== */
+(function(){
+'use strict';
+const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelectorAll(s)];
+const NS='http://www.w3.org/2000/svg';
+const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const st=k=>k==null?'':' data-st="'+k+'"';
+const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const KIND_VAR={main:'--g-main',change:'--g-change',new:'--g-new',ext:'--g-ext',hub:'--acc'};
+
+/* ---------------- sources + inline codes ---------------- */
+function srcInfo(v){if(!v)return null;const key=Array.isArray(v)?v[0]:v,unv=Array.isArray(v)?(v[1]||'Not checked yet'):'';
+ const s=(DECK.sources||{})[key];if(!s){console.warn('[deck] unknown source key: '+key);return null}return{url:s[0],label:s[1]||s[0],unv}}
+function linkHTML(v){const s=srcInfo(v);if(!s)return'';
+ return '<a class="sl" href="'+esc(s.url)+'" target="_blank" rel="noopener" title="Source: '+esc(s.label)+(s.unv?' · UNVERIFIED: '+esc(s.unv):'')+'">↗</a>'+
+  (s.unv?'<span class="tag unv" title="'+esc(s.unv)+'">unverified</span>':'')}
+function countHTML(n,pre,suf,dec){return '<span data-count="'+(+n)+'" data-pre="'+esc(pre||'')+'" data-suf="'+esc(suf||'')+'" data-dec="'+(+dec||0)+'">'+esc(pre||'')+'0'+esc(suf||'')+'</span>'}
+function rich(t){if(t==null)return'';return String(t).replace(/\\\[\[/g,'\u0000')   // \[[ = show [[ literally
+ .replace(/\[\[src:([\w-]+)\]\]/g,(_,k)=>linkHTML(k))
+ .replace(/\[\[unv:([\w-]+)\|([^\]]*)\]\]/g,(_,k,r)=>linkHTML([k,r]))
+ .replace(/\[\[tag:(\w+)\|([^\]]*)\]\]/g,(_,k,x)=>'<span class="tag '+k+'">'+x+'</span>')
+ .replace(/\[\[count:([\d.]+)\|([^|\]]*)\|([^|\]]*)(?:\|(\d+))?\]\]/g,(_,n,p,s,d)=>countHTML(n,p,s,d)).replace(/\u0000/g,'[[')}
+function fmt(v,d,p,s){return p+v.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d})+s}
+
+/* ---------------- slide renderers (one per layout) ---------------- */
+function head(s){return '<div class="hd"><p class="eyebrow">'+rich(s.eyebrow)+'</p><h1>'+rich(s.heading)+'</h1>'+(s.stand?'<p class="stand">'+rich(s.stand)+'</p>':'<span></span>')+'</div>'}
+function notesRow(notes){return notes&&notes.length?'<div class="row2">'+notes.map(n=>'<div'+st(n.step)+'>'+rich(n.html)+'</div>').join('')+'</div>':''}
+/* extension helpers: a card row under an ask/array slide, and plain text for the voice */
+function extCards(s){return s.cards&&s.cards.length?'<div class="grid" style="grid-template-columns:repeat('+(s.columns||Math.min(3,s.cards.length))+',1fr)">'+
+ s.cards.map(c=>'<div class="card"'+st(c.step)+'><h3>'+rich(c.title)+'</h3>'+rich(c.html)+'</div>').join('')+'</div>':''}
+function plain(t){return String(t==null?'':t).replace(/\\\[\[/g,'[[').replace(/\[\[[^\]]*\]\]/g,'').replace(/<[^>]*>/g,'').replace(/\s+/g,' ').trim()}
+const RENDER={
+ /* extension: code layout */
+ code(s){const c=s.code,L=c.lines,shown=new Set(),fresh=new Set();
+  (c.shown||[]).forEach(([a,b])=>{for(let i=a;i<=b;i++)shown.add(i)});(c.fresh||[]).forEach(([a,b])=>{for(let i=a;i<=b;i++)fresh.add(i)});
+  if(c.full)L.forEach((_,i)=>shown.add(i));
+  let h='',prev=-1;L.forEach((t,i)=>{if(!shown.has(i)&&!fresh.has(i))return;
+   if(prev>=0&&i>prev+1)h+='<div class="gap">⋯ '+(i-prev-1)+' line'+(i-prev-1===1?'':'s')+' not written yet</div>';
+   h+='<div class="ln'+(fresh.has(i)?' fresh':'')+'" data-n="'+i+'"'+(fresh.has(i)?st(c.step):'')+'><i>'+(i+1)+'</i><span>'+esc(t)+'</span></div>';prev=i});
+  if(c.full)h=h.split('not written yet').join('');
+  const panel='<div class="card codecard"><p class="k">'+rich(c.label||'the program so far')+'</p><div class="codep">'+h+'</div></div>';
+  let side='';
+  if(s.question){const q=s.question;side+='<div class="card askq compact"'+st(q.step)+'><p class="k">'+rich(q.label||'Your turn · pick an answer')+'</p><p class="qtext">'+rich(q.prompt)+'</p><div class="opts">'+
+   q.options.map((o,j)=>'<button type="button" class="opt" data-j="'+j+'"><i>'+String.fromCharCode(65+j)+'</i><span>'+rich(o.text)+'</span></button>').join('')+'</div><div class="fb" aria-live="polite"></div></div>'}
+  if(s.cards&&s.cards.length)side+=s.cards.map(x=>'<div class="card"'+st(x.step)+'><h3>'+rich(x.title)+'</h3>'+rich(x.html)+'</div>').join('');
+  return head(s)+'<div class="codegrid'+(side?'':' solo')+'">'+(side?'<div class="codeside">'+side+'</div>':'')+panel+'</div>'},
+ /* extension: ask + array layouts */
+ ask(s){const q=s.question;
+  let h='<div class="card askq"'+st(q.step)+'><p class="k">'+rich(q.label||'Your turn · pick an answer')+'</p><p class="qtext">'+rich(q.prompt)+'</p><div class="opts">'+
+   q.options.map((o,j)=>'<button type="button" class="opt" data-j="'+j+'"><i>'+String.fromCharCode(65+j)+'</i><span>'+rich(o.text)+'</span></button>').join('')+
+   '</div><div class="fb" aria-live="polite"></div></div>';
+  return head(s)+'<div class="askwrap">'+h+extCards(s)+'</div>'},
+ array(s){const a=s.array,n=a.rows[0].values.length;
+  let h='<div class="card arr"><div class="agrid" style="grid-template-columns:'+(a.labelWidth||130)+'px repeat('+n+',minmax(0,1fr))">';
+  if(a.slots!==false)h+='<span class="al k">'+rich(a.slotLabel||'slot')+'</span>'+Array.from({length:n},(_,j)=>'<span class="ai" data-c="'+j+'">'+j+'</span>').join('');
+  a.rows.forEach((r,ri)=>{h+='<span class="al">'+rich(r.label)+'</span>'+r.values.map((v,j)=>'<span class="ac" data-r="'+ri+'" data-c="'+j+'">'+esc(v)+'</span>').join('')});
+  h+='</div>'+((a.meters||[]).length?'<div class="ameter">'+a.meters.map((m,j)=>'<div class="am" data-m="'+j+'"><span class="k">'+rich(m)+'</span><b>0</b></div>').join('')+'</div>':'')+'</div>';
+  return head(s)+'<div class="arrwrap">'+h+extCards(s)+'</div>'},
+
+ title(s){let l='<p class="eyebrow">'+rich(s.eyebrow)+'</p><h1>'+rich(s.heading)+'</h1>';
+  if(s.hero)l+='<div class="card hero"'+st(s.hero.step)+'><p>'+rich(s.hero.text)+'</p></div>';
+  if(s.tiles)l+='<div class="tiles">'+s.tiles.map(t=>'<div'+st(t.step)+'><div class="v">'+countHTML(t.value,t.prefix,t.suffix,t.decimals)+'</div><div class="d">'+rich(t.label)+'</div></div>').join('')+'</div>';
+  if(s.note)l+='<p class="note"'+st(s.note.step)+'>'+rich(s.note.text)+'</p>';
+  let r=(s.cardsLabel?'<p class="k">'+rich(s.cardsLabel)+'</p>':'')+'<div class="steps">'+(s.cards||[]).map(c=>'<div class="card"'+st(c.step)+'><span class="n">'+esc(c.n)+'</span><div><b>'+rich(c.title)+'</b><span class="x">'+rich(c.text)+'</span></div></div>').join('')+'</div>';
+  return '<div class="tl"><div class="l">'+l+'</div><div class="r">'+r+'</div></div>'},
+ graph(s){const g=s.graph,L=DECK.legend||{};
+  const leg=g.legend?'<div class="glegend">'+['main','change','new','ext'].filter(k=>L[k]).map(k=>'<span><i class="'+k+'"></i>'+esc(L[k])+'</span>').join('')+'</div>':'';
+  return head(s)+'<div class="card gwrap">'+leg+'<svg class="g" viewBox="'+esc(g.viewBox||'0 0 1520 460')+'" preserveAspectRatio="xMidYMid meet"></svg>'+notesRow(s.notes)+'</div>'},
+ sequence(s){return head(s)+'<div class="card gwrap"><svg class="seq" preserveAspectRatio="xMidYMid meet"></svg>'+notesRow(s.notes)+'</div>'},
+ table(s){const t=s.table;
+  let h='<div class="card"><table class="t"><tr>'+t.columns.map(c=>'<th>'+rich(c)+'</th>').join('')+'</tr>'+
+   t.rows.map(r=>'<tr'+st(r.step)+'>'+r.cells.map(c=>'<td>'+rich(c)+'</td>').join('')+'</tr>').join('')+'</table></div>';
+  if(s.side)h+='<div class="card"'+st(s.side.step)+'><p class="k">'+rich(s.side.title)+'</p>'+rich(s.side.html)+'</div>';
+  return head(s)+'<div class="cols" style="grid-template-columns:'+(s.side?'1.6fr 1fr':'1fr')+'">'+h+'</div>'},
+ timeline(s){const T=s.timeline||[],n=T.length;
+  let h='<div class="card"><div class="tline"><div class="track"></div><div class="fillbar"></div>'+
+   T.map((m,j)=>'<div class="ms" style="left:'+tlPos(j,n)+'%"><div class="t">'+esc(m.time||'')+'</div><div class="dot"></div><b>'+rich(m.title)+'</b><span>'+rich(m.text)+'</span><span class="chip state">next</span></div>').join('')+'</div></div>';
+  if(s.strip)h+='<div class="card"><p class="k">'+rich(s.strip.label)+'</p><div class="strip">'+s.strip.items.map(i=>'<div class="tkt '+esc(i.tone||'')+'"><b>'+esc(i.n)+'</b>'+rich(i.text)+'</div>').join('')+'</div></div>';
+  return head(s)+h+notesRow(s.notes)},
+ cards(s){let h='';
+  if(s.tokens||s.bars){h+='<div class="cols" style="flex:none;grid-template-columns:'+(s.tokens&&s.bars?'1fr 1fr':'1fr')+'">';
+   if(s.tokens)h+='<div class="card"><p class="k">'+rich(s.tokens.label)+'</p><div class="tokens">'+s.tokens.items.map(x=>'<span class="tk">'+esc(x)+'</span>').join('')+'</div></div>';
+   if(s.bars){const mx=Math.max(...s.bars.items.map(b=>b.value))||1;
+    h+='<div class="card"><p class="k">'+rich(s.bars.label)+'</p><div class="bars">'+s.bars.items.map(b=>'<div class="row"><span>'+rich(b.label)+'</span><span class="track"><span class="fill" data-w="'+(b.value/mx*100)+'"'+(b.color?' style="background:'+esc(b.color)+'"':'')+'></span></span><span class="num">'+esc(b.value)+'</span></div>').join('')+'</div></div>'}
+   h+='</div>'}
+  h+='<div class="grid" style="grid-template-columns:repeat('+(s.columns||3)+',1fr)">'+(s.cards||[]).map(c=>'<div class="card"'+st(c.step)+'><h3>'+rich(c.title)+'</h3>'+rich(c.html)+'</div>').join('')+'</div>';
+  return head(s)+h+notesRow(s.notes)}
+};
+function tlPos(j,n){return n<2?50:8+j*(84/(n-1))}
+
+/* ---------------- graph engine ----------------
+   node: {id,x,y,w,h,title,sub,kind,step,src,values}   (coordinates are in viewBox units)
+   edge: {from,to,kind,step,label,bend,labelAt,dx,dy,labelAnchor,loop,src}
+   Arrows dash-draw in on their step; "new" arrows march; dots run along the current step's arrows. */
+function rectHit(n,qx,qy){/* point where the line from the box centre towards (qx,qy) leaves the box */
+ const cx=n.x+n.w/2,cy=n.y+n.h/2,dx=qx-cx,dy=qy-cy;if(!dx&&!dy)return[cx,cy];
+ const sx=dx?(n.w/2+3)/Math.abs(dx):1e9,sy=dy?(n.h/2+3)/Math.abs(dy):1e9,s=Math.min(sx,sy);return[cx+dx*s,cy+dy*s]}
+function buildGraph(svg,cfg){const vb=svg.viewBox.baseVal,N={};let h='';const f=v=>v.toFixed(1);
+ (cfg.lanes||[]).forEach(l=>h+='<rect class="glane" x="0" y="'+l.y+'" width="'+vb.width+'" height="'+l.h+'"/><text class="gcol" x="16" y="'+(l.y+l.h/2+4)+'">'+esc(l.label)+'</text>');
+ (cfg.cols||[]).forEach(c=>h+='<text class="gcol" x="'+c.x+'" y="'+c.y+'">'+esc(c.text)+'</text>');
+ cfg.nodes.forEach(n=>{N[n.id]={kind:'main',step:0,...n}});
+ const E=cfg.edges.map(e=>{const A=N[e.from],B=N[e.to];if(!A||!B){console.warn('[deck] edge with unknown box',e);return null}
+  let d;const ac=[A.x+A.w/2,A.y+A.h/2],bc=[B.x+B.w/2,B.y+B.h/2];
+  if(e.loop){const x=A.x+A.w*0.5,y=A.y;d='M'+(x-30)+','+(y-2)+' C'+(x-44)+','+(y-62)+' '+(x+44)+','+(y-62)+' '+(x+30)+','+(y-4)}
+  else{const mx=(ac[0]+bc[0])/2,my=(ac[1]+bc[1])/2,L=Math.hypot(bc[0]-ac[0],bc[1]-ac[1])||1,b=e.bend||0;
+   const cx=mx-(bc[1]-ac[1])/L*b,cy=my+(bc[0]-ac[0])/L*b;
+   const p=rectHit(A,b?cx:bc[0],b?cy:bc[1]),q=rectHit(B,b?cx:ac[0],b?cy:ac[1]);
+   d=b?'M'+f(p[0])+','+f(p[1])+' Q'+f(cx)+','+f(cy)+' '+f(q[0])+','+f(q[1]):'M'+f(p[0])+','+f(p[1])+' L'+f(q[0])+','+f(q[1])}
+  return{kind:'main',step:0,...e,d}}).filter(Boolean).map((e,i)=>({...e,i}));
+ E.forEach(e=>h+='<path class="gedge k-'+e.kind+'" data-i="'+e.i+'" d="'+e.d+'"/>');
+ Object.values(N).forEach(n=>{const cx=n.x+n.w/2,subs=n.sub?(Array.isArray(n.sub)?n.sub:[n.sub]):[],hasVal=!!n.values;
+  h+='<g class="gnode k-'+n.kind+'" data-id="'+esc(n.id)+'">';
+  if(n.kind==='hub')h+='<rect class="hubring" x="'+n.x+'" y="'+n.y+'" width="'+n.w+'" height="'+n.h+'" rx="6" style="transform-origin:'+cx+'px '+(n.y+n.h/2)+'px"/>';
+  h+='<rect x="'+n.x+'" y="'+n.y+'" width="'+n.w+'" height="'+n.h+'" rx="4"/>';
+  const ty=hasVal?n.y+24:(subs.length?n.y+n.h/2-(n.kind==='hub'?4:3)-(subs.length-1)*6:n.y+n.h/2+5);
+  h+='<text x="'+cx+'" y="'+ty+'" text-anchor="middle">'+esc(n.title)+'</text>';
+  subs.forEach((s,j)=>h+='<text class="s" x="'+cx+'" y="'+(ty+(n.kind==='hub'?20:15)+j*13)+'" text-anchor="middle">'+esc(s)+'</text>');
+  if(hasVal)h+='<text class="val" x="'+cx+'" y="'+(n.y+n.h-14)+'" text-anchor="middle" data-val="'+esc(n.id)+'"></text>';
+  h+='</g>'});
+ h+='<g class="ahs"></g><g class="lbls"></g><g class="pkts"></g>';
+ svg.innerHTML=h;
+ let ah='',lb='';
+ $$('.gedge',svg).forEach(p=>{const e=E[+p.dataset.i];const L=p.getTotalLength();p.style.setProperty('--len',Math.ceil(L)+4);e.len=L;e.el=p;
+  const P1=p.getPointAtLength(L),P0=p.getPointAtLength(Math.max(0,L-1));let ux=P1.x-P0.x,uy=P1.y-P0.y;const n=Math.hypot(ux,uy)||1;ux/=n;uy/=n;
+  const bx=P1.x-ux*11,by=P1.y-uy*11;
+  ah+='<path class="gah k-'+e.kind+'" data-i="'+e.i+'" d="M'+f(P1.x)+','+f(P1.y)+'L'+f(bx-uy*5.5)+','+f(by+ux*5.5)+'L'+f(bx+uy*5.5)+','+f(by-ux*5.5)+'z"/>';
+  if(e.label){const M=p.getPointAtLength(L*(e.labelAt==null?.5:e.labelAt));
+   String(e.label).split('|').forEach((s,j)=>lb+='<text class="glbl" data-i="'+e.i+'" x="'+f(M.x+(e.dx||0))+'" y="'+f(M.y+(e.dy==null?-6:e.dy)+j*15)+'" text-anchor="'+(e.labelAnchor||'middle')+'">'+esc(s)+'</text>')}});
+ $('.ahs',svg).innerHTML=ah;$('.lbls',svg).innerHTML=lb;
+ /* source links on boxes and arrow labels */
+ $$('.gnode',svg).forEach(el=>{const n=N[el.dataset.id];if(!n.src)return;const unv=Array.isArray(n.src);
+  svgText(el,n.x+n.w-6,n.y+11,unv?'unvt':'lnk',unv?'UNVERIFIED ↗':'↗');svgLink(el,n.src)});
+ E.forEach(e=>{if(e.src&&e.label)$$('.glbl[data-i="'+e.i+'"]',svg).forEach(x=>svgLink(x,e.src))});
+ return{svg,N,E,gen:0,timer:null}}
+function graphStage(g,k){const svg=g.svg;
+ $$('.gnode',svg).forEach(el=>{const n=g.N[el.dataset.id];el.classList.toggle('lit',n.step<=k);el.classList.toggle('pulse',n.step===k)});
+ $$('.hubring',svg).forEach(r=>r.classList.toggle('go',k>=0));
+ g.E.forEach(e=>{const on=e.step<=k,hot=e.step===k;e.el.classList.toggle('lit',on);e.el.classList.toggle('hot',hot);
+  $$('[data-i="'+e.i+'"]:not(.gedge)',svg).forEach(x=>{x.classList.toggle('lit',on);if(x.classList.contains('glbl'))x.classList.toggle('hot',hot)})});
+ Object.values(g.N).forEach(n=>{if(!n.values)return;const t=$('[data-val="'+CSS.escape(n.id)+'"]',svg);let s='';
+  for(let j=0;j<=k&&j<n.values.length;j++)if(n.values[j]!=null)s=n.values[j];t.textContent=k<0?'':s});
+ packets(g,k)}
+function packets(g,k){g.gen++;clearTimeout(g.timer);const gen=g.gen;$('.pkts',g.svg).innerHTML='';if(k<0)return;
+ const hot=g.E.filter(e=>e.step===k);if(!hot.length)return;
+ const fire=()=>{if(gen!==g.gen)return;hot.forEach((e,j)=>setTimeout(()=>runPacket(g,e,gen),j*260));g.timer=setTimeout(fire,2900)};
+ g.timer=setTimeout(fire,900)}
+function runPacket(g,e,gen){if(gen!==g.gen)return;const c=document.createElementNS(NS,'circle');c.setAttribute('r',5.5);c.setAttribute('class','pkt');
+ c.setAttribute('fill',css(KIND_VAR[e.kind]||'--acc'));$('.pkts',g.svg).appendChild(c);
+ const D=Math.max(900,e.len*3.2),t0=performance.now();
+ (function f(n){if(gen!==g.gen){c.remove();return}const q=Math.min(1,(n-t0)/D),ez=q<.5?2*q*q:1-Math.pow(-2*q+2,2)/2;
+  const P=e.el.getPointAtLength(e.len*ez);c.setAttribute('cx',P.x);c.setAttribute('cy',P.y);c.setAttribute('opacity',q>.92?(1-q)*12:1);
+  if(q<1)requestAnimationFrame(f);else c.remove()})(t0)}
+function svgLink(el,v){const s=srcInfo(v);if(!s||el.closest('a'))return null;
+ const a=document.createElementNS(NS,'a');a.setAttribute('href',s.url);a.setAttribute('target','_blank');a.setAttribute('rel','noopener');
+ const ti=document.createElementNS(NS,'title');ti.textContent='Source: '+s.label+(s.unv?' · UNVERIFIED: '+s.unv:'');a.appendChild(ti);
+ el.parentNode.insertBefore(a,el);a.appendChild(el);return a}
+function svgText(parent,x,y,cls,txt,anc){const t=document.createElementNS(NS,'text');t.setAttribute('class',cls);t.setAttribute('x',x);t.setAttribute('y',y);t.setAttribute('text-anchor',anc||'end');t.textContent=txt;parent.appendChild(t);return t}
+
+/* ---------------- sequence engine ---------------- */
+function buildSeq(svg,cfg){const A=cfg.actors,M=cfg.messages,W=1500,sp=W/A.length,bw=Math.min(170,sp-16),rh=cfg.rowHeight||38,H=92+M.length*rh+10;
+ svg.setAttribute('viewBox','0 0 '+W+' '+H);const X=i=>sp*(i+.5),idx={};A.forEach((a,i)=>idx[a.name]=i);let h='';
+ A.forEach((a,i)=>{h+='<g class="actor'+(a.highlight?' new':'')+'"><rect x="'+(X(i)-bw/2)+'" y="8" width="'+bw+'" height="48" rx="3"/><text x="'+X(i)+'" y="29" text-anchor="middle" font-weight="600">'+esc(a.name)+'</text><text class="lbl" x="'+X(i)+'" y="46" text-anchor="middle">'+esc(a.sub||'')+'</text></g><line class="life" x1="'+X(i)+'" x2="'+X(i)+'" y1="56" y2="'+(H-6)+'"/>'});
+ M.forEach((m,i)=>{const a=idx[m.from],b=idx[m.to];if(a==null||b==null||a===b){console.warn('[deck] bad sequence message',m);return}
+  const y=92+i*rh,x1=X(a),x2=X(b),k=m.step||0;
+  h+='<path class="msg" data-k="'+k+'" data-m="'+i+'" d="M'+x1+','+y+' L'+(x2+(x2>x1?-6:6))+','+y+'"/><text class="mt lbl" data-k="'+k+'" data-m="'+i+'" x="'+((x1+x2)/2)+'" y="'+(y-8)+'" text-anchor="middle">'+(i+1)+'. '+esc(m.label)+'</text>'});
+ svg.innerHTML=h+'<g class="ahs"></g>';
+ let ah='';const f=v=>v.toFixed(2);
+ $$('.msg',svg).forEach(p=>{const L=p.getTotalLength();p.style.setProperty('--len',Math.ceil(L)+4);
+  const E=p.getPointAtLength(L),P=p.getPointAtLength(Math.max(0,L-1));let ux=E.x-P.x,uy=E.y-P.y;const n=Math.hypot(ux,uy)||1;ux/=n;uy/=n;
+  const tx=E.x+ux*1.3,ty=E.y+uy*1.3,bx=tx-ux*12.6,by=ty-uy*12.6;
+  ah+='<path class="ah" data-k="'+p.dataset.k+'" d="M'+f(tx)+','+f(ty)+'L'+f(bx-uy*6.3)+','+f(by+ux*6.3)+'L'+f(bx+uy*6.3)+','+f(by-ux*6.3)+'z"/>'});
+ $('.ahs',svg).innerHTML=ah;
+ $$('.actor',svg).forEach((g,i)=>{const v=A[i].src;if(!v)return;const r=g.querySelector('rect');
+  svgText(g,+r.getAttribute('x')+(+r.getAttribute('width'))-5,+r.getAttribute('y')+11,Array.isArray(v)?'unvt':'lnk',Array.isArray(v)?'UNVERIFIED ↗':'↗');svgLink(g,v)});
+ $$('.mt',svg).forEach(t=>{const v=M[+t.dataset.m].src;if(v)svgLink(t,v)})}
+
+/* ---------------- counters ---------------- */
+function count(el){const t=+el.dataset.count,d=+el.dataset.dec||0,p=el.dataset.pre||'',s=el.dataset.suf||'';
+ const t0=performance.now(),D=+el.dataset.ms||1900;const host=el.closest('.v')||el;host.classList.add('ticking');host.classList.remove('landed');
+ (function f(n){if(!el._run)return;const q=Math.min(1,(n-t0)/D),e=1-Math.pow(1-q,4);el.textContent=fmt(t*e,d,p,s);
+  if(q<1)requestAnimationFrame(f);else{el.textContent=fmt(t,d,p,s);host.classList.remove('ticking');host.classList.add('landed')}})(t0)}
+function counters(slide,k){$$('[data-count]',slide).forEach(c=>{const host=c.closest('[data-st]');const on=host?+host.dataset.st<=k:k>=0;
+ if(on&&!c._run){c._run=1;count(c)}else if(!on&&c._run){c._run=0;c.textContent=fmt(0,+c.dataset.dec||0,c.dataset.pre||'',c.dataset.suf||'')}})}
+
+/* ---------------- build the deck from DECK ---------------- */
+document.title=DECK.title||document.title;$('#deckEyebrow').innerHTML=rich(DECK.eyebrow||'');
+const deckEl=$('#deck');
+DECK.slides.forEach((s,i)=>{const sec=document.createElement('section');sec.className='slide';sec.dataset.title=s.title||('Slide '+(i+1));
+ const r=RENDER[s.layout];if(!r){console.warn('[deck] unknown layout "'+s.layout+'" on slide '+(i+1));sec.innerHTML=head(s)}else sec.innerHTML=r(s);deckEl.appendChild(sec)});
+const S=$$('.slide',deckEl);
+const NARR=DECK.slides.map(s=>(s.narration&&s.narration.length?s.narration:['']).map(String));
+const SPEECH=DECK.slides.map(s=>s.speech||[]);   // optional per-line spoken text, if it should differ from the bar
+/* per-slide hooks for diagrams that need JS: stage(k) shows step k, reset() clears */
+DECK.slides.forEach((s,i)=>{const sec=S[i];sec._hooks=[];
+ if(s.layout==='graph'){const g=buildGraph($('svg.g',sec),s.graph);sec._hooks.push({stage:k=>graphStage(g,k),reset:()=>{g.gen++;clearTimeout(g.timer);graphStage(g,-1)}})}
+ if(s.layout==='sequence'){const svg=$('svg.seq',sec);buildSeq(svg,s.sequence);
+  const lit=k=>$$('.msg,.mt,.ah',svg).forEach(e=>e.classList.toggle('lit',+e.dataset.k<=k));sec._hooks.push({stage:lit,reset:()=>lit(-1)})}
+ if(s.layout==='timeline'){const ms=$$('.ms',sec),T=s.timeline||[],fill=$('.fillbar',sec),tk=$$('.tkt',sec),sp=s.strip;
+  sec._hooks.push({stage:k=>{let c=-1;T.forEach((m,j)=>{if((m.step||0)<=k)c=j});
+    ms.forEach((m,j)=>{const state=j<c?'done':j===c?'now':'next';m.classList.remove('done','now','next');m.classList.add(state);const ch=$('.state',m);ch.textContent=state;ch.className='chip state'+(state==='done'?' u':state==='now'?' a':'')});
+    fill.style.width=c<0?'0':(tlPos(c,T.length)-8)+'%';
+    if(sp){if(k>=sp.step&&!sec._dropped){sec._dropped=1;tk.forEach((t,j)=>{clearTimeout(t._t);t._t=setTimeout(()=>t.classList.add('in'),300+j*520)})}
+     else if(k<sp.step){sec._dropped=0;tk.forEach(t=>{clearTimeout(t._t);t.classList.remove('in')})}}},
+   reset:()=>{sec._dropped=0;tk.forEach(t=>{clearTimeout(t._t);t.classList.remove('in')});fill.style.width='0';ms.forEach(m=>m.classList.remove('done','now'))}})}
+ if(s.layout==='cards'&&(s.tokens||s.bars)){const tks=$$('.tk',sec),fills=$$('.bars .fill',sec);
+  sec._hooks.push({stage:k=>{if(s.tokens){if(k>=s.tokens.step&&!sec._tok){sec._tok=1;tks.forEach((t,j)=>{clearTimeout(t._t);t._t=setTimeout(()=>t.classList.add('in'),j*90)})}
+     else if(k<s.tokens.step){sec._tok=0;tks.forEach(t=>{clearTimeout(t._t);t.classList.remove('in')})}
+     tks.forEach(t=>t.classList.toggle('fade',s.tokens.fadeStep!=null&&k>=s.tokens.fadeStep))}
+    if(s.bars)fills.forEach(f=>f.style.width=(k>=s.bars.step?f.dataset.w:0)+'%')},
+   reset:()=>{sec._tok=0;tks.forEach(t=>{clearTimeout(t._t);t.classList.remove('in','fade')});fills.forEach(f=>f.style.width='0')}})}
+ /* extension: ask — answering is the only way past the question step */
+ if(s.question){const q=s.question,fb=$('.fb',sec),bs=$$('.opt',sec),L=j=>String.fromCharCode(65+j);
+  const reset=()=>{sec._answered=false;bs.forEach(b=>{b.className='opt';b.disabled=false});fb.innerHTML=''};
+  bs.forEach(b=>b.onclick=e=>{e.stopPropagation();if(sec._answered)return;const j=+b.dataset.j,o=q.options[j],ok=!!o.correct,ci=q.options.findIndex(x=>x.correct),c=q.options[ci];
+   sec._answered=true;bs.forEach((x,m)=>{x.disabled=true;x.classList.add(q.options[m].correct?'right':m===j?'wrong':'dim')});
+   fb.innerHTML='<p class="verdict '+(ok?'ok':'no')+'">'+(ok?'Right':'Not quite')+'</p><p>'+rich(o.why)+'</p>'+(ok?'':'<p><b>The answer is '+L(ci)+'.</b> '+rich(c.why)+'</p>');
+   if(voice&&HAS_TTS)speakLine((ok?'Right. ':'Not quite. ')+plain(o.why)+(ok?'':' The answer is '+plain(c.text)+'. '+plain(c.why)));
+   else if(playing){clearTimeout(timer);timer=setTimeout(next,Math.max(4000,plain(fb.textContent).length*55))}});
+  sec._hooks.push({stage:()=>{},reset})}
+ /* extension: code — keep the newest lines in view as they appear */
+ if(s.layout==='code'){const pane=$('.codep',sec),fr=$$('.ln.fresh',sec);
+  sec._hooks.push({stage:k=>{const first=fr.find(e=>e.classList.contains('lit')||!e.hasAttribute('data-st'));
+    if(first&&pane)pane.scrollTop=Math.max(0,first.offsetTop-pane.offsetTop-pane.clientHeight*0.25)},
+   reset:()=>{if(pane)pane.scrollTop=0}})}
+ /* extension: array — show, pick and sweep, each tied to a narration step */
+ if(s.layout==='array'){const a=s.array,A=a.actions||[],cell=(r,c)=>$('.ac[data-r="'+r+'"][data-c="'+c+'"]',sec),M=$$('.am b',sec);
+  let gen=0;const fmt0=v=>Number(v).toLocaleString('en-US'),setM=(i,v)=>{if(i!=null&&M[i])M[i].textContent=fmt0(v)};
+  const rowsOf=x=>x.rows!=null?x.rows:x.row!=null?[x.row]:a.rows.map((_,r)=>r);
+  const clear=()=>{gen++;$$('.ac',sec).forEach(e=>e.classList.remove('in','seen','hit','pick','ptr'));$$('.ai',sec).forEach(e=>e.classList.remove('pick'));M.forEach(m=>m.textContent='0')};
+  const sweepTo=(x,upto)=>{const r=x.row,vals=a.rows[r].values;let read=0,acc=0,hits=0;
+   for(let c=0;c<=upto;c++){const el=cell(r,c),v=Number(vals[c]);read++;el.classList.add('seen');
+    if(x.mode==='sum')acc+=v;else if(x.mode==='match'&&String(vals[c])===String(x.match)){hits++;el.classList.add('hit')}}
+   setM(x.readMeter,read);if(x.mode==='sum')setM(x.resultMeter,acc);if(x.mode==='match')setM(x.resultMeter,hits)};
+  const stageA=k=>{clear();const g=gen;
+   A.filter(x=>x.step<=k).forEach(x=>{const live=x.step===k;
+    if(x.do==='show')rowsOf(x).forEach(r=>a.rows[r].values.forEach((_,c)=>{const el=cell(r,c);if(live){el._t=setTimeout(()=>{if(g===gen)el.classList.add('in')},c*45+r*120)}else el.classList.add('in')}));
+    if(x.do==='pick')(x.slots||[]).forEach(c=>{rowsOf(x).forEach(r=>cell(r,c).classList.add('pick'));const i=$('.ai[data-c="'+c+'"]',sec);if(i)i.classList.add('pick')});
+    if(x.do==='sweep'){const n=a.rows[x.row].values.length;
+     if(!live)sweepTo(x,n-1);else{let c=0;(function tick(){if(g!==gen)return;$$('.ac.ptr',sec).forEach(e=>e.classList.remove('ptr'));
+      if(c>=n)return;sweepTo(x,c);cell(x.row,c).classList.add('ptr');c++;setTimeout(tick,x.speed||140)})()}}})};
+  sec._hooks.push({stage:stageA,reset:clear})}
+});
+/* authoring check: warns (console only) when a step number has no narration line */
+DECK.slides.forEach((s,i)=>{let mx=-1;JSON.stringify(s,(k,v)=>{if((k==='step'||k==='fadeStep')&&typeof v==='number')mx=Math.max(mx,v);return v});
+ if(mx>=NARR[i].length)console.warn('[deck] slide '+(i+1)+' uses step '+mx+' but has only '+NARR[i].length+' narration lines')});
+
+/* ---------------- scaling, theme, tabs ---------------- */
+function fit(){document.documentElement.style.setProperty('--s',Math.min(innerWidth/1600,innerHeight/900))}
+fit();addEventListener('resize',fit);
+const tt=$('#tt');function setTheme(m){document.documentElement.dataset.theme=m;tt.textContent=m==='dark'?'Light':'Dark'}
+setTheme(DECK.theme==='dark'?'dark':'light');tt.onclick=()=>setTheme(document.documentElement.dataset.theme==='dark'?'light':'dark');
+const tabs=$('#tabs');S.forEach((s,i)=>{const b=document.createElement('button');b.type='button';b.innerHTML='<i>'+String(i+1).padStart(2,'0')+'</i>'+esc(s.dataset.title);b.onclick=()=>go(i);tabs.appendChild(b)});
+
+/* ---------------- voice-over ----------------
+   Fixed voice by name (any word order), silent fallback through DECK.voice.fallbackLangs, then the
+   browser default. Voices load asynchronously in Chrome, so the choice is redone on "voiceschanged".
+   Each sentence is spoken as its own utterance (avoids Chrome cutting long utterances off). */
+const V=DECK.voice||{},AUTO=DECK.auto||{},HAS_TTS='speechSynthesis' in window&&typeof SpeechSynthesisUtterance!=='undefined';
+let VOICE=null;
+const WANT=String(V.preferred||'').toLowerCase().split(/\s+/).filter(Boolean);
+const isPreferred=v=>{const n=(v.name||'').toLowerCase();return WANT.length>0&&WANT.every(w=>new RegExp('\\b'+w.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\b').test(n))};
+const normLang=l=>String(l||'').toLowerCase().replace('_','-');
+function chooseVoice(list){const p=list.find(isPreferred);if(p)return p;
+ for(const lang of (V.fallbackLangs||[])){const L=normLang(lang),m=list.find(v=>normLang(v.lang)===L||normLang(v.lang).startsWith(L+'-')||normLang(v.lang).startsWith(L));if(m)return m}
+ return null}   // null = let the browser use its default voice
+function loadVoices(){if(!HAS_TTS)return;VOICE=chooseVoice(speechSynthesis.getVoices()||[])}
+if(HAS_TTS){loadVoices();if(speechSynthesis.addEventListener)speechSynthesis.addEventListener('voiceschanged',loadVoices);else speechSynthesis.onvoiceschanged=loadVoices}
+function speakable(s){let t=String(s);Object.entries(V.sayAs||{}).forEach(([a,b])=>{t=t.split(a).join(b)});
+ return t.replace(/(\d),(\d{3})/g,'$1$2').replace(/(\d+(?:\.\d+)?)%/g,'$1 percent')}
+function rateFor(v){const R=V.rate||{};if(v&&/^google/i.test(v.name))return R.google||1;if(v&&/^microsoft/i.test(v.name))return R.microsoft||1;return R.other||1}
+let speechGen=0,pauseT=null;
+function stopSpeech(){speechGen++;clearTimeout(pauseT);if(HAS_TTS)speechSynthesis.cancel()}
+function speakLine(text){stopSpeech();const gen=speechGen;if(!VOICE)loadVoices();const v=VOICE;
+ const parts=speakable(text).match(/[^.!?]+[.!?]+["')]*|[^.!?]+$/g)||[text];let i=0;
+ (function nextSentence(){if(gen!==speechGen)return;
+  if(i>=parts.length){if(playing)timer=setTimeout(next,AUTO.afterSpeechMs==null?700:AUTO.afterSpeechMs);return}
+  const u=new SpeechSynthesisUtterance(parts[i++].trim());if(v){u.voice=v;u.lang=v.lang}u.rate=rateFor(v);u.pitch=V.pitch||1;u.volume=1;
+  const pause=/[?!]["')]*$/.test(u.text)?(V.questionPauseMs||420):(V.sentencePauseMs||320);
+  let done=false;const fin=()=>{if(done)return;done=true;clearTimeout(wd);if(gen!==speechGen)return;pauseT=setTimeout(nextSentence,pause)};
+  const wd=setTimeout(fin,Math.max(8000,u.text.length*200));   // watchdog: some browsers never fire "end"
+  u.onend=fin;u.onerror=fin;speechSynthesis.speak(u)})()}
+
+/* ---------------- stepping, narration bar, auto-play ---------------- */
+let cur=0,line=0,playing=false,timer=null,t0=0,dur=1,voice=false,sayGen=0;
+function stage(i,k){const s=S[i];$$('[data-st]',s).forEach(e=>e.classList.toggle('lit',+e.dataset.st<=k));counters(s,k);s._hooks.forEach(h=>h.stage(k))}
+function dots(){$('#ndots').innerHTML=NARR[cur].map((_,j)=>'<i class="'+(j<=line?'on':'')+'"></i>').join('')}
+function go(i,startLine){if(i<0||i>=S.length)return;stopSpeech();clearTimeout(timer);
+ S.forEach((s,j)=>{s.classList.toggle('on',j===i);s.classList.toggle('prev',j<i);s._hooks.forEach(h=>h.reset())});
+ $$('#tabs button').forEach((b,j)=>b.classList.toggle('on',j===i));
+ $$('[data-st]',S[i]).forEach(e=>e.classList.remove('lit'));counters(S[i],-1);
+ cur=i;line=Math.max(0,Math.min(startLine||0,NARR[i].length-1));history.replaceState(null,'','#'+(i+1));
+ const g=++sayGen;setTimeout(()=>{if(g===sayGen)say()},350)}
+function say(){clearTimeout(timer);const g=++sayGen,L=NARR[cur],tx=$('#ntxt');tx.style.opacity=0;
+ setTimeout(()=>{if(g!==sayGen)return;tx.textContent=L[line];tx.style.opacity=1;
+  $('#ncount').textContent='slide '+(cur+1)+'/'+S.length+' · step '+(line+1)+'/'+L.length;dots();stage(cur,line);
+  dur=Math.max(AUTO.minStepMs||5200,L[line].length*(AUTO.msPerChar||62));t0=performance.now();
+  if(voice&&HAS_TTS)speakLine(SPEECH[cur][line]||L[line]);else if(playing)timer=setTimeout(next,dur)},250)}
+/* extension: an unanswered question holds the deck on its question step */
+function blocked(){const s=DECK.slides[cur];return !!s.question&&line===s.question.step&&!S[cur]._answered}
+function nudge(){const s=S[cur];s.classList.remove('nudge');void s.offsetWidth;s.classList.add('nudge');
+ const fb=$('.fb',s);if(fb&&!fb.textContent.trim())fb.innerHTML='<p class="hint">Choose an answer to carry on.</p>'}
+function next(){if(blocked()){nudge();return}stopSpeech();if(line<NARR[cur].length-1){line++;say()}else if(cur<S.length-1)go(cur+1);else{playing=false;upd()}}
+function prev(){stopSpeech();if(line>0){line--;say()}else if(cur>0)go(cur-1,NARR[cur-1].length-1)}
+(function prog(){const p=playing?Math.min(1,(performance.now()-t0)/dur):0;$('#nprog').style.width=(p*100)+'%';requestAnimationFrame(prog)})();
+function upd(){$('#bplay').textContent=playing?'❚❚ auto':'▶ auto';$('#bplay').classList.toggle('on',playing)}
+function toggleAuto(){playing=!playing;upd();clearTimeout(timer);if(playing){if(voice&&HAS_TTS)say();else timer=setTimeout(next,AUTO.firstStepDelayMs||1200)}}
+function toggleVoice(){voice=!voice;const b=$('#bvoice');b.textContent=voice?'Voice on':'Voice off';b.setAttribute('aria-pressed',String(voice));b.classList.toggle('on',voice);
+ if(!voice){stopSpeech();if(playing){clearTimeout(timer);timer=setTimeout(next,dur)}}else say()}
+$('#bplay').onclick=toggleAuto;$('#bnext').onclick=next;$('#bprev').onclick=prev;$('#bvoice').onclick=toggleVoice;
+
+/* keyboard: → / space next · ← back · PageDown/PageUp slide · Home/End · 1–9, 0 = slide 10 · A auto · V voice */
+addEventListener('keydown',e=>{if(e.target.closest&&e.target.closest('input,textarea,select,[contenteditable]'))return;if(e.ctrlKey||e.metaKey||e.altKey)return;
+ const k=e.key;
+ if(k==='ArrowRight'||k===' '){e.preventDefault();next()}else if(k==='ArrowLeft'){e.preventDefault();prev()}
+ else if(k==='PageDown')go(cur+1);else if(k==='PageUp')go(cur-1);else if(k==='Home')go(0);else if(k==='End')go(S.length-1);
+ else if(/^[1-9]$/.test(k))go(+k-1);else if(k==='0')go(9);else if(k==='a'||k==='A')toggleAuto();else if(k==='v'||k==='V')toggleVoice()});
+/* click anywhere on the slide to advance — but not on links, buttons or while selecting text */
+let clickLock=0;
+deckEl.addEventListener('click',e=>{if(e.button!==0||e.target.closest('button,a,input,select,textarea,label,.ctl,.tabs'))return;
+ const sel=window.getSelection&&String(window.getSelection());if(sel&&sel.trim())return;const now=performance.now();if(now-clickLock<450)return;clickLock=now;next()});
+/* links (HTML or SVG) never advance the slide: stop the event in the capture phase; the link still opens */
+['click','pointerdown','mousedown','pointerup','mouseup'].forEach(ev=>document.addEventListener(ev,e=>{if(e.target.closest&&e.target.closest('a[href]'))e.stopPropagation()},true));
+
+/* small read-only hook for automated checks */
+window.__deck={go,next,prev,toggleAuto,toggleVoice,slides:S.length,narrLen:i=>NARR[i].length,
+ state:()=>({cur,line,playing,voice,voiceName:VOICE?VOICE.name:null,text:$('#ntxt').textContent})};
+
+const h0=parseInt((location.hash||'').slice(1),10);go(h0>=1&&h0<=S.length?h0-1:0);
+})();
+</script>
+</body>
+</html>

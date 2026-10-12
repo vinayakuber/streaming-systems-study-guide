@@ -3,7 +3,7 @@
     "// primitive: len(xs) — element count.  len([1,2]) = 2",
     "// Two of an event's five fields are CLOCKS, which is the whole subject of ch01:",
     "//   et = event time, when the thing happened  ·  pt = processing time, when we saw it",
-    "//   v  = the value being summed (clicks, here)  ·  key = which stream it belongs to",
+    "//   v  = how many clicks the event reports; every total is a sum of v  ·  key = which stream",
     "type Event { id, key, et, pt, v }",
     "// primitive: EVENTS — the book's 9 events, in PROCESSING order (tools/stream_seed.js).",
     "//   EVENTS[0] = (id 0, key \"a\", et 1, pt 2, v 5)",

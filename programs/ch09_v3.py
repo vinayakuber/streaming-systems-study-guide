@@ -22,8 +22,11 @@
     the answer -- how many clicks end up attributed.  A click credited to nobody is
                   UNATTRIBUTED, which is an answer and not a failure.
 
-  Impressions and clicks arrive on two streams.  The impressions were shown at 1, 3, 130,
-  245 and 540, and the one shown at 245 does not reach the matcher until 330.  The clicks
+  Impressions and clicks arrive on two streams.  (The numbers are borrowed from the interview's
+  span lists, NOT the chapter body's reading of the seed: the chapter body reads key "a" as
+  clicks and key "b" as impressions, while here key "a" times are impressions and key "b"
+  times are clicks.  This variation keeps the integers and gives them its own roles.)  The
+  impressions were shown at 1, 3, 130, 245 and 540, and the one shown at 245 does not reach the matcher until 330.  The clicks
   come at 50, 90, 220, 260 and 265 -- and the last two both want the same impression.
 
   GIVEN W AND A WAIT, HOW MANY CLICKS GET ATTRIBUTED?
@@ -84,12 +87,15 @@ Run it:  python3 programs/ch09_v3.py
 """
 import random
 
-# Impressions as (shown_at, arrived_at).  The shown_at times are the chapter's LEFT endpoints,
-# 1, 3, 130, 245 and 540 -- its key 'a' session boundaries.  One of them arrives late: the
-# impression shown at 245 reaches the matcher at 330, which is 85 seconds of lateness and is
-# deliberately MORE than W, so the two numbers cannot be confused for one.
+# Impressions as (shown_at, arrived_at).  The shown_at times are the interview's LEFT endpoints,
+# 1, 3, 130, 245 and 540 -- key "a" session boundaries in the seed.  The ROLES are this
+# variation's own and are the REVERSE of the chapter body, which reads key "a" as clicks and
+# key "b" as impressions: here key "a" times are impressions and key "b" times are clicks.
+# One of them arrives late: the impression shown at 245 reaches the matcher at 330, which is
+# 85 seconds of lateness and is deliberately MORE than W, so the two numbers cannot be
+# confused for one.
 IMPRESSIONS = [(1, 1), (3, 3), (130, 130), (245, 330), (540, 540)]
-# Clicks, punctual, at the chapter's key 'b' event times 50, 90, 220 and 260, plus a second
+# Clicks, punctual, at key "b" event times in the seed, 50, 90, 220 and 260, plus a second
 # click at 265 that wants the same impression as the one at 260 -- which is what makes the
 # one-to-one rule do some work.
 CLICKS = [50, 90, 220, 260, 265]

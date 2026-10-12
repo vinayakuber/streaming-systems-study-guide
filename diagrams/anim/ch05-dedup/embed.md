@@ -8,7 +8,7 @@ This connects straight back to ch02. An **accumulating** pane carries the window
 
 **Dedup at the shuffle** is a set of ids already accepted plus one membership test. Replay ids 5, 6, 7, 8 into it and all 4 are recognised and dropped: total 45, correct. Two things make it non-free — the ids must be **stable** across the retry (an id generated at send time gets a new value and defeats it), and the seen-set is unbounded state that needs a horizon, so dedup has a memory beyond which it stops working.
 
-**Now put all three guards in a table.** After a crash at event 4 with the state committed and the offset not, the 8 combinations of (replayable source × deduplicating shuffle × idempotent sink) produce exactly **three** totals: 23, 45 and 67.
+**Now put all three guards in a table.** The pipeline crashes after event 4. The checkpoint covers events 0–4; events 5–8 were sent once, past the committed offset, and the pipeline cannot know whether those first sends landed. Each row reports its **worst case** over that unknown: a source that cannot replay loses them if they did not land, and an unguarded replay counts them twice if they did. The 8 combinations of (replayable source × deduplicating shuffle × idempotent sink) produce exactly **three** totals: 23, 45 and 67.
 
 3 of the 8 rows reach 45, and reading them refines the usual claim. "End-to-end exactly-once = source + shuffle + sink, drop any one and it breaks" is **not quite right for an aggregation**: the replayable source is load-bearing, and then dedup **or** an idempotent sink is enough. The two accuracy guards are redundant.
 

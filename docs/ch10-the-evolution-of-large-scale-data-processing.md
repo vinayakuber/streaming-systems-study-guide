@@ -1,5 +1,7 @@
 # Chapter 10: The Evolution of Large-Scale Data Processing
 
+> ▶ **Narrated decks:** [part 1](../decks/ch10-the-evolution-of-large-scale-data-processing-part1.html) · [part 2](../decks/ch10-the-evolution-of-large-scale-data-processing-part2.html) · [part 3](../decks/ch10-the-evolution-of-large-scale-data-processing-part3.html) · [part 4](../decks/ch10-the-evolution-of-large-scale-data-processing-part4.html) · [part 5](../decks/ch10-the-evolution-of-large-scale-data-processing-part5.html) — this chapter explained step by step, with voice-over and questions to answer. GitHub shows HTML as source, so download the file and open it in Chrome.
+
 > The field moved from batch MapReduce, through the Lambda architecture (batch + speed layers), to the Kappa architecture (one streaming pipeline with replay) — and the Beam model unifies batch and streaming as one thing.
 
 _Also known as: SS Ch10 · Lambda Architecture · Kappa Architecture · Batch-Stream Unification · MapReduce · Reprocessing_
@@ -31,6 +33,8 @@ Not because it lacks them, but because **the ending answers the time questions f
 **The four questions unified them.** Read the WHAT and WHERE rows: batch's map/reduce and streaming's aggregation are the **same**, over the same 4 windows. The computation was never the difference. The two questions that differ — WHEN a result is final and HOW successive answers relate — are both about time, and those are exactly the two an ending used to answer.
 
 **So one pipeline can run in both modes.** The grouping is identical: 4 windows with values 19, 11, 7, 8, bounded or unbounded. The only difference is **when each result is final** — batch closes all 4 at event 9, while in streaming 1 is never final at all.
+
+The streaming watermark used throughout this chapter is the seed's rule: **the latest event time seen so far, minus 60s**, and a window is final once that watermark reaches the window's end. After the last event it stands at 12:08, short of 12:10, the end of window [12:08, 12:10) — which is why that window is never final.
 
 #### When the unification pays, and what it does not remove
 
@@ -286,7 +290,7 @@ This call returns Fix(2, 2) into `lam`, and the next one, with `"kappa"`, return
 
 #### Why batch already has all four mechanisms, and what reprocessing becomes
 
-**Batch is streaming over a bounded input,** and the reframing is the whole claim. Batch does not *lack* watermarks — it has the easiest possible one, which reaches infinity at end of input and closes every window at once. It has a trigger too: fire once, at EOF. Three of the four mechanisms are **trivial** in batch rather than absent.
+**Batch is streaming over a bounded input,** and the reframing is the whole claim. Batch does not *lack* watermarks — it has the easiest possible one, which reaches infinity at end of input and closes every window at once. It has a trigger too: fire once, at EOF. Of the four mechanisms — windows, watermarks, triggers and accumulation — three (the watermark, the trigger and the accumulation mode) are **trivial** in batch rather than absent, and the fourth, windowing, is identical in both modes.
 
 Seeing it that way is what makes one codebase possible: you are not adding streaming machinery to a batch job, you are removing a special case.
 
@@ -321,7 +325,7 @@ The animation loops through all 4 steps. Expand any step to study it on its own.
 
 <img src="../diagrams/anim/ch10-converge/frames/step-01.svg" alt="Step 1: batch is streaming over a bounded input" width="1040">
 
-The reframing is the content of the claim. Batch has a watermark — the simplest one, which jumps to infinity at end of input — and a trigger, which fires once. Three of the four mechanisms are trivial rather than absent, and recognising that is what lets one pipeline serve both modes instead of two pipelines serving one each.
+The reframing is the content of the claim. Batch has a watermark — the simplest one, which jumps to infinity at end of input — and a trigger, which fires once. Three of the four mechanisms — watermark, trigger and accumulation — are trivial rather than absent, and the fourth, windowing, is the same in both modes; recognising that is what lets one pipeline serve both modes instead of two pipelines serving one each.
 
 </details>
 <details>
@@ -444,7 +448,7 @@ _Role: one streaming pipeline — the only codebase_
 
 ### speed result
 
-_Role: speed result — the live output_
+_Role: speed result — the live output (Kappa has no speed layer; this is not Lambda's)_
 
 - the live result reflects the current fold of the log
 - it is low-latency but uses the same code as any reprocess
@@ -466,6 +470,8 @@ _Role: replay path — recomputes history after a code change_
 **The question.** Design a data-processing system that survives a bug fix: every input is kept in a replayable log, so the corrected pipeline is deployed once and the whole history is replayed through the same code to replace the wrong result.
 
 **The pipeline:** log (replayable) → one streaming pipeline → speed result; and replay path → **the same pipeline** → corrected result.
+
+"Speed result" here means only the live, low-latency output. Kappa has **no speed layer**: unlike Lambda's speed layer, a second implementation, this result comes from the same pipeline code as any replay.
 
 The pipeline appears twice and is the same code both times. That is the design: **there is no second implementation to keep in agreement.** And the log is the only box that cannot be rebuilt from another box, which makes its retention policy the system's real correctness boundary.
 
@@ -543,7 +549,7 @@ The first two gaps are the ones that invalidate the architecture rather than mer
 
 `replayThrough` is the architecture's only recovery mechanism, and it works: 45 from 9 retained events through the fixed pipeline.
 
-`verify` then names what that result depends on. Step 2: 6 retained events give 30 — a confident wrong answer with no error. Step 3: a pipeline flagged non-deterministic gives 45, the **right** total with `trustworthy` false — the same additions as the healthy replay, since the program models determinism only as a flag, so only `verify`'s check can tell them apart. The totals alone cannot tell you which replay to believe.
+`verify` then names what that result depends on. Step 2: the newest 6 retained events (offsets 3–8) give 30 — a confident wrong answer with no error. Step 3: a pipeline flagged non-deterministic gives 45, the **right** total with `trustworthy` false — the same additions as the healthy replay, since the program models determinism only as a flag, so only `verify`'s check can tell them apart. The totals alone cannot tell you which replay to believe.
 
 The animation steps through the code, holding each line long enough to read the STACK (call frames and their locals) and the HEAP (allocated arrays and objects) as they are AT THAT MOMENT. Expand any step to study it on its own.
 
@@ -562,7 +568,7 @@ All 9 retained events through the fixed pipeline: `total` = 45. This is the arch
 
 <img src="../diagrams/anim/ch10-system-memory/frames/step-02.svg" alt="Step 2: short retention produces a smaller total and no error" width="980">
 
-With 6 of 9 events retained the replay returns 30 — a complete, confident, wrong answer. Only this explicit check distinguishes it from 45; the replay itself raises nothing. "We can always reprocess" is true exactly as far back as retention.
+With only the newest 6 of 9 events retained (offsets 3–8) the replay returns 30 — a complete, confident, wrong answer. Only this explicit check distinguishes it from 45; the replay itself raises nothing. "We can always reprocess" is true exactly as far back as retention.
 
 </details>
 <details>

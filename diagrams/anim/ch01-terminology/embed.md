@@ -11,9 +11,11 @@
 - **event time** — when the thing actually happened, stamped by whatever produced it.
 - **processing time** — when the pipeline observed it, read off the pipeline's own clock.
 
+Each event also carries a value, **v**: the number of clicks it reports. A device batches its clicks, so one event can carry several — event 0 reports 5, event 7 reports 4. **Every per-minute figure in this chapter is a sum of v — a click total, not a number of events.** The 9 events carry 45 clicks between them.
+
 They disagree, always, by an amount nobody controls. In this book's dataset event 7 happened at **12:00:50** and was seen at **12:04:40** — 230s apart. A phone was offline; a queue backed up. Nothing is broken.
 
-**And that gap changes answers, not just timings.** Count the same 9 events per minute by event time and then by processing time: **3 of the 6 minutes get a different number.** The 12:00 minute is 12 by event time and 8 by processing time. No event was lost and no sum is miscalculated — the two columns are answering two different questions.
+**And that gap changes answers, not just timings.** Total the clicks of the same 9 events per minute, once by event time and once by processing time: **3 of the 6 minutes get a different total.** The 12:00 minute holds 12 clicks by event time (ids 0, 1, 7: 5 + 3 + 4) and 8 by processing time (ids 0, 1: 5 + 3). No event was lost and no sum is miscalculated — the two columns are answering two different questions.
 
 #### When each meaning of the word is the one you want
 
@@ -48,11 +50,11 @@ Read the two times on any row and they differ. Read event 7 and they differ by 2
 
 </details>
 <details>
-<summary><b>Step 3 of 4</b> — count by the wrong clock and the answer changes</summary>
+<summary><b>Step 3 of 4</b> — total the clicks by the wrong clock and the answer changes</summary>
 
-<img src="../diagrams/anim/ch01-terminology/frames/step-03.svg" alt="Step 3: count by the wrong clock and the answer changes" width="1040">
+<img src="../diagrams/anim/ch01-terminology/frames/step-03.svg" alt="Step 3: total the clicks by the wrong clock and the answer changes" width="1040">
 
-This is the whole problem in one table. Bucketing by processing time says the 12:00 minute saw 8; bucketing by event time says 12. 3 of 6 minutes disagree. A processing-time dashboard is not a slightly-stale event-time dashboard — it answers a different question and can be arbitrarily far off.
+This is the whole problem in one table. Bucketing by processing time says the 12:00 minute saw 8 clicks; bucketing by event time says 12. 3 of 6 minutes disagree. A processing-time dashboard is not a slightly-stale event-time dashboard — it answers a different question and can be arbitrarily far off.
 
 </details>
 <details>

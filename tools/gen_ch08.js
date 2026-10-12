@@ -36,6 +36,15 @@ const UPDATED_ROWS = ET_KEYS.filter(k => closedAt(k) !== null && SUM(EVENTS.filt
 const perKeyWindow = {};
 for (const e of EVENTS) { const k = `${e.key}|${winOf(e.et)}`; perKeyWindow[k] = (perKeyWindow[k] || 0) + e.v; }
 const RESULT_ROWS = Object.keys(perKeyWindow).sort();
+// what the sink finally holds: the windows the watermark ever closes, at their final values
+const NEVER = ET_KEYS.filter(k => closedAt(k) === null);
+const SINK_TOTAL = SUM(ET_KEYS.filter(k => closedAt(k) !== null).flatMap(k => TUMBLE_ET[k]));
+// HOP: rows with no earlier window to land in (the run starts at 12:00:00)
+const HOP_EDGE = EVENTS.filter(e => hopStarts(e.et).length < WIN / PERIOD);
+// the join's pair sets, side "a" against side "b", within LAG on each clock
+const SIDE_A = EVENTS.filter(e => e.key === KEYS[0]), SIDE_B = EVENTS.filter(e => e.key === KEYS[1]);
+const pairsOn = (clock) => SIDE_A.flatMap(a => SIDE_B.filter(b => Math.abs(a[clock] - b[clock]) <= LAG).map(b => `${a.id}–${b.id}`));
+const PAIRS_ET = pairsOn('et'), PAIRS_PT = pairsOn('pt');
 const pl = (n, one, many) => (n === 1 ? one : many);
 const fail = (m) => { throw new Error(`gen_ch08: ${m}`); };
 if (CLOCK_DIFFER.length < 2) fail(`only ${CLOCK_DIFFER.length} TUMBLE window differs between the clocks — the time-attribute point needs more`);
@@ -43,6 +52,9 @@ if (HOP_TOTAL <= TOTAL) fail('HOP does not over-count relative to the data; the 
 if (!APPEND_ROWS.length) fail('the filter query returns nothing');
 if (!UPDATED_ROWS.length) fail('no windowed result is ever revised, so there is no updating stream to contrast');
 if (ONTIME === W0_TRUE) fail('the first window is already correct on time; the update story needs a revision');
+if (NEVER.length !== 1 || SINK_TOTAL !== TOTAL - SUM(TUMBLE_ET[NEVER[0]])) fail(`the sink total ${SINK_TOTAL} does not reconcile with ${TOTAL} minus the never-emitted window`);
+if (!HOP_EDGE.length || HOP_EDGE.some(e => e.et >= PERIOD)) fail('the HOP rows below 2 windows are not exactly the start-of-run edge');
+if (PAIRS_ET.join(' ') !== '0–7 1–7 3–2 4–5 4–6' || PAIRS_PT.join(' ') !== '3–2 4–5 4–6 4–7') fail(`join pairs et [${PAIRS_ET}] pt [${PAIRS_PT}]; the prose was checked against 5 and 4 pairs`);
 if (SESSIONS.a.length === SESSIONS.b.length) fail('both keys have the same session count; SESSION(gap) looks like TUMBLE');
 
 const W = 1140;
@@ -92,7 +104,7 @@ const C1 = [
         `${CLOCK_DIFFER.length} of the ${ET_KEYS.length} windows get a different answer. One token in the query — \`et\` or \`pt\` — decides which.`,
         `And both are valid SQL producing valid results. Nothing in the engine can tell you the wrong one was chosen.`,
       ], c.C.hot, c.C.hotFill); },
-    cap: `This is ch01's two-clock problem arriving as a one-token edit. \`TUMBLE(et, ...)\` and \`TUMBLE(pt, ...)\` differ by three characters and disagree on ${CLOCK_DIFFER.length} of ${ET_KEYS.length} windows — window [${mm(CLOCK_DIFFER[0])}, ${mm(CLOCK_DIFFER[0] + WIN)}) reads ${SUM(TUMBLE_ET[CLOCK_DIFFER[0]])} against ${SUM(TUMBLE_PT[CLOCK_DIFFER[0]] || [])}. Both are valid SQL and the engine cannot flag either.` },
+    cap: `This is ch01's two-clock problem arriving as a one-token edit. \`TUMBLE(et, ...)\` and \`TUMBLE(pt, ...)\` differ by one letter, \`e\` against \`p\`, and disagree on ${CLOCK_DIFFER.length} of ${ET_KEYS.length} windows — window [${mm(CLOCK_DIFFER[0])}, ${mm(CLOCK_DIFFER[0] + WIN)}) reads ${SUM(TUMBLE_ET[CLOCK_DIFFER[0]])} against ${SUM(TUMBLE_PT[CLOCK_DIFFER[0]] || [])}. Both are valid SQL and the engine cannot flag either.` },
   { t: 'so some results append and others UPDATE', draw: (c) =>
       c.panel('TWO QUERIES, TWO KINDS OF RESULT STREAM', 'p')
       + c.mapRows('au', c.P.main.x + 24, c.P.main.y + 52, [
@@ -219,7 +231,7 @@ const C4 = [
   { t: 'the pipeline, and the one line of SQL it runs', draw: (c) =>
       c.panel('A CONTINUOUS CLICK-COUNT QUERY — FIVE STAGES', 'a')
       + c.mapRows('pp', c.P.main.x + 24, c.P.main.y + 52, [
-        [`streams (clicks, impressions)`, `${EVENTS.length} rows, with et and pt on every one`],
+        [`click stream (sources a, b)`, `${EVENTS.length} click rows, with et and pt on every one`],
         [`SQL engine (continuous query)`, SQL_TOTAL.slice(0, 58) + '…'],
         [`watermark + window`, `TUMBLE buckets by et; the watermark decides when each bucket emits`],
         [`updating result`, `${ET_KEYS.length} rows, of which ${UPDATED_ROWS.length} window ${pl(UPDATED_ROWS.length, 'row gets', 'rows get')} revised`],
@@ -273,9 +285,10 @@ const DIAGRAMS = [
     heading: 'Why streaming SQL is relational SQL plus a column that is a clock',
     why: [
       `**A query over a stream never finishes.** The same text over a finite table reads ${EVENTS.length} rows, emits ${RESULT_ROWS.length} result rows and exits; over an unbounded stream it emits those ${RESULT_ROWS.length} rows and keeps running. A batch query **returns**; a continuous query **maintains** — and everything else follows from that.`, '',
+      `**The table throughout is \`clicks\`:** the ${EVENTS.length} seed rows, each a click whose \`key\` column names its source, \"${KEYS[0]}\" or \"${KEYS[1]}\". Only the join, which needs two streams, splits it by source.`, '',
       `**The relational operations map straight across.** \`SELECT\` is a transform, \`WHERE v > ${FILTER_V}\` is a filter (${APPEND_ROWS.length} of ${EVENTS.length} rows: ids ${APPEND_ROWS.join(', ')}), \`GROUP BY key\` is a keyed aggregation (${KEYS.length} groups). Nothing new so far.`, '',
       `The one row with no batch equivalent is \`GROUP BY key, TUMBLE(et, INTERVAL '${WIN}' SECOND)\`, which needs a **time column** — and batch SQL has no notion of event time. Adding the window takes the group count from ${KEYS.length} to ${RESULT_ROWS.length}. **Streaming SQL is relational SQL plus a column whose values are a clock.**`, '',
-      `**And which clock is a one-token choice with different answers.** \`TUMBLE(et, …)\` and \`TUMBLE(pt, …)\` differ by three characters, and over this dataset they disagree on **${CLOCK_DIFFER.length} of the ${ET_KEYS.length} windows** — window [${mm(CLOCK_DIFFER[0])}, ${mm(CLOCK_DIFFER[0] + WIN)}) reads ${SUM(TUMBLE_ET[CLOCK_DIFFER[0]])} by event time and ${SUM(TUMBLE_PT[CLOCK_DIFFER[0]] || [])} by processing time. Both are valid SQL producing valid results, and no engine can flag the wrong one.`, '',
+      `**And which clock is a one-token choice with different answers.** \`TUMBLE(et, …)\` and \`TUMBLE(pt, …)\` differ by one letter, \`e\` against \`p\`, and over this dataset they disagree on **${CLOCK_DIFFER.length} of the ${ET_KEYS.length} windows** — window [${mm(CLOCK_DIFFER[0])}, ${mm(CLOCK_DIFFER[0] + WIN)}) reads ${SUM(TUMBLE_ET[CLOCK_DIFFER[0]])} by event time and ${SUM(TUMBLE_PT[CLOCK_DIFFER[0]] || [])} by processing time. Both are valid SQL producing valid results, and no engine can flag the wrong one.`, '',
       `**So some results append and others update.** \`SELECT * FROM clicks WHERE v > ${FILTER_V}\` is **append-only**: ${APPEND_ROWS.length} rows, each a fact that can never be revised, because a row either matched or it did not. The windowed total \`${SQL_TOTAL}\` is **updating**: ${UPDATED_ROWS.length} of its ${ET_KEYS.length} window rows ${pl(UPDATED_ROWS.length, 'gets', 'get')} revised — window [${mm(W0)}, ${mm(W0_END)}) emits ${ONTIME} and later becomes ${W0_TRUE}.`, '',
       `That distinction is readable from the query text, and it tells you what the sink must be capable of before any code exists.`],
     whenHeading: 'When to reach for streaming SQL, and what it does not do for you',
@@ -292,11 +305,11 @@ const DIAGRAMS = [
     subtitle: `TUMBLE ${ET_KEYS.length} rows totalling ${TOTAL} · HOP ${HOP_WINDOWS.length} rows totalling ${HOP_TOTAL} · SESSION ${SESSIONS.a.length + SESSIONS.b.length} rows, count unpredictable`,
     heading: 'Why the three window functions are three different cost profiles',
     why: [
-      `**TUMBLE(size)** is the fixed window: equal, contiguous, non-overlapping. ${ET_KEYS.length} output rows here (${ET_KEYS.map(k => SUM(TUMBLE_ET[k])).join(', ')}), every input row counted once, and the sums total ${TOTAL} — the whole dataset. That reconciliation against a batch run is what makes it the easy case.`, '',
-      `**HOP(slide, size)** is the sliding window: fixed length, advancing by \`slide\`. With ${secs(WIN)} windows every ${secs(PERIOD)}, ${EVENTS.filter(e => hopStarts(e.et).length > 1).length} of the ${EVENTS.length} input rows land in ${Math.max(...EVENTS.map(e => hopStarts(e.et).length))} output rows, so there are **${HOP_WINDOWS.length} rows totalling ${HOP_TOTAL}** against a dataset of ${TOTAL}. Output volume is size / slide = ${WIN / PERIOD}×, and a HOP total must never be compared to an input total.`, '',
+      `**TUMBLE(size)** is the fixed window: equal, contiguous, non-overlapping. ${ET_KEYS.length} output rows here (${ET_KEYS.map(k => SUM(TUMBLE_ET[k])).join(', ')}), every input row counted once, and the engine's window sums total ${TOTAL} — the whole dataset. That reconciliation against a batch run is what makes it the easy case; what the sink receives is another matter, below.`, '',
+      `**HOP(slide, size)** is the sliding window: fixed length, advancing by \`slide\`. With ${secs(WIN)} windows every ${secs(PERIOD)}, ${EVENTS.filter(e => hopStarts(e.et).length > 1).length} of the ${EVENTS.length} input rows land in ${Math.max(...EVENTS.map(e => hopStarts(e.et).length))} output rows, so there are **${HOP_WINDOWS.length} rows totalling ${HOP_TOTAL}** against a dataset of ${TOTAL}. In steady state each row lands in size / slide = ${WIN / PERIOD} windows, so plan for ${WIN / PERIOD}× the output; this short run sits below that because the ${HOP_EDGE.length} rows before ${mm(PERIOD)} (ids ${HOP_EDGE.map(e => e.id).join(', ')}) have no earlier window to land in — ${HOP_WINDOWS.length} rows against TUMBLE's ${ET_KEYS.length}, a total of ${HOP_TOTAL} against ${TOTAL}. Either way a HOP total must never be compared to an input total.`, '',
       `**SESSION(gap)** is the data-driven window, and it is the one whose **row count cannot be predicted from the query**: key "${KEYS[0]}" gets ${SESSIONS[KEYS[0]].length} rows and key "${KEYS[1]}" gets ${SESSIONS[KEYS[1]].length} over the same time range, because that is how bursty each key's activity was. The engine also **merges** sessions as rows arrive, which means a window boundary can move after the fact — so a SESSION result is always an updating stream.`, '',
       `**And the watermark is what makes any of them correct.** The time attribute picks the bucket; the watermark picks the moment the bucket speaks. Window [${mm(W0)}, ${mm(W0_END)}) emits after event ${ONTIME_I} holding ${ONTIME}, against a final ${W0_TRUE}.`, '',
-      `Without a watermark a windowed query over an unbounded stream could never emit anything, because "this window is done" would never become true. And **${ET_KEYS.filter(k => closedAt(k) === null).length} of the ${ET_KEYS.length} windows here is never emitted at all** — the SQL gives no hint of that, and the sink simply never sees the row.`],
+      `Without a watermark a windowed query over an unbounded stream could never emit anything, because "this window is done" would never become true. And **${ET_KEYS.filter(k => closedAt(k) === null).length} of the ${ET_KEYS.length} windows here is never emitted at all** — the SQL gives no hint of that, and the sink simply never sees the row. So the rows the sink finally holds total ${SINK_TOTAL}, not ${TOTAL}: the missing ${SUM(TUMBLE_ET[NEVER[0]])} is window [${mm(NEVER[0])}, ${mm(NEVER[0] + WIN)}).`],
     whenHeading: 'When to use each window function, and how to capacity-plan them',
     when: [
       `**TUMBLE when the question names a period.** Plan for (keys × open windows) state and one output row per window. Totals reconcile, which makes it the only shape you can easily check against a batch job.`, '',
@@ -311,9 +324,9 @@ const DIAGRAMS = [
     subtitle: `the join claims min(${KEYS.map(k => hhmmss(Math.max(...EVENTS.filter(e => e.key === k).map(e => e.et)) - LAG)).join(', ')}) · a mis-clocked join pairs rows ${secs(L.pt - L.et)} apart`,
     heading: 'Why a join is where the time decisions cost the most',
     why: [
-      `**Joining two unbounded streams needs a time bound, or the query has no meaning.** A batch join completes when both tables are read — here ${EVENTS.filter(e => e.key === KEYS[0]).length} × ${EVENTS.filter(e => e.key === KEYS[1]).length} candidate pairs, then done. A stream-stream join never completes on its own: either side may still produce a match.`, '',
+      `**Joining two unbounded streams needs a time bound, or the query has no meaning.** A batch join completes when both tables are read — here ${EVENTS.filter(e => e.key === KEYS[0]).length} × ${EVENTS.filter(e => e.key === KEYS[1]).length} candidate pairs, then done. The two streams are the table's two sources: the key-\"${KEYS[0]}\" rows on one side and the key-\"${KEYS[1]}\" rows on the other (ch09 names them clicks and impressions). A stream-stream join never completes on its own: either side may still produce a match.`, '',
       `So SQL **requires** a window on such a join, and the bound does two jobs at once — it ends the wait, and it bounds the buffered state. Without it the engine would have to keep every row of both sides forever in case a match arrives.`, '',
-      `**The watermark decides when a result may be emitted**, and it is ch03's minimum rule applied to two inputs. Side "${KEYS[0]}" reaches ${hhmmss(Math.max(...EVENTS.filter(e => e.key === KEYS[0]).map(e => e.et)) - LAG)} and side "${KEYS[1]}" reaches ${hhmmss(Math.max(...EVENTS.filter(e => e.key === KEYS[1]).map(e => e.et)) - LAG)}, so the join claims the **minimum**, ${hhmmss(Math.min(...KEYS.map(k => Math.max(...EVENTS.filter(e => e.key === k).map(e => e.et)) - LAG)))}.`, '',
+      `**The watermark decides when a result may be emitted**, and it is ch03's minimum rule applied to two inputs: a pair is emitted once the join's watermark, the lower of the two sides', passes the pair's join bound. By the end of the run side "${KEYS[0]}" has reached ${hhmmss(Math.max(...EVENTS.filter(e => e.key === KEYS[0]).map(e => e.et)) - LAG)} and side "${KEYS[1]}" ${hhmmss(Math.max(...EVENTS.filter(e => e.key === KEYS[1]).map(e => e.et)) - LAG)}, so the join's watermark ends at the **minimum**, ${hhmmss(Math.min(...KEYS.map(k => Math.max(...EVENTS.filter(e => e.key === k).map(e => e.et)) - LAG)))}.`, '',
       `A join is where that rule hurts most, because it has two inputs by construction: one slow or idle side holds back every result, however fast the other is.`, '',
       `**And the clock choice costs more here than in an aggregate.** In a windowed sum the wrong clock puts a value in the wrong bucket — a wrong number in a known place. In a join it **pairs the wrong two rows**, emitting an assertion that two things coincided when they did not. For id ${L.id}, which happened at ${hhmmss(L.et)} and arrived at ${hhmmss(L.pt)}, a processing-time join would pair it with rows from ${hhmmss(L.pt)} — ${secs(L.pt - L.et)} away from when it actually happened — and the resulting row looks entirely plausible.`, '',
       `**So SQL hides the mechanics, not the semantics.** The engine configures triggers, accumulation, retraction emission and state layout. You still choose the window and the time attribute, and those two decide whether a window holds ${SUM(TUMBLE_ET[CLOCK_DIFFER[0]])} or ${SUM(TUMBLE_PT[CLOCK_DIFFER[0]] || [])}, and whether ${ET_KEYS.filter(k => closedAt(k) === null).length} window ever emits.`],
@@ -468,7 +481,7 @@ PROGRAMS.push({
       { t: 'the clock is a PARAMETER, not a second code path', line: at('fun runTumble(clock)', 'val b = bucketOf(e, clock)'),
         stack: [MAIN({ facts: '@0x100', byEvent: '@0x200' }), { name: 'runTumble', locals: ['clock = "pt"', 'out = @0x300', `e = EVENTS[${L.id}]`, `b = ${Math.floor(L.pt / WIN) * WIN}`] }],
         heap: [{ key: 'byEvent' }, { key: 'byProc', hot: true }],
-        cap: `For id ${L.id}, \`b\` is ${Math.floor(L.pt / WIN) * WIN} with \`clock\` = "pt" and ${Math.floor(L.et / WIN) * WIN} with "et" — ${Math.round((Math.floor(L.pt / WIN) * WIN - Math.floor(L.et / WIN) * WIN) / WIN)} windows apart. One argument, and the row lands somewhere else entirely. In SQL that argument is three characters of the query text.` },
+        cap: `For id ${L.id}, \`b\` is ${Math.floor(L.pt / WIN) * WIN} with \`clock\` = "pt" and ${Math.floor(L.et / WIN) * WIN} with "et" — ${Math.round((Math.floor(L.pt / WIN) * WIN - Math.floor(L.et / WIN) * WIN) / WIN)} windows apart. One argument, and the row lands somewhere else entirely. In SQL that argument is the time column, \`et\` or \`pt\` — one letter of the query text.` },
       { t: `so ${CLOCK_DIFFER.length} of the ${ET_KEYS.length} buckets hold different sums`, line: at('fun disagree(a, b)', 'if (a.rows[k] != b.rows[k]) { out = append(out, k) }'),
         stack: [MAIN({ facts: '@0x100', byEvent: '@0x200', byProc: '@0x300', diff: `[${CLOCK_DIFFER.join(', ')}]` }),
                 { name: 'disagree', locals: ['a = @0x200', 'b = @0x300', `out = [${CLOCK_DIFFER.join(', ')}]`, `k = ${CLOCK_DIFFER[CLOCK_DIFFER.length - 1]}`] }],
@@ -483,7 +496,7 @@ PROGRAMS.push({
   },
   intro: [
     `**What is being answered.** Why a streaming query's clock and its update mode are both properties of the query text — as two query functions over the same rows.`, '',
-    `\`runTumble(clock)\` takes the clock as a **parameter**. There is no second code path for processing time: step 2 shows the same line producing bucket ${Math.floor(L.et / WIN) * WIN} or ${Math.floor(L.pt / WIN) * WIN} for id ${L.id} depending on one argument. In SQL that argument is three characters.`, '',
+    `\`runTumble(clock)\` takes the clock as a **parameter**. There is no second code path for processing time: step 2 shows the same line producing bucket ${Math.floor(L.et / WIN) * WIN} or ${Math.floor(L.pt / WIN) * WIN} for id ${L.id} depending on one argument. In SQL that argument is the time column, \`et\` or \`pt\` — one letter.`, '',
     `\`sinkNeeds(r)\` reads only \`r.mode\`, which \`runFilter\` and \`runTumble\` set from their own shape — so "does my sink need UPSERT?" is answerable from the query before anything runs.`],
   sub: `Both clock results, the disagreement list and the filter output are computed from the seed and asserted.` });
 
@@ -688,13 +701,13 @@ PROGRAMS.push({
       { t: 'so the same join on pt pairs a different set of rows', line: at('    val byPt  = matches("pt")'),
         stack: [MAIN({ early: 'NONE', claim: Math.min(WA, WB), byEt: '@0x100', byPt: '@0x200' })],
         heap: [{ key: 'byEt' }, { key: 'byPt', hot: true }],
-        cap: `Compare the heap rows. Pairing on \`et\` and on \`pt\` gives different pair sets from identical data — id ${L.id} arrived ${L.pt - L.et}s after it happened, so on the arrival clock it sits next to rows it had nothing to do with. The output rows look equally plausible in both cases.` },
+        cap: `Compare the heap rows. Pairing on \`et\` gives ${PAIRS_ET.length} pairs (${PAIRS_ET.join(', ')}) and on \`pt\` ${PAIRS_PT.length} (${PAIRS_PT.join(', ')}), from identical data — id ${L.id} arrived ${L.pt - L.et}s after it happened, so on the arrival clock it sits next to rows it had nothing to do with. The output rows look equally plausible in both cases.` },
     ];
   },
   intro: [
     `**What is being answered.** Why a join is where the time decisions cost most — as the minimum rule and the pairing rule, side by side.`, '',
     `\`joinWatermark(i)\` has the line that matters: \`if (w == NONE) { return NONE }\`. A side that has produced nothing blocks the claim entirely, and a join has two sides by construction — so either one going quiet stops every result.`, '',
-    `\`matches(clock)\` then shows the sharper cost. A mis-clocked aggregate puts a number in the wrong bucket; a mis-clocked join **pairs the wrong rows**, emitting an assertion that two things coincided. Step 4 compares the two pair sets from identical data.`],
+    `\`matches(clock)\` then shows the sharper cost. A mis-clocked aggregate puts a number in the wrong bucket; a mis-clocked join **pairs the wrong rows**, emitting an assertion that two things coincided. Step 4 compares the two pair sets from identical data: by event time ${PAIRS_ET.join(', ')}; by processing time ${PAIRS_PT.join(', ')}.`],
   sub: `Both side watermarks, their minimum and both pair sets are computed from the seed and asserted.` });
 
 // ---- concept 4: the continuous query, end to end ---------------------------

@@ -1,5 +1,7 @@
 # Chapter 1: Streaming 101
 
+> ▶ **Narrated decks:** [part 1](../decks/ch01-streaming-101-part1.html) · [part 2](../decks/ch01-streaming-101-part2.html) · [part 3](../decks/ch01-streaming-101-part3.html) · [part 4](../decks/ch01-streaming-101-part4.html) · [part 5](../decks/ch01-streaming-101-part5.html) · [part 6](../decks/ch01-streaming-101-part6.html) · [part 7](../decks/ch01-streaming-101-part7.html) · [part 8](../decks/ch01-streaming-101-part8.html) · [part 9](../decks/ch01-streaming-101-part9.html) — this chapter explained step by step, with voice-over and questions to answer. GitHub shows HTML as source, so download the file and open it in Chrome.
+
 > The vocabulary and mental model that the whole book builds on: what streaming is, why the event-time/processing-time distinction matters, and the three shapes data can take — bounded, unbounded batched, and unbounded streamed.
 
 _Also known as: SS Ch01 · Event Time · Processing Time · Bounded vs Unbounded_
@@ -31,9 +33,11 @@ _Also known as: SS Ch01 · Event Time · Processing Time · Bounded vs Unbounded
 - **event time** — when the thing actually happened, stamped by whatever produced it.
 - **processing time** — when the pipeline observed it, read off the pipeline's own clock.
 
+Each event also carries a value, **v**: the number of clicks it reports. A device batches its clicks, so one event can carry several — event 0 reports 5, event 7 reports 4. **Every per-minute figure in this chapter is a sum of v — a click total, not a number of events.** The 9 events carry 45 clicks between them.
+
 They disagree, always, by an amount nobody controls. In this book's dataset event 7 happened at **12:00:50** and was seen at **12:04:40** — 230s apart. A phone was offline; a queue backed up. Nothing is broken.
 
-**And that gap changes answers, not just timings.** Count the same 9 events per minute by event time and then by processing time: **3 of the 6 minutes get a different number.** The 12:00 minute is 12 by event time and 8 by processing time. No event was lost and no sum is miscalculated — the two columns are answering two different questions.
+**And that gap changes answers, not just timings.** Total the clicks of the same 9 events per minute, once by event time and once by processing time: **3 of the 6 minutes get a different total.** The 12:00 minute holds 12 clicks by event time (ids 0, 1, 7: 5 + 3 + 4) and 8 by processing time (ids 0, 1: 5 + 3). No event was lost and no sum is miscalculated — the two columns are answering two different questions.
 
 #### When each meaning of the word is the one you want
 
@@ -68,11 +72,11 @@ Read the two times on any row and they differ. Read event 7 and they differ by 2
 
 </details>
 <details>
-<summary><b>Step 3 of 4</b> — count by the wrong clock and the answer changes</summary>
+<summary><b>Step 3 of 4</b> — total the clicks by the wrong clock and the answer changes</summary>
 
-<img src="../diagrams/anim/ch01-terminology/frames/step-03.svg" alt="Step 3: count by the wrong clock and the answer changes" width="1040">
+<img src="../diagrams/anim/ch01-terminology/frames/step-03.svg" alt="Step 3: total the clicks by the wrong clock and the answer changes" width="1040">
 
-This is the whole problem in one table. Bucketing by processing time says the 12:00 minute saw 8; bucketing by event time says 12. 3 of 6 minutes disagree. A processing-time dashboard is not a slightly-stale event-time dashboard — it answers a different question and can be arbitrarily far off.
+This is the whole problem in one table. Bucketing by processing time says the 12:00 minute saw 8 clicks; bucketing by event time says 12. 3 of 6 minutes disagree. A processing-time dashboard is not a slightly-stale event-time dashboard — it answers a different question and can be arbitrarily far off.
 
 </details>
 <details>
@@ -92,7 +96,7 @@ These four are not a summary — they are the book's actual structure, and the r
 
 #### One dataset, two clocks — stack and heap at every step
 
-**What is being answered.** Why "count clicks per minute" is ambiguous — as one loop, run twice.
+**What is being answered.** Why "count clicks per minute" — the per-minute sum of v — is ambiguous, as one loop run twice.
 
 `countBy(events, clock)` takes the clock as a **parameter**. There is no branch per clock and no separate code path: the only difference between the two calls is the string `"et"` or `"pt"`. Watch `minute` on the highlighted line in steps 1 and 2 — the same expression evaluates to 0 and then to 240 for the same event.
 
@@ -107,7 +111,7 @@ The animation steps through the code, holding each line long enough to read the 
 
 <img src="../diagrams/anim/ch01-terminology-memory/frames/step-01.svg" alt="Step 1: the late event is bucketed by its EVENT time" width="980">
 
-On the pass for id 7, `clock` is `"et"`, so `minute` is `minOf(50)` = 0 — the 12:00 minute, where the click actually happened. Its 4 joins ids 0 and 1 for a total of 12.
+On the pass for id 7, `clock` is `"et"`, so `minute` is `minOf(50)` = 0 — the 12:00 minute, where the click actually happened. Its 4 clicks join the 5 + 3 of ids 0 and 1 for a total of 12.
 
 </details>
 <details>
@@ -115,7 +119,7 @@ On the pass for id 7, `clock` is `"et"`, so `minute` is `minOf(50)` = 0 — the 
 
 <img src="../diagrams/anim/ch01-terminology-memory/frames/step-02.svg" alt="Step 2: the SAME line, with clock = &quot;pt&quot;, sends it somewhere else" width="980">
 
-Identical code, one argument changed. Now `minute` is `minOf(280)` = 240 — the 12:04 minute, 4 minutes away from where the click happened. The 4 lands in a minute during which this user did nothing.
+Identical code, one argument changed. Now `minute` is `minOf(280)` = 240 — the 12:04 minute, 4 minutes away from where the click happened. Its 4 clicks land in a minute during which this user did nothing.
 
 </details>
 <details>
@@ -131,7 +135,7 @@ Read the two heap rows against each other: minute 0 holds 12 and 8; minute 240 h
 
 <img src="../diagrams/anim/ch01-terminology-memory/frames/step-04.svg" alt="Step 4: and neither counter is wrong" width="980">
 
-Every event was counted exactly once in both counters — 45 total in each. Nothing was dropped and no sum is wrong. The two Counters are answers to two different questions, and `diff` is the list of minutes where choosing the wrong one would mislead someone.
+Every event was added exactly once to both counters — 45 clicks in each. Nothing was dropped and no sum is wrong. The two Counters are answers to two different questions, and `diff` is the list of minutes where choosing the wrong one would mislead someone.
 
 </details>
 
@@ -155,19 +159,19 @@ Every event was counted exactly once in both counters — 45 total in each. Noth
 
 **Skew** is the name for the gap: `skew = processing time − event time`, in seconds. It is the one quantity this concept rests on, so measure it on all 9 events rather than reasoning about it.
 
-Eight of the nine arrive within 50s. One — id 7 — takes **230s**, about 5× the next worst. **Skew is a long tail, not a constant**, and that shape is why you cannot look it up.
+Eight of the nine arrive within 50s. One — id 7 — takes **230s**, about 5× the next worst (50s), and nearly 4× the 60s lag introduced below. **Skew is a long tail, not a constant**, and that shape is why you cannot look it up.
 
 **A watermark is a claim about completeness:** "no event with an event time earlier than *t* will arrive from here on." It is what lets a pipeline decide a window is done. The usual way to produce one is a heuristic: take the highest event time seen so far and subtract an assumed worst-case lag — here **60s**.
 
 That heuristic is arithmetic on the events that *did* arrive, so it cannot know about one that has not. When id 7 shows up, the watermark already stands at 12:03:20 — it has already claimed 12:00:50 is settled. **The claim is simply false, and nothing in the pipeline detects it.**
 
-**Now price the fix.** Waiting 60s drops 1 event (id 7). Waiting 230s drops none. The difference is **170s of extra delay on every answer this pipeline ever produces** — across this seed's 4 windows, 240s of total delay becomes 920s. That is the exchange rate between completeness and latency, and it is fixed by the data, not by your cleverness.
+**Now price the fix.** Waiting 60s drops 1 event (id 7). Waiting 230s drops none. The difference is **170s of extra delay on every answer this pipeline ever produces** — counted over the seed's 4 two-minute event-time windows (the fixed 120s windows the rest of the book uses, not the one-minute buckets above), 240s of total delay becomes 920s. That is the exchange rate between completeness and latency, and it is fixed by the data, not by your cleverness.
 
 #### When to use which clock, and why the budget is a product decision
 
-**Use event time for any question about the world.** "How many clicks happened at 12:00?" is a fact about users; the answer is 12 and it does not change because your pipeline was busy. Session lengths, conversion windows, latency percentiles — all event time.
+**Use event time for any question about the world.** "How many clicks happened at 12:00?" is a fact about users; the answer is 12 clicks and it does not change because your pipeline was busy. Session lengths, conversion windows, latency percentiles — all event time.
 
-**Use processing time for any question about the system.** "What is our ingest rate right now?" is a fact about you; the answer is 8 for that minute and it is *correct*. Processing time is not the lazy choice — it is the right answer to a different question.
+**Use processing time for any question about the system.** "What is our ingest rate right now?" is a fact about you; the answer is 8 clicks received in that minute, and it is *correct*. Processing time is not the lazy choice — it is the right answer to a different question.
 
 **Use both to measure yourself:** the gap between the two clocks *is* your lag. That is the number to alert on.
 
@@ -186,7 +190,7 @@ The animation loops through all 4 steps. Expand any step to study it on its own.
 
 <img src="../diagrams/anim/ch01-eventtime/frames/step-01.svg" alt="Step 1: skew, measured: processing time minus event time" width="1040">
 
-Skew is the single measured quantity this chapter rests on. Note its SHAPE: a cluster of small values and one outlier 5× larger. Any system that picks a waiting time from the typical case is correct for eight events in nine and silently wrong about the ninth.
+Skew is the single measured quantity this chapter rests on. Note its SHAPE: a cluster of small values and one outlier about 5× the next worst (230s against 50s). Any system that picks a waiting time from the typical case is correct for eight events in nine and silently wrong about the ninth.
 
 </details>
 <details>
@@ -194,7 +198,7 @@ Skew is the single measured quantity this chapter rests on. Note its SHAPE: a cl
 
 <img src="../diagrams/anim/ch01-eventtime/frames/step-02.svg" alt="Step 2: the watermark is a GUESS about skew" width="1040">
 
-The watermark never stalls and never apologises — it is arithmetic on the events that did arrive, so it cannot know about one that has not. The 60s lag is a human guess at the skew tail, and id 7's 230s is 4x it. A heuristic watermark being wrong is its normal mode, not a failure.
+The watermark never stalls and never apologises — it is arithmetic on the events that did arrive, so it cannot know about one that has not. The 60s lag is a human guess at the skew tail, and id 7's 230s is nearly 4× it (230s against 60s) — a different ratio from the 5× above, which compares skews with each other, not with the lag. A heuristic watermark being wrong is its normal mode, not a failure.
 
 </details>
 <details>
@@ -202,7 +206,7 @@ The watermark never stalls and never apologises — it is arithmetic on the even
 
 <img src="../diagrams/anim/ch01-eventtime/frames/step-03.svg" alt="Step 3: what completeness costs: wait longer, or drop events" width="1040">
 
-Both rows are correct systems. The first is fast and loses 1 of 9 events; the second is complete and makes every answer 170s later — 680s across the 4 windows. And the second budget was only knowable AFTER seeing id 7, so in a live system you are choosing it blind.
+Both rows are correct systems. The first is fast and loses 1 of 9 events; the second is complete and makes every answer 170s later — 680s more across the seed's 4 two-minute (120s) event-time windows. And the second budget was only knowable AFTER seeing id 7, so in a live system you are choosing it blind.
 
 </details>
 <details>
@@ -210,11 +214,11 @@ Both rows are correct systems. The first is fast and loses 1 of 9 events; the se
 
 <img src="../diagrams/anim/ch01-eventtime/frames/step-04.svg" alt="Step 4: so each clock is correct for a different question" width="1040">
 
-The useful habit is to read the question for whose clock it mentions. "How many clicks happened at 12:00" names the users' clock, so the answer is 12. "How many did we receive in that minute" names ours, so the answer is 8. Both are right; only one of them is what a dashboard labelled "clicks at 12:00" is promising.
+The useful habit is to read the question for whose clock it mentions. "How many clicks happened at 12:00" names the users' clock, so the answer is 12. "How many clicks did we receive in that minute" names ours, so the answer is 8. Both are right; only one of them is what a dashboard labelled "clicks at 12:00" is promising.
 
 </details>
 
-<sub>Skews, watermarks and drop counts are computed from the seed and asserted: max skew 230s > 3× lag, and waiting 230s drops nothing. Generated by `node tools/gen_ch01.js`.</sub>
+<sub>Skews, watermarks and drop counts are computed from the seed and asserted: max skew 230s is more than 3× the 60s lag, and waiting 230s drops nothing. Generated by `node tools/gen_ch01.js`.</sub>
 
 <!-- ch01-eventtime:end -->
 
@@ -1278,8 +1282,8 @@ def main():
     for t, a, c in bad_one:
         ra, rc = average_at(SAMPLES, t)
         print(f"    t={t:>3}s reports {a:.3f} over {c} samples; the truth is {ra:.3f} over {rc}")
-    # CORRECTED, twice.  The first expectation was that it is wrong only at the three
-    # arrivals where two or more expire -- 90, 220, 540.  Measured: it is wrong at FIVE,
+    # TWO TEMPTING GUESSES, AND WHAT IS MEASURED.  The first guess is that it is wrong
+    # only at the three arrivals where two or more expire -- 90, 220, 540.  Measured: it is wrong at FIVE,
     # including 130 and 245 where only one sample was due to leave.  The reason is that the
     # error does not heal: once an arrival retires one of the two it owed, each later
     # arrival adds one and retires one, so the backlog is carried forever and the count
@@ -1783,9 +1787,9 @@ def main():
                 assert ck["total"] > 0, "these values are all positive, so the total must be"
         print(f"  crash at each of positions 1..{N - 1}, policy {policy:>7}: final answer "
               f"{sorted(set(round(e, 4) for e in ends))}")
-    # CORRECTED.  The first expectation was that a total-only restart simply stops
-    # subtracting, so the final answer would be the whole stream's sum over W.  Measured, it
-    # is not: the window REFILLS after the restart and subtraction resumes once it holds
+    # THE TEMPTING GUESS, AND WHAT IS MEASURED.  It is tempting to expect a total-only
+    # restart to stop subtracting, so the final answer would be the whole stream's sum over
+    # W.  Measured, it is not: the window REFILLS after the restart and subtraction resumes once it holds
     # more than W values.  What is permanent is narrower and much sharper -- the restored
     # total entered the accumulator with no window entries behind it, so it is never taken
     # out, and the final answer is high by EXACTLY the checkpointed total over W.  That
@@ -1820,8 +1824,8 @@ def main():
     print(f"    position ONE AHEAD of the state : {[round(a, 4) for a in ahead]}")
     print(f"    position ONE BEHIND the state   : {[round(a, 4) for a in behind]}")
     print(f"    the truth                       : {[round(a, 4) for a in truth]}")
-    # CORRECTED.  The expectation taken from the problem statement was that an older state
-    # against a newer position double-counts.  Measured, it is the other way round: a
+    # THE TEMPTING GUESS, AND WHAT IS MEASURED.  It is tempting to expect an older state
+    # against a newer position to double-count.  Measured, it is the other way round: a
     # position AHEAD of the state skips the input in between (xs[4] = 6 is never added, so
     # the sequence is SHORT by one answer), and a position BEHIND the state re-reads input
     # already folded in, which is the double count.  The lesson survives intact -- skew is
@@ -2425,7 +2429,7 @@ Concepts this chapter mentions but does not fully unpack are linked below — ea
 
 ## System Design Interview
 
-> **The question:** Design a real-time clicks-per-minute dashboard. Use case: ops watches live click counts. Premise: each click is stamped with its event time, but the network delays it by minutes, so a click at 12:00:50 processed at 12:04:40 must land in the 12:00 window (event time), not 12:04.
+> **The question:** Design a real-time clicks-per-minute dashboard. Use case: ops watches live click counts. Premise: each event reports v clicks and is stamped with its event time, but the network delays it by minutes, so an event at 12:00:50 processed at 12:04:40 must add its clicks to the 12:00 window (event time), not 12:04.
 
 **The pipeline:** writer (event producer) -> transport (unbounded stream) -> collector (processor) -> aggregator/store (window state) -> reader (dashboard)
 
@@ -2435,7 +2439,7 @@ Concepts this chapter mentions but does not fully unpack are linked below — ea
 
 _Role: writer — stamps events with event time_
 
-- a device stamps click id 7 {key: "b", v: 4, event_time: "12:00:50"}
+- a device stamps event id 7, a report of 4 clicks: {key: "b", v: 4, event_time: "12:00:50"}
 - the timestamp is the user-interaction instant, not the send instant
 - each event is immutable once emitted
 
@@ -2443,7 +2447,7 @@ _Role: writer — stamps events with event time_
 
 _Role: transport — carries events and delays them_
 
-- the click is queued and delayed 3m50s (230 s) by the network
+- the event is queued and delayed 3m50s (230 s) by the network
 - processing time trails event time by the accumulated lag
 - a watermark of 12:03:20 (max event time seen 12:04:20 − 60 s lag) declares how complete event time is
 
@@ -2451,17 +2455,17 @@ _Role: transport — carries events and delays them_
 
 _Role: collector — reads events and assigns buckets_
 
-- the processor reads the click at processing time 12:04:40
-- it buckets by event time, placing the click in the 12:00 window
+- the processor reads the event at processing time 12:04:40
+- it buckets by event time, placing the event in the 12:00 window
 - a straggler arriving after the watermark is flagged late
 
 ### aggregator/store (window state)
 
-_Role: aggregator/store — holds per-window counts_
+_Role: aggregator/store — holds per-window click totals (sums of v)_
 
-- window 12:00 sum : 8 -> 12 as the late click (id 7, v 4) is folded in
-- window 12:04 keeps 7 (ids 4, 5) — it does NOT get id 7's 4, which belongs to 12:00
-- the dashboard reads the live window counts
+- window 12:00 sum : 8 -> 12 clicks as the late event (id 7, v 4) is folded in
+- window 12:04 keeps 7 clicks (ids 4, 5: 6 + 1) — it does NOT get id 7's 4 clicks, which belong to 12:00
+- the dashboard reads the live window click totals
 
 
 <!-- ch01-system:begin — generated by tools/gen_ch01.js; do not hand-edit -->
@@ -2476,7 +2480,7 @@ _Role: aggregator/store — holds per-window counts_
 
 **Now the number that decides the design.** Follow the 12:00 minute all the way through:
 
-- Clicks that actually happened in it: ids 0, 1, 7 — sum **12**.
+- Clicks that actually happened in it: ids 0, 1, 7, carrying 5 + 3 + 4 — **12** clicks.
 - The watermark crosses 12:01 at event id 3, which arrives at **12:02:12**. At that moment only ids 0, 1 have landed.
 - So the dashboard declares the minute complete and publishes **8** — **33% low**.
 - The truth is not knowable until id 7 lands at **12:04:40**.
@@ -2499,7 +2503,7 @@ None of the three is "the right one"; they trade accuracy, latency and downstrea
 
 1. **The 60s lag is a guess.** It was wrong about id 7 by 170s, and nothing inside the pipeline could detect that. Option C's 230s was only knowable *after* id 7 happened.
 2. **One minute never closes.** [12:09, 12:10) still holds 8. Unbounded input means unbounded state unless something expires it.
-3. **Nothing here is exactly-once.** If the transport redelivers id 7, the 12:00 minute reads 16, and this design cannot distinguish that from a real click.
+3. **Nothing here is exactly-once.** If the transport redelivers id 7, the 12:00 minute reads 16, and this design cannot distinguish that from a real report of 4 more clicks.
 4. **It is sized for 9 events.** Nothing here says what happens at a million per second.
 
 #### Visual walkthrough — five stages, one wrong number, three options

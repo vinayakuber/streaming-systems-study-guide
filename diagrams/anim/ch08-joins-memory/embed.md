@@ -6,7 +6,7 @@
 
 `joinWatermark(i)` has the line that matters: `if (w == NONE) { return NONE }`. A side that has produced nothing blocks the claim entirely, and a join has two sides by construction — so either one going quiet stops every result.
 
-`matches(clock)` then shows the sharper cost. A mis-clocked aggregate puts a number in the wrong bucket; a mis-clocked join **pairs the wrong rows**, emitting an assertion that two things coincided. Step 4 compares the two pair sets from identical data.
+`matches(clock)` then shows the sharper cost. A mis-clocked aggregate puts a number in the wrong bucket; a mis-clocked join **pairs the wrong rows**, emitting an assertion that two things coincided. Step 4 compares the two pair sets from identical data: by event time 0–7, 1–7, 3–2, 4–5, 4–6; by processing time 3–2, 4–5, 4–6, 4–7.
 
 The animation steps through the code, holding each line long enough to read the STACK (call frames and their locals) and the HEAP (allocated arrays and objects) as they are AT THAT MOMENT. Expand any step to study it on its own.
 
@@ -41,7 +41,7 @@ Side "a" has reached 480 and side "b" 200, so `lowest` ends at 200. Every join e
 
 <img src="../diagrams/anim/ch08-joins-memory/frames/step-04.svg" alt="Step 4: so the same join on pt pairs a different set of rows" width="980">
 
-Compare the heap rows. Pairing on `et` and on `pt` gives different pair sets from identical data — id 7 arrived 230s after it happened, so on the arrival clock it sits next to rows it had nothing to do with. The output rows look equally plausible in both cases.
+Compare the heap rows. Pairing on `et` gives 5 pairs (0–7, 1–7, 3–2, 4–5, 4–6) and on `pt` 4 (3–2, 4–5, 4–6, 4–7), from identical data — id 7 arrived 230s after it happened, so on the arrival clock it sits next to rows it had nothing to do with. The output rows look equally plausible in both cases.
 
 </details>
 

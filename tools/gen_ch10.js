@@ -171,7 +171,7 @@ const C3 = [
         `Batch does not lack watermarks — it has the easiest possible one, which reaches infinity when the file ends and closes every window at once.`,
         `Seeing it that way is what makes one codebase possible: you are not adding streaming machinery to a batch job, you are removing a special case.`,
       ], c.C.good, c.C.goodFill),
-    cap: `The reframing is the content of the claim. Batch has a watermark — the simplest one, which jumps to infinity at end of input — and a trigger, which fires once. Three of the four mechanisms are trivial rather than absent, and recognising that is what lets one pipeline serve both modes instead of two pipelines serving one each.` },
+    cap: `The reframing is the content of the claim. Batch has a watermark — the simplest one, which jumps to infinity at end of input — and a trigger, which fires once. Three of the four mechanisms — watermark, trigger and accumulation — are trivial rather than absent, and the fourth, windowing, is the same in both modes; recognising that is what lets one pipeline serve both modes instead of two pipelines serving one each.` },
   { t: 'so one codebase, and Lambda\'s duplication disappears', draw: (c) =>
       c.panel('THE FIX, APPLIED ONCE', 'a')
       + c.mapRows('oc', c.P.main.x + 24, c.P.main.y + 52, [
@@ -219,7 +219,7 @@ const C4 = [
       + c.mapRows('pp', c.P.main.x + 24, c.P.main.y + 52, [
         [`log (replayable)`, `${EVENTS.length} events, retained and re-readable from an offset`],
         [`one streaming pipeline`, `serves the live result AND the replay — ${KAPPA_FIXES} codebase`],
-        [`speed result`, `what consumers read now`],
+        [`speed result`, `the live output consumers read now — not a speed layer`],
         [`replay path → same pipeline`, `the corrected result, from the same code`],
       ], { w: 1040, rh: 36, hot: 0, label: 'four boxes, and only the first is irreplaceable' })
       + c.note('p1', c.P.main.x + 24, c.P.main.y + 212, 1040, [
@@ -273,7 +273,8 @@ const DIAGRAMS = [
       `Not because it lacks them, but because **the ending answers the time questions for free**: WHEN is end of input and HOW has no panes to relate, while WHERE is the same ${ET_KEYS.length} windows of ${WIN}s in both modes. Remove the ending and both defaults stop existing simultaneously. That is the difficulty, and it has nothing to do with latency.`, '',
       `**Early streaming systems got latency and lost correctness** — and it is worth being precise about why. They had no vocabulary for event time, so they bucketed by arrival. On this data that is **${LAMBDA_DIFFER.length} of the ${ET_KEYS.length} windows wrong, by ${LAMBDA_DRIFT} in total**: window [${mm(LAMBDA_DIFFER[0])}, ${mm(LAMBDA_DIFFER[0] + WIN)}) reads ${SUM(BY_ET[LAMBDA_DIFFER[0]])} by event time and ${SUM(BY_PT[LAMBDA_DIFFER[0]] || [])} by arrival. A missing feature, not an inherent limit — which is why a model could fix it.`, '',
       `**The four questions unified them.** Read the WHAT and WHERE rows: batch's map/reduce and streaming's aggregation are the **same**, over the same ${ET_KEYS.length} windows. The computation was never the difference. The two questions that differ — WHEN a result is final and HOW successive answers relate — are both about time, and those are exactly the two an ending used to answer.`, '',
-      `**So one pipeline can run in both modes.** The grouping is identical: ${ET_KEYS.length} windows with values ${ET_KEYS.map(k => SUM(BY_ET[k])).join(', ')}, bounded or unbounded. The only difference is **when each result is final** — batch closes all ${ET_KEYS.length} at event ${batchFinalAt}, while in streaming ${NEVER_FINAL.length} is never final at all.`],
+      `**So one pipeline can run in both modes.** The grouping is identical: ${ET_KEYS.length} windows with values ${ET_KEYS.map(k => SUM(BY_ET[k])).join(', ')}, bounded or unbounded. The only difference is **when each result is final** — batch closes all ${ET_KEYS.length} at event ${batchFinalAt}, while in streaming ${NEVER_FINAL.length} is never final at all.`, '',
+      `The streaming watermark used throughout this chapter is the seed's rule: **the latest event time seen so far, minus ${LAG}s**, and a window is final once that watermark reaches the window's end. After the last event it stands at ${mm(WATERMARKS[EVENTS.length - 1])}, short of ${mm(NEVER_FINAL[0].k + WIN)}, the end of window [${mm(NEVER_FINAL[0].k)}, ${mm(NEVER_FINAL[0].k + WIN)}) — which is why that window is never final.`],
     whenHeading: 'When the unification pays, and what it does not remove',
     when: [
       `**It pays whenever the same logic serves history and live traffic** — a backfill, a re-derivation after a schema change, a new consumer over old data. One codebase, with the mode chosen by whether the input ends.`, '',
@@ -307,7 +308,7 @@ const DIAGRAMS = [
     subtitle: `identical ${ET_KEYS.length} windows · fix once, replay ${REPLAY_READS} · ${NEVER_FINAL.length} window never final in streaming`,
     heading: 'Why batch already has all four mechanisms, and what reprocessing becomes',
     why: [
-      `**Batch is streaming over a bounded input,** and the reframing is the whole claim. Batch does not *lack* watermarks — it has the easiest possible one, which reaches infinity at end of input and closes every window at once. It has a trigger too: fire once, at EOF. Three of the four mechanisms are **trivial** in batch rather than absent.`, '',
+      `**Batch is streaming over a bounded input,** and the reframing is the whole claim. Batch does not *lack* watermarks — it has the easiest possible one, which reaches infinity at end of input and closes every window at once. It has a trigger too: fire once, at EOF. Of the four mechanisms — windows, watermarks, triggers and accumulation — three (the watermark, the trigger and the accumulation mode) are **trivial** in batch rather than absent, and the fourth, windowing, is identical in both modes.`, '',
       `Seeing it that way is what makes one codebase possible: you are not adding streaming machinery to a batch job, you are removing a special case.`, '',
       `**So Lambda's duplication disappears.** The concrete correction: key "${BUG_KEY}" reads ${BUGGY_PER_KEY[BUG_KEY]} (total ${BUGGY_TOTAL}); one edit in one pipeline; replay ${REPLAY_READS} events; key "${BUG_KEY}" reads ${TRUE_PER_KEY[BUG_KEY]} and the total reads ${TOTAL}.`, '',
       `And note the verification: **key "${KEYS[1]}" reads ${TRUE_PER_KEY[KEYS[1]]} before and after.** That unaffected key is how you know the replay *reproduced* history rather than recomputing it differently — without an invariant to check, "the numbers changed" and "the numbers are now right" are indistinguishable.`, '',
@@ -329,6 +330,7 @@ const DIAGRAMS = [
     why: [
       `**The question.** Design a data-processing system that survives a bug fix: every input is kept in a replayable log, so the corrected pipeline is deployed once and the whole history is replayed through the same code to replace the wrong result.`, '',
       `**The pipeline:** log (replayable) → one streaming pipeline → speed result; and replay path → **the same pipeline** → corrected result.`, '',
+      `"Speed result" here means only the live, low-latency output. Kappa has **no speed layer**: unlike Lambda's speed layer, a second implementation, this result comes from the same pipeline code as any replay.`, '',
       `The pipeline appears twice and is the same code both times. That is the design: **there is no second implementation to keep in agreement.** And the log is the only box that cannot be rebuilt from another box, which makes its retention policy the system's real correctness boundary.`, '',
       `**The incident, with values.** A bug halves each of key "${BUG_KEY}"'s values, rounding down (${HALVING}): the pipeline produces ${KEYS.map(k => `"${k}" = ${BUGGY_PER_KEY[k]}`).join(', ')}, total ${BUGGY_TOTAL}, where the truth is ${KEYS.map(k => `"${k}" = ${TRUE_PER_KEY[k]}`).join(', ')}, total ${TOTAL}. One edit, replay ${REPLAY_READS} events, and the corrected result lands.`, '',
       `**The verification is the part worth copying:** key "${KEYS[1]}" reads ${TRUE_PER_KEY[KEYS[1]]} before *and* after. An unaffected invariant is what distinguishes "the replay reproduced history" from "the replay computed something else".`, '',
@@ -768,7 +770,7 @@ PROGRAMS.push({
       { t: 'short retention produces a smaller total and no error', line: at('fun verify(log, pipe)', 'if (log.retained < len(EVENTS))  { return Outcome(t, false, "retention shorter than history") }'),
         stack: [MAIN({ h: '@0x100', s: '@0x200' }), { name: 'verify', locals: [`log = Log(${EVENTS.length - 3} events, retained ${EVENTS.length - 3})`, 'pipe = Pipeline(true, true)', `t = ${EVENTS.slice(3).reduce((s, e) => s + e.v, 0)}`] }],
         heap: [{ key: 'healthy' }, { key: 'short', hot: true }],
-        cap: `With ${EVENTS.length - 3} of ${EVENTS.length} events retained the replay returns ${EVENTS.slice(3).reduce((s, e) => s + e.v, 0)} — a complete, confident, wrong answer. Only this explicit check distinguishes it from ${TOTAL}; the replay itself raises nothing. "We can always reprocess" is true exactly as far back as retention.` },
+        cap: `With only the newest ${EVENTS.length - 3} of ${EVENTS.length} events retained (offsets 3–${EVENTS.length - 1}) the replay returns ${EVENTS.slice(3).reduce((s, e) => s + e.v, 0)} — a complete, confident, wrong answer. Only this explicit check distinguishes it from ${TOTAL}; the replay itself raises nothing. "We can always reprocess" is true exactly as far back as retention.` },
       { t: 'and a non-deterministic pipeline gives the right total for the wrong reason', line: at('if (pipe.deterministic == false) { return Outcome(t, false, "pipeline reads outside the log") }'),
         stack: [MAIN({ h: '@0x100', s: '@0x200', l: '@0x300' }), { name: 'verify', locals: [`log = Log(${EVENTS.length} events, retained ${EVENTS.length})`, 'pipe = Pipeline(true, false)', `t = ${TOTAL}`] }],
         heap: [{ key: 'short' }, { key: 'loose', hot: true }],
@@ -782,7 +784,7 @@ PROGRAMS.push({
   intro: [
     `**What is being answered.** The two assumptions Kappa rests on, made into checks rather than hopes.`, '',
     `\`replayThrough\` is the architecture's only recovery mechanism, and it works: ${TOTAL} from ${EVENTS.length} retained events through the fixed pipeline.`, '',
-    `\`verify\` then names what that result depends on. Step 2: ${EVENTS.length - 3} retained events give ${EVENTS.slice(3).reduce((s, e) => s + e.v, 0)} — a confident wrong answer with no error. Step 3: a pipeline flagged non-deterministic gives ${TOTAL}, the **right** total with \`trustworthy\` false — the same additions as the healthy replay, since the program models determinism only as a flag, so only \`verify\`'s check can tell them apart. The totals alone cannot tell you which replay to believe.`],
+    `\`verify\` then names what that result depends on. Step 2: the newest ${EVENTS.length - 3} retained events (offsets 3–${EVENTS.length - 1}) give ${EVENTS.slice(3).reduce((s, e) => s + e.v, 0)} — a confident wrong answer with no error. Step 3: a pipeline flagged non-deterministic gives ${TOTAL}, the **right** total with \`trustworthy\` false — the same additions as the healthy replay, since the program models determinism only as a flag, so only \`verify\`'s check can tell them apart. The totals alone cannot tell you which replay to believe.`],
   sub: `All three replay outcomes are computed from the seed and asserted.` });
 
 for (const g of PROGRAMS) {

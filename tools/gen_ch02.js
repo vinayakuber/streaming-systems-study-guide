@@ -24,6 +24,11 @@ const SLIDE = {};
 for (const e of EVENTS) for (const st of slidingStarts(e.et)) (SLIDE[st] = SLIDE[st] || []).push(e.id);
 const SLIDE_STARTS = Object.keys(SLIDE).map(Number).sort((a, b) => a - b);
 const SLIDE_TOTAL = EVENTS.reduce((s, e) => s + e.v * slidingStarts(e.et).length, 0);
+// the rule the sliding figures rest on: the first window starts at 12:00, the start of the
+// book's time. A windowing that also opened [11:59, 12:01) would add one result holding
+// every event of the first PERIOD seconds.
+const PRE_IDS = EVENTS.filter(e => e.et < PERIOD).map(e => e.id);
+const PRE_SUM = SUM(PRE_IDS);
 const W0 = WIN_STARTS[0], W0_END = W0 + WIN;
 const W0_IDS = WINDOWS[W0], W0_TRUE = SUM(W0_IDS);
 const L = LATE[0], LI = EVENTS.indexOf(L);
@@ -101,6 +106,8 @@ const RIGHT = W0_TRUE;
 const WRONG_SUM_ACC = sinkSum(ACC.accumulating.panes);      // sink sums accumulating panes
 const WRONG_REPL_DISC = sinkReplace(ACC.discarding.panes);  // sink replaces with discarding panes
 const fail = (m) => { throw new Error(`gen_ch02: ${m}`); };
+if (PRE_IDS.length === 0 || SLIDE_STARTS[0] !== 0) fail('the sliding windows no longer start at 12:00 with events in the first period — the stated start rule would be idle');
+if (WATERMARKS[LI] !== WATERMARKS[LI - 1]) fail('id L moves the watermark — "the same before and after it is fed" would be false');
 if (SLIDE_TOTAL <= TOTAL) fail(`sliding total ${SLIDE_TOTAL} does not exceed the fixed total ${TOTAL} — the overlap lesson would be invisible`);
 if (ONTIME === W0_TRUE) fail(`the on-time pane already equals the truth (${ONTIME}) — there would be no refinement to explain`);
 if (LATE_DELTA <= 0) fail('the late pane adds nothing');
@@ -121,6 +128,7 @@ if (!(LAST_CLOCK_SUM > 0) || WATERMARKS[WATERMARKS.length - 1] >= LAST_W + WIN) 
 const W = 1140;
 const secs = (n) => `${n}s`;
 const mm = (sec) => hhmmss(sec).slice(0, 5);
+const clockMin = (sec) => { const m = 12 * 60 + Math.floor(sec / 60); return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`; };
 
 // =========================== CONCEPT 1 — WHAT AND WHERE =====================
 const C1 = [
@@ -142,7 +150,7 @@ const C1 = [
       + c.mapRows('wh', c.P.main.x + 24, c.P.main.y + 52, [
         [`global window (all of event time)`, `1 result: ${TOTAL}`],
         [`fixed ${secs(WIN)} windows`, `${WIN_STARTS.length} results: ${WIN_STARTS.map(w => SUM(WINDOWS[w])).join(', ')}  (total ${TOTAL})`],
-        [`sliding ${secs(WIN)} wide, every ${secs(PERIOD)}`, `${SLIDE_STARTS.length} results, totalling ${SLIDE_TOTAL}`],
+        [`sliding ${secs(WIN)} wide, every ${secs(PERIOD)}, from ${mm(SLIDE_STARTS[0])}`, `${SLIDE_STARTS.length} results, totalling ${SLIDE_TOTAL}`],
         [`session windows, ${secs(GAP)} gap`, `key a: ${SESSIONS.a.length} sessions · key b: ${SESSIONS.b.length} sessions`],
       ], { w: 1040, rh: 36, hot: 2, label: 'one transform (sum of v); four answers to "over what slice?"' })
       + c.note('h1', c.P.main.x + 24, c.P.main.y + 208, 1040, [
@@ -218,7 +226,7 @@ const C2 = [
   { t: 'so a pipeline wants THREE triggers, not one', draw: (c) =>
       c.panel('EARLY · ON-TIME · LATE', 'a')
       + c.mapRows('tr', c.P.main.x + 24, c.P.main.y + 52, [
-        [`EARLY — every ${secs(PERIOD)} before the watermark`, `speculative: ${EARLY.map(f => f.v).join(', ')} — fast and knowingly incomplete`],
+        [`EARLY — every ${secs(PERIOD)}, until the on-time pane fires`, `speculative: ${EARLY.map(f => f.v).join(', ')} — fast and knowingly incomplete`],
         [`ON-TIME — when the watermark passes ${mm(W0_END)}`, `${ONTIME} at ${hhmmss(EVENTS[ONTIME_I].pt)} — the pipeline's best claim`],
         [`LATE — once per straggler after that`, `${W0_TRUE} at ${hhmmss(L.pt)}, when id ${L.id} lands`],
       ], { w: 1040, rh: 40, hot: 2, label: 'three separate triggers on one window, each answering a different need' })
@@ -341,8 +349,8 @@ const C4 = [
       + c.note('x1', c.P.main.x + 24, c.P.main.y + 46, 1040, [`Allowed lateness >= ${secs(ALLOWED_MIN)} keeps window state alive longer. With ${WIN_STARTS.length} windows that is cheap; with a million open windows it is the memory bill.`], c.C.warn, c.C.warnFill)
       + c.note('x2', c.P.main.x + 24, c.P.main.y + 112, 1040, [`Retractions require the sink to accept a negative. A counter in a key-value store usually can; an append-only billing ledger usually cannot.`], c.C.hot, c.C.hotFill)
       + c.note('x3', c.P.main.x + 24, c.P.main.y + 178, 1040, [`The ${secs(ALLOWED_MIN)} threshold was computed from watermarks we can see in full. A live pipeline sets that number before observing them.`], c.C.hot, c.C.hotFill)
-      + c.note('x4', c.P.main.x + 24, c.P.main.y + 244, 1040, [`One window was specified. The window starting ${mm(LAST_W)} never closes in this dataset: the on-time and late triggers never publish it, and its only published value is the speculative early pane ${LAST_CLOCK_SUM} at ${hhmmss(LAST_CLOCK)}.`], c.C.blue, c.C.blueFill),
-    cap: `The last gap is the sharpest: this chapter fully specified ONE window, and the final window of the same dataset is never published by the on-time or late trigger, because the watermark never passes its end — only the clock reports it (${LAST_CLOCK_SUM} at ${hhmmss(LAST_CLOCK)}), a value the pipeline never claims is complete. A complete answer to all four questions still says nothing about a window whose "when" never arrives.` },
+      + c.note('x4', c.P.main.x + 24, c.P.main.y + 244, 1040, [`One window was specified. The window starting ${mm(LAST_W)} never closes in this dataset: the on-time and late triggers never publish it.`, `Only the early trigger does — ${LAST_CLOCK_SUM} at ${hhmmss(LAST_CLOCK)}, then ${LAST_CLOCK_SUM} again every ${secs(PERIOD)}, since no on-time pane ever stops it.`], c.C.blue, c.C.blueFill),
+    cap: `The sharpest gap: the final window is never published by the on-time or late trigger, because the watermark never passes its end. Only the early trigger reports it — ${LAST_CLOCK_SUM} at ${hhmmss(LAST_CLOCK)}, then again every ${secs(PERIOD)}, since no on-time pane ever stops it — and every value is speculative. Four answered questions still say nothing about a window whose "when" never arrives.` },
 ];
 
 // =============================== EMIT DIAGRAMS ==============================
@@ -356,9 +364,9 @@ const DIAGRAMS = [
       `**WHERE is the slice of event time** each value covers. Windowing cuts an unbounded stream into finite, event-time-aligned pieces. Hold the transform fixed at \`sum(v)\` and vary only the windowing:`, '',
       `- **global window** — one result: **${TOTAL}**.`,
       `- **fixed ${secs(WIN)} windows** — ${WIN_STARTS.length} results: ${WIN_STARTS.map(w => SUM(WINDOWS[w])).join(', ')}, totalling ${TOTAL}.`,
-      `- **sliding, ${secs(WIN)} wide every ${secs(PERIOD)}** — ${SLIDE_STARTS.length} results, totalling **${SLIDE_TOTAL}**.`,
+      `- **sliding, ${secs(WIN)} wide every ${secs(PERIOD)}, the first starting at ${mm(SLIDE_STARTS[0])}** — ${SLIDE_STARTS.length} results, one per non-empty window (starting ${SLIDE_STARTS.map(mm).join(', ')}), totalling **${SLIDE_TOTAL}**.`,
       `- **session windows, ${secs(GAP)} gap** — key \`a\` gets ${SESSIONS.a.length} sessions, key \`b\` gets ${SESSIONS.b.length}.`, '',
-      `Read the sliding row twice. Its results sum to ${SLIDE_TOTAL} over a dataset containing ${TOTAL}, because each event falls into up to ${Math.max(...EVENTS.map(e => slidingStarts(e.et).length))} overlapping windows. Nothing was duplicated — **overlap is a property of the windowing**, and partitioning windowings (fixed, global) preserve the total while overlapping ones do not.`, '',
+      `Read the sliding row twice. Its results sum to ${SLIDE_TOTAL} over a dataset containing ${TOTAL}, because each event falls into up to ${Math.max(...EVENTS.map(e => slidingStarts(e.et).length))} overlapping windows. The count depends on one stated rule: **no sliding window starts before ${mm(SLIDE_STARTS[0])}**, where this book's time begins, so events of the first ${secs(PERIOD)} (ids ${PRE_IDS.join(', ')}) sit in just one window. A windowing that also opened [${clockMin(SLIDE_STARTS[0] - PERIOD)}, ${mm(PERIOD)}) would add a result of ${PRE_SUM} — ${SLIDE_STARTS.length + 1} results totalling ${SLIDE_TOTAL + PRE_SUM}. Nothing was duplicated — **overlap is a property of the windowing**, and partitioning windowings (fixed, global) preserve the total while overlapping ones do not.`, '',
       `**And the two axes are genuinely independent.** The grid in the walkthrough below picks ${WHATS.length} of those transforms and ${WHERES.length} of those windowings — ${GRID} legal pipelines — and picking a row constrains no column. So "we sum purchases" leaves the answer undetermined, and so does "we use session windows".`],
     whenHeading: 'When each windowing is the right one, and what batch was doing all along',
     when: [
@@ -379,8 +387,8 @@ const DIAGRAMS = [
       `**A processing-time trigger fires on the clock** — every ${secs(PERIOD)}, say. Following window [${mm(W0)}, ${mm(W0_END)})${''}, it emits ${PT_FIRES.slice(0, 4).map(f => f.sum).join(', then ')}: whatever had arrived. It first reaches the right answer, ${W0_TRUE}, at ${hhmmss(PT_FIRST_CORRECT.at)} — and it cannot tell that firing apart from the ones before it.`, '',
       `**A watermark is a completeness signal:** "no event with an event time earlier than *t* will arrive." That lets a trigger make a different kind of claim — fire when the watermark passes ${mm(W0_END)}, because the window is *done*. It fires exactly once, after event id ${EVENTS[ONTIME_I].id} at ${hhmmss(EVENTS[ONTIME_I].pt)}, emitting **${ONTIME}** from ids ${ONTIME_IDS.join(', ')}.`, '',
       `${ONTIME}, not ${W0_TRUE}: id ${L.id} has not arrived. **The claim of completeness and the error are the same event** — the watermark was the pipeline's best estimate and it was wrong.`, '',
-      `**So a real pipeline wants three triggers on one window,** not a choice between them: **early** (speculative, before the watermark — ${EARLY.map(f => f.v).join(', ')} at ${EARLY.map(f => hhmmss(f.at)).join(', ')}), **on-time** (at the watermark — ${ONTIME}), and **late** (once per straggler — ${W0_TRUE} at ${hhmmss(L.pt)}). They serve three different consumers and all three fire.`, '',
-      `**Allowed lateness** bounds the waiting: it is how long window state is kept after the watermark passes, which is garbage collection for that state. And it has an exact threshold here. When id ${L.id} arrives, the watermark stands at ${hhmmss(WM_AT_LATE)} (${WM_AT_LATE}s); state survives while the watermark is below ${mm(W0_END)} + allowed, so **allowed lateness must be at least ${secs(ALLOWED_MIN)}** for the correction to land. At ${secs(ALLOWED_MIN - 1)} the state is already gone and ${ONTIME} stands forever.`, '',
+      `**So a real pipeline wants three triggers on one window,** not a choice between them: **early** (speculative, before the watermark — ${EARLY.map(f => f.v).join(', ')} at ${EARLY.map(f => hhmmss(f.at)).join(', ')}), **on-time** (at the watermark — ${ONTIME}), and **late** (once per straggler — ${W0_TRUE} at ${hhmmss(L.pt)}). They serve three different consumers and all three fire. The early trigger is the same ${secs(PERIOD)} clock as above with one added rule: **it stops once the on-time pane has fired**. That is why its list ends at ${hhmmss(EARLY[EARLY.length - 1].at)}, while the bare clock runs on and reaches ${W0_TRUE} at ${hhmmss(PT_FIRST_CORRECT.at)}.`, '',
+      `**Allowed lateness** bounds the waiting: it is how long window state is kept after the watermark passes, which is garbage collection for that state. And it has an exact threshold here. When id ${L.id} arrives, the watermark stands at ${hhmmss(WM_AT_LATE)} (${WM_AT_LATE}s) — the check reads it after id ${L.id} is fed, and it is the same before, because an event as old as id ${L.id} cannot raise the highest event time seen. State survives while the watermark is below ${mm(W0_END)} + allowed, so **allowed lateness must be at least ${secs(ALLOWED_MIN)}** for the correction to land. At ${secs(ALLOWED_MIN - 1)} the state is already gone and ${ONTIME} stands forever.`, '',
       `Note that ${secs(ALLOWED_MIN)} is *not* id ${L.id}'s ${secs(L.pt - L.et)} of skew, which is the number a reader would guess. It comes from how far the watermark had advanced — it jumped from ${hhmmss(WATERMARKS[ONTIME_I - 1])} to ${hhmmss(WATERMARKS[ONTIME_I])} in a single event. **The knob is calibrated against the watermark, not against the data.**`],
     whenHeading: 'When to use each trigger, and what allowed lateness costs',
     when: [
@@ -439,7 +447,7 @@ const DIAGRAMS = [
       `1. **Allowed lateness is memory.** Holding state past the watermark costs (open windows × state per window). With ${WIN_STARTS.length} windows it is free; with a million open windows it is the pipeline's dominant cost.`,
       `2. **Retractions require a sink that accepts negatives.** ${-ONTIME} has to be representable and meaningful downstream.`,
       `3. **The ${secs(ALLOWED_MIN)} threshold was computed from watermarks visible in full.** A live pipeline sets that number before observing them, and is therefore guessing.`,
-      `4. **Only one window was specified.** The window starting ${mm(LAST_W)} is never published by the on-time or late trigger, because the watermark never passes its end — only the speculative early pane (${LAST_CLOCK_SUM} at ${hhmmss(LAST_CLOCK)}) ever reports it, so its only published value is one the pipeline never claims is complete. A complete answer to all four questions still says nothing about a window whose "when" never arrives.`],
+      `4. **Only one window was specified.** The window starting ${mm(LAST_W)} is never published by the on-time or late trigger, because the watermark never passes its end — only the early trigger reports it: ${LAST_CLOCK_SUM} at ${hhmmss(LAST_CLOCK)}, the first clock tick after its data arrives, then ${LAST_CLOCK_SUM} again every ${secs(PERIOD)} for as long as the pipeline runs, because no on-time pane ever fires to stop it. Every value it publishes is one the pipeline never claims is complete. A complete answer to all four questions still says nothing about a window whose "when" never arrives.`],
     diagramHeading: `Visual walkthrough — four stages, ${SYS.received} published values, two thresholds`,
     sub: `The publish sequence, the ${secs(ALLOWED_MIN)} lateness threshold and the ${SYS_ACC.stored}-vs-${SYS.stored} sink outcomes are all derived from the seed and asserted.` },
 ];

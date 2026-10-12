@@ -2,11 +2,11 @@
 
 #### Why a join is where the time decisions cost the most
 
-**Joining two unbounded streams needs a time bound, or the query has no meaning.** A batch join completes when both tables are read — here 5 × 4 candidate pairs, then done. A stream-stream join never completes on its own: either side may still produce a match.
+**Joining two unbounded streams needs a time bound, or the query has no meaning.** A batch join completes when both tables are read — here 5 × 4 candidate pairs, then done. The two streams are the table's two sources: the key-"a" rows on one side and the key-"b" rows on the other (ch09 names them clicks and impressions). A stream-stream join never completes on its own: either side may still produce a match.
 
 So SQL **requires** a window on such a join, and the bound does two jobs at once — it ends the wait, and it bounds the buffered state. Without it the engine would have to keep every row of both sides forever in case a match arrives.
 
-**The watermark decides when a result may be emitted**, and it is ch03's minimum rule applied to two inputs. Side "a" reaches 12:08:00 and side "b" reaches 12:03:20, so the join claims the **minimum**, 12:03:20.
+**The watermark decides when a result may be emitted**, and it is ch03's minimum rule applied to two inputs: a pair is emitted once the join's watermark, the lower of the two sides', passes the pair's join bound. By the end of the run side "a" has reached 12:08:00 and side "b" 12:03:20, so the join's watermark ends at the **minimum**, 12:03:20.
 
 A join is where that rule hurts most, because it has two inputs by construction: one slow or idle side holds back every result, however fast the other is.
 

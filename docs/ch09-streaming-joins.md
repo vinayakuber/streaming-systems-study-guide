@@ -1,5 +1,7 @@
 # Chapter 9: Streaming Joins
 
+> ▶ **Narrated decks:** [part 1](../decks/ch09-streaming-joins-part1.html) · [part 2](../decks/ch09-streaming-joins-part2.html) · [part 3](../decks/ch09-streaming-joins-part3.html) · [part 4](../decks/ch09-streaming-joins-part4.html) · [part 5](../decks/ch09-streaming-joins-part5.html) · [part 6](../decks/ch09-streaming-joins-part6.html) · [part 7](../decks/ch09-streaming-joins-part7.html) · [part 8](../decks/ch09-streaming-joins-part8.html) · [part 9](../decks/ch09-streaming-joins-part9.html) — this chapter explained step by step, with voice-over and questions to answer. GitHub shows HTML as source, so download the file and open it in Chrome.
+
 > Joining streams is about bounding an unbounded match — windowed joins bound time, temporal joins enrich against a table, and the watermark plus state decide when a join result is complete.
 
 _Also known as: SS Ch09 · Streaming Join · Windowed Join · Temporal Join · Stream-Table Join · Join State_
@@ -28,7 +30,7 @@ Reading this book's two keys as two streams — "a" is clicks, "b" is impression
 
 So SQL requires a **time bound**, and with a 60s bound there are exactly **5 true matches** here: 0-7, 1-7, 3-2, 4-5, 4-6. Without the bound the join would retain every row of both sides forever, so the bound makes the state finite *and* the semantics defined.
 
-**The join must buffer.** A row cannot be matched and discarded — it waits for a counterpart that may never come. The buffer peaks at **5 rows** on this 9-row stream, and the sizing formula is (arrival rate × join window) per side.
+**The join must buffer.** A row cannot be matched and discarded — it waits for a counterpart that may never come. The buffer peaks at **5 rows** on this 9-row stream — that counts both streams together, 4 clicks + 1 impression after event 4. The sizing formula is (arrival rate × join window) per side, and the buffer is the sum of the two sides.
 
 **The watermark ends the wait, and it is the minimum over both inputs** — ch03's rule, now structural because a join always has two. Trace each click's emission point and **2 of the 5 never emit at all**, because the minimum watermark never passes its bound. Those rows hold **2 of the 5 true matches**: computed, sitting in state, never published.
 
@@ -38,7 +40,7 @@ So SQL requires a **time bound**, and with a 60s bound there are exactly **5 tru
 
 **Use a windowed join when both sides are genuinely streams** and a match means "these happened close together". The window width is a domain statement — how close counts as together — not a tuning parameter.
 
-**Size it as arrival rate × window, per side**, and treat that as a hard number in the capacity plan. 5 rows here; at 10k rows/sec with a 60s window it is 600k rows per side.
+**Size it as arrival rate × window, per side**, add the two sides, and treat that as a hard number in the capacity plan. 5 rows here for both sides together (per side, the click buffer peaks at 4 and the impression buffer at 2). At an illustrative 10k rows/sec per side — a rate assumed for scale, not one measured on this stream — a 60s window holds 10k × 60 = 600k rows per side, and twice that across both.
 
 **Expect the accounting, not just the matches.** On out-of-order data a correct windowed join delivers 1 of 5 matches correctly first time, 2 after a retraction, and 2 not at all. If that split is unacceptable, the answer is a different join or a different guarantee — not a wider window.
 
@@ -65,7 +67,7 @@ A batch join over these inputs tests 20 pairs and finishes. The streaming versio
 
 <img src="../diagrams/anim/ch09-hard/frames/step-02.svg" alt="Step 2: the join must BUFFER one side while waiting for the other" width="1040">
 
-Rows cannot be matched and discarded immediately — each one waits for a counterpart. The buffer peaks at 5 rows here, and the only reason it peaks at all rather than growing is the 60s window. That makes join state (arrival rate × join window), which is the sizing formula to carry away.
+Rows cannot be matched and discarded immediately — each one waits for a counterpart. The buffer peaks at 5 rows of both streams together (4 clicks + 1 impression, after event 4); per side, the click buffer peaks at 4 and the impression buffer at 2. The only reason it peaks at all rather than growing is the 60s window. That makes each side's join state (its arrival rate × join window), and the whole buffer the sum over both sides, which is the sizing formula to carry away.
 
 </details>
 <details>
@@ -160,14 +162,14 @@ Click 4 needs the watermark above 305, and `claim` only ever reaches 200. So `wh
 
 Worth noticing early: **one click matches 2 impressions**, so a windowed join is not one-to-one and its output can exceed either input. That is a capacity surprise people usually meet after shipping.
 
-**The temporal (stream-table) join** enriches each row with the version of a table that was current *at that row's event time*. Here each click probes the impression side as of its own `et`: click 3 → 11, click 4 → 20, and 2 clicks get NULL because no impression existed yet at that time.
+**The temporal (stream-table) join** enriches each row with the version of a table that was current *at that row's event time*. Here the impression side is read as a table whose state at time t is the **impression total** — the sum of each impression's value `v` (the seed's per-event number) over every impression with `et` ≤ t — and each click probes that total as of its own `et`: click 3 → 11, click 4 → 20, and 2 clicks get NULL because no impression existed yet at that time.
 
 No window, no buffer, no wait on the other side's watermark — each of the 5 rows is looked up as it arrives. The price is that it needs a **versioned** table that is **complete** for that time: "as of 12:02:10" is not the same question as "now", and a table holding only current values cannot answer it. These impressions are not complete in time: looked up on arrival, click 3 reads 7 instead of 11 and click 4 reads 7 instead of 20, because impressions 6 and 7 arrive after the clicks they precede.
 
 **So the two are bounded by entirely different things:**
 
 - what bounds it — windowed: the 60s window · temporal: the table, finite per key
-- what it buffers — windowed: up to 5 rows · temporal: nothing
+- what it buffers — windowed: up to 5 rows, both sides together · temporal: nothing
 - when it emits — windowed: when both watermarks pass · temporal: on arrival, trusting the table to be settled
 - what it needs — windowed: watermarks on both sides · temporal: a versioned table
 
@@ -206,7 +208,7 @@ The join predicate is one subtraction, and it produces 5 matches from 20 candida
 
 <img src="../diagrams/anim/ch09-kinds/frames/step-02.svg" alt="Step 2: the temporal join: look up the table AS OF the row&#39;s time" width="1040">
 
-A temporal join is a lookup, and it behaves completely differently: no buffer, and no wait on a second watermark. The price is in the note — it needs the table's **history**, because "as of 12:02:10" is not the same question as "now", and it needs that history to be **complete**. The values above are the as-of answers; looked up the moment each click arrives, click 3 reads 7 instead of 11 and click 4 reads 7 instead of 20, because impressions 6 and 7 have not arrived yet.
+A temporal join is a lookup, and it behaves completely differently: no buffer, and no wait on a second watermark. The price is in the note — it needs the table's **history**, because "as of 12:02:10" is not the same question as "now", and it needs that history to be **complete**. The values above are the as-of impression totals (sums of v); looked up the moment each click arrives, click 3 reads 7 instead of 11 and click 4 reads 7 instead of 20, because impressions 6 and 7 have not arrived yet.
 
 </details>
 <details>
@@ -297,7 +299,7 @@ Click 0 at 12:00:01 precedes every impression, so `any` stays false and the resu
 
 #### Why a correct windowed join still fails to deliver most of its matches here
 
-**Join state is bounded by the window, and only by it.** A buffered row may be dropped once both watermarks pass its event time plus 60s. Peak buffer here: **5 of 9 rows**, and the formula is arrival rate × join window per side. Doubling the window doubles the state, which is why "just widen it" is never free.
+**Join state is bounded by the window, and only by it.** A buffered row may be dropped once both watermarks pass its event time plus 60s. Peak buffer here: **5 of 9 rows**, both sides together (4 clicks + 1 impression), and the formula is arrival rate × join window per side, summed over both sides. Doubling the window doubles the state, which is why "just widen it" is never free.
 
 **A late row can contradict a result already emitted.** Click 0 reaches its emission point after event 5 and publishes **no match** — nothing within 60s had arrived. Then impression 7 arrives at event 7 and it *does* match, 49s apart.
 
@@ -336,7 +338,7 @@ The animation loops through all 4 steps. Expand any step to study it on its own.
 
 <img src="../diagrams/anim/ch09-correctness/frames/step-01.svg" alt="Step 1: join state is bounded by the window, and only by it" width="1040">
 
-The sizing formula is the whole of it: buffered rows ≈ arrival rate × join window, per side. 5 rows here on a 9-row stream. It matters because the two obvious responses to a join missing matches — widen the window, raise allowed lateness — both scale this number linearly.
+The sizing formula is the whole of it: buffered rows ≈ arrival rate × join window, per side, and the buffer is the sum of both sides. 5 rows here on a 9-row stream, both sides together; per side, the click buffer peaks at 4 and the impression buffer at 2. It matters because the two obvious responses to a join missing matches — widen the window, raise allowed lateness — both scale this number linearly.
 
 </details>
 <details>
@@ -493,6 +495,9 @@ This is **the double-booked room** solved on its own: a complete file, every hel
   One list this time: a meeting room's bookings, sorted by start -- (1, 3), (50, 150),
   (130, 245), (220, 320), (540, 540).  Two of those clash: 130..245 overlaps 50..150 over
   minutes 130..150, and 220..320 overlaps 130..245 over 220..245.  Up to 10**6 bookings.
+  These are the interview's own integers; in the book's dataset (tools/stream_seed.js) they
+  are SECONDS past 12:00, and this variation reads the same integers as minutes because a
+  room is booked by the minute.  The numbers carry over; the unit is this surface's own.
 
   GIVEN A ROOM'S BOOKINGS, HOW MANY CLASH AT ONCE, WHERE, AND HOW MANY PAIRS CLASH?
 
@@ -550,7 +555,8 @@ import random
 # its LEFT = [(1, 3), (130, 245), (540, 540)] and RIGHT = [(50, 150), (220, 320)], sorted by
 # start.  Neither list overlapped itself; the union does, and the chapter's two cross-list
 # overlaps (130..150 and 220..245) are now this room's two double-bookings.  Spans are CLOSED:
-# a booking from 130 to 245 occupies 245.
+# a booking from 130 to 245 occupies 245.  The seed counts these integers in seconds; this
+# room reads the same integers in minutes -- the values carry over, the unit does not.
 BOOKINGS = [(1, 3), (50, 150), (130, 245), (220, 320), (540, 540)]
 LEFT = [(1, 3), (130, 245), (540, 540)]      # kept, to check the general sweep against
 RIGHT = [(50, 150), (220, 320)]
@@ -1024,8 +1030,11 @@ This is **the attributed click** solved on its own: a complete file, every helpe
     the answer -- how many clicks end up attributed.  A click credited to nobody is
                   UNATTRIBUTED, which is an answer and not a failure.
 
-  Impressions and clicks arrive on two streams.  The impressions were shown at 1, 3, 130,
-  245 and 540, and the one shown at 245 does not reach the matcher until 330.  The clicks
+  Impressions and clicks arrive on two streams.  (The numbers are borrowed from the interview's
+  span lists, NOT the chapter body's reading of the seed: the chapter body reads key "a" as
+  clicks and key "b" as impressions, while here key "a" times are impressions and key "b"
+  times are clicks.  This variation keeps the integers and gives them its own roles.)  The
+  impressions were shown at 1, 3, 130, 245 and 540, and the one shown at 245 does not reach the matcher until 330.  The clicks
   come at 50, 90, 220, 260 and 265 -- and the last two both want the same impression.
 
   GIVEN W AND A WAIT, HOW MANY CLICKS GET ATTRIBUTED?
@@ -1086,12 +1095,15 @@ Run it:  python3 programs/ch09_v3.py
 """
 import random
 
-# Impressions as (shown_at, arrived_at).  The shown_at times are the chapter's LEFT endpoints,
-# 1, 3, 130, 245 and 540 -- its key 'a' session boundaries.  One of them arrives late: the
-# impression shown at 245 reaches the matcher at 330, which is 85 seconds of lateness and is
-# deliberately MORE than W, so the two numbers cannot be confused for one.
+# Impressions as (shown_at, arrived_at).  The shown_at times are the interview's LEFT endpoints,
+# 1, 3, 130, 245 and 540 -- key "a" session boundaries in the seed.  The ROLES are this
+# variation's own and are the REVERSE of the chapter body, which reads key "a" as clicks and
+# key "b" as impressions: here key "a" times are impressions and key "b" times are clicks.
+# One of them arrives late: the impression shown at 245 reaches the matcher at 330, which is
+# 85 seconds of lateness and is deliberately MORE than W, so the two numbers cannot be
+# confused for one.
 IMPRESSIONS = [(1, 1), (3, 3), (130, 130), (245, 330), (540, 540)]
-# Clicks, punctual, at the chapter's key 'b' event times 50, 90, 220 and 260, plus a second
+# Clicks, punctual, at key "b" event times in the seed, 50, 90, 220 and 260, plus a second
 # click at 265 that wants the same impression as the one at 260 -- which is what makes the
 # one-to-one rule do some work.
 CLICKS = [50, 90, 220, 260, 265]
@@ -1559,7 +1571,10 @@ This is **the unavailable hours** solved on its own: a complete file, every help
 
   One person's calendar holds three meetings -- 1..3, 130..245 and 540..540 -- and you are
   asked for their free time in the window 0..600.  A year of minutes is 525,600 of them, so
-  whatever you do may not walk the range minute by minute.
+  whatever you do may not walk the range minute by minute.  The spans and the window are
+  the interview's own integers; in the book's dataset (tools/stream_seed.js) they are
+  SECONDS past 12:00, and this variation reads the same integers as minutes because a
+  calendar is kept by the minute.  The numbers carry over; the unit is this surface's own.
 
   GIVEN THE BUSY SPANS AND A WINDOW, WHAT ARE THE FREE SPANS?
 
@@ -1623,7 +1638,8 @@ import random
 
 # The chapter's LEFT list as one person's busy spans -- its key 'a' sessions at a gap of 120 --
 # and the chapter's own window of 0 to 600.  Spans are CLOSED: busy from 130 to 245 means minute
-# 245 is busy and 246 is not.
+# 245 is busy and 246 is not.  The seed counts these integers in seconds; this calendar reads
+# the same integers in minutes -- the values carry over, the unit does not.
 BUSY = [(1, 3), (130, 245), (540, 540)]
 START, END = 0, 600
 YEAR_MINUTES = 525_600
@@ -2157,9 +2173,10 @@ def the_double_booked_room(bookings):
             best, at = live, t
     return best, at, pairs
 
-def the_attributed_click(impressions, clicks, w, wait_for_late):
+def the_attributed_click(impressions, clicks, w, wait):
     """Variation 3, surface: advertising.  Match each click to the NEAREST impression
-    that preceded it by at most w, one-to-one.
+    shown at most w before it, one-to-one.  The same function, encoding and data as
+    programs/ch09_v3.py's attribute(), so the two give the same answers.
 
     Non-obvious point: the match is asymmetric and one-to-one, so an impression already
     matched must not match again -- and "nearest" means a click cannot be answered until
@@ -2168,21 +2185,17 @@ def the_attributed_click(impressions, clicks, w, wait_for_late):
     stops being an optimisation and becomes a correctness requirement.  w and the
     lateness bound are different numbers and are easy to conflate.
 
-    `impressions` is [(arrival_order_index, t), ...] -- its t values may arrive late.
-    `wait_for_late` false answers each click immediately; true waits for every
-    impression first.  Returns [(click_t, impression_t or None), ...].
+    `impressions` is [(shown_at, arrived_at), ...]: the second it was shown and the
+    second the matcher received it.  A click at t is answered at t + wait, so it may only
+    consider impressions that had ARRIVED by then.  Returns [(click_t, shown_at or None), ...].
     """
     out, used = [], set()
-    for ci, ct in enumerate(clicks):
-        if wait_for_late:
-            pool = [t for _, t in impressions]
-        else:                            # only what had arrived by this click's position
-            pool = [t for order, t in impressions if order <= ci]
+    for ct in clicks:
         best = None
-        for t in pool:
-            if ct - w <= t <= ct and t not in used:
-                if best is None or t > best:
-                    best = t
+        for shown, arrived in impressions:
+            if arrived <= ct + wait and ct - w <= shown <= ct and shown not in used:
+                if best is None or shown > best:
+                    best = shown
         if best is not None:
             used.add(best)
         out.append((ct, best))
@@ -2251,25 +2264,23 @@ def main():
     assert (best, at, pairs) == (2, 5, 2), (best, at, pairs)
     assert the_double_booked_room([(0, 1), (2, 3)]) == (1, 0, 0), "no overlap, no clash"
 
-    late = [(0, 100), (1, 180), (2, 150)]          # the 150 impression arrives LAST
-    now = the_attributed_click(late, [200], w=60, wait_for_late=False)
-    later = the_attributed_click(late, [200], w=60, wait_for_late=True)
-    print(f"  attributed click: answering at once gives {now} (lost), waiting gives {later}")
-    # MEASURED, and sharper than first expected: answering the click at once does not
-    # merely pick a worse impression, it finds NONE at all -- the only impression that
-    # had arrived (100) is already outside the w = 60 window, so the attribution is
-    # lost rather than approximated.  Waiting for the late arrivals recovers 180.
-    assert now == [(200, None)] and later == [(200, 180)], (now, later)
-    assert now != later, "the wait must change the answer"
-    # a click at 160 answered immediately picks 100; waiting finds the nearer 150
-    now2 = the_attributed_click(late, [160], w=60, wait_for_late=False)
-    later2 = the_attributed_click(late, [160], w=60, wait_for_late=True)
-    assert now2 == [(160, 100)] and later2 == [(160, 150)], (now2, later2)
-    assert now2 != later2, "the wait must change the answer, or it is not needed"
-    print(f"                    a click at 160: at once {now2[0][1]}, waiting {later2[0][1]}")
+    # the streams of programs/ch09_v3.py: the impression shown at 245 arrives at 330
+    imps = [(1, 1), (3, 3), (130, 130), (245, 330), (540, 540)]
+    clicks = [50, 90, 220, 260, 265]
+    credited = lambda res: sum(1 for _, i in res if i is not None)
+    at_once = the_attributed_click(imps, clicks, w=60, wait=0)
+    wait_w = the_attributed_click(imps, clicks, w=60, wait=60)
+    wait_late = the_attributed_click(imps, clicks, w=60, wait=85)
+    print(f"  attributed click: wait 0 -> {credited(at_once)}, wait 60 -> {credited(wait_w)}, "
+          f"wait 85 -> {credited(wait_late)} attributed")
+    # MEASURED, as in ch09_v3.py: waiting W = 60 is not enough, because the impression
+    # shown at 245 is 85 late; waiting the measured lateness recovers the click at 260.
+    assert (credited(at_once), credited(wait_w), credited(wait_late)) == (1, 1, 2)
+    assert at_once[3] == (260, None) and wait_late[3] == (260, 245), (at_once, wait_late)
+    assert wait_late[4] == (265, None), "one-to-one: the click at 265 may not take 245 again"
     # one-to-one: two clicks may not take the same impression
-    two = the_attributed_click([(0, 100)], [120, 130], w=60, wait_for_late=True)
-    assert two == [(120, 100), (130, None)], two
+    two = the_attributed_click([(100, 100)], [120, 120], w=60, wait=0)
+    assert two == [(120, 100), (120, None)], two
 
     free = the_unavailable_hours([(130, 245), (540, 540)], 0, 600)
     print(f"  unavailable hours: free {free}")
@@ -2342,8 +2353,7 @@ RIGHT = [(50, 150), (220, 320)]
   with a bound of 220 on how late RIGHT may be: droppable [(1, 3)], kept [(130, 245), (540, 540)]
 
   double-booked room: busiest 2 at t=5, 2 overlapping pairs
-  attributed click: answering at once gives [(200, None)] (lost), waiting gives [(200, 180)]
-                    a click at 160: at once 100, waiting 150
+  attributed click: wait 0 -> 1, wait 60 -> 1, wait 85 -> 2 attributed
   unavailable hours: free [(0, 129), (246, 539), (541, 600)]
 
   800 random span-list pairs: sweep == every pair, never more than m + n
@@ -2547,7 +2557,7 @@ The never-published group is the one that matters commercially, and the pipeline
 
 1. **2 of the 5 true matches are never published and nothing reports it.** Absence of an attribution is indistinguishable from a genuine non-match, so this gap is invisible from inside the system.
 2. **The store must retract a negative result.** "Click 0 matched nothing" is published and later false — a harder store requirement than revising a value.
-3. **Buffer is arrival rate × 60s per side**, 5 rows on this stream, and both tuning knobs scale it linearly. Nothing here bounds it at a real traffic rate.
+3. **Buffer is arrival rate × 60s per side, summed over both sides** — 5 rows on this stream (4 clicks + 1 impression), and both tuning knobs scale it linearly. Nothing here bounds it at a real traffic rate.
 4. **One click matches 2 impressions**, so the join's output can exceed either input and somebody must decide which impression gets the credit. First touch, last touch or split is a business decision this design cannot make — and it cannot ship without one.
 
 #### Visual walkthrough — four stages, the honest count, two knobs

@@ -2,7 +2,7 @@
 
 #### One dataset, two clocks — stack and heap at every step
 
-**What is being answered.** Why "count clicks per minute" is ambiguous — as one loop, run twice.
+**What is being answered.** Why "count clicks per minute" — the per-minute sum of v — is ambiguous, as one loop run twice.
 
 `countBy(events, clock)` takes the clock as a **parameter**. There is no branch per clock and no separate code path: the only difference between the two calls is the string `"et"` or `"pt"`. Watch `minute` on the highlighted line in steps 1 and 2 — the same expression evaluates to 0 and then to 240 for the same event.
 
@@ -17,7 +17,7 @@ The animation steps through the code, holding each line long enough to read the 
 
 <img src="../diagrams/anim/ch01-terminology-memory/frames/step-01.svg" alt="Step 1: the late event is bucketed by its EVENT time" width="980">
 
-On the pass for id 7, `clock` is `"et"`, so `minute` is `minOf(50)` = 0 — the 12:00 minute, where the click actually happened. Its 4 joins ids 0 and 1 for a total of 12.
+On the pass for id 7, `clock` is `"et"`, so `minute` is `minOf(50)` = 0 — the 12:00 minute, where the click actually happened. Its 4 clicks join the 5 + 3 of ids 0 and 1 for a total of 12.
 
 </details>
 <details>
@@ -25,7 +25,7 @@ On the pass for id 7, `clock` is `"et"`, so `minute` is `minOf(50)` = 0 — the 
 
 <img src="../diagrams/anim/ch01-terminology-memory/frames/step-02.svg" alt="Step 2: the SAME line, with clock = &quot;pt&quot;, sends it somewhere else" width="980">
 
-Identical code, one argument changed. Now `minute` is `minOf(280)` = 240 — the 12:04 minute, 4 minutes away from where the click happened. The 4 lands in a minute during which this user did nothing.
+Identical code, one argument changed. Now `minute` is `minOf(280)` = 240 — the 12:04 minute, 4 minutes away from where the click happened. Its 4 clicks land in a minute during which this user did nothing.
 
 </details>
 <details>
@@ -41,7 +41,7 @@ Read the two heap rows against each other: minute 0 holds 12 and 8; minute 240 h
 
 <img src="../diagrams/anim/ch01-terminology-memory/frames/step-04.svg" alt="Step 4: and neither counter is wrong" width="980">
 
-Every event was counted exactly once in both counters — 45 total in each. Nothing was dropped and no sum is wrong. The two Counters are answers to two different questions, and `diff` is the list of minutes where choosing the wrong one would mislead someone.
+Every event was added exactly once to both counters — 45 clicks in each. Nothing was dropped and no sum is wrong. The two Counters are answers to two different questions, and `diff` is the list of minutes where choosing the wrong one would mislead someone.
 
 </details>
 

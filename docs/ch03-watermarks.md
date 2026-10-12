@@ -1,5 +1,7 @@
 # Chapter 3: Watermarks
 
+> ▶ **Narrated decks:** [part 1](../decks/ch03-watermarks-part1.html) · [part 2](../decks/ch03-watermarks-part2.html) · [part 3](../decks/ch03-watermarks-part3.html) · [part 4](../decks/ch03-watermarks-part4.html) · [part 5](../decks/ch03-watermarks-part5.html) · [part 6](../decks/ch03-watermarks-part6.html) · [part 7](../decks/ch03-watermarks-part7.html) · [part 8](../decks/ch03-watermarks-part8.html) · [part 9](../decks/ch03-watermarks-part9.html) — this chapter explained step by step, with voice-over and questions to answer. GitHub shows HTML as source, so download the file and open it in Chrome.
+
 > A watermark is a monotonically increasing timestamp that declares how complete the event-time axis is; it is the mechanism that lets a pipeline trade latency against correctness when closing windows.
 
 _Also known as: SS Ch03 · Watermark · Event-time Progress · Heuristic Watermark · Perfect Watermark · Skew_
@@ -168,7 +170,7 @@ The common heuristic is one line: **watermark = max event time seen so far − s
 
 **Too slow means correct and slow.** The threshold is exactly **141s**: at 140s the window still publishes 15, at 141s it publishes 19. The cost is **296s** of added latency on this window — and only on this one: [12:02, 12:04), [12:04, 12:06) close at 12:09:02 under both bounds, and [12:08, 12:10) closes under neither.
 
-And note the threshold is **not** id 7's 230s of skew, which is the number most readers would reach for. It is `12:04:20 − 12:02 + 1` — the highest event time seen before the straggler, minus the **window's end**. The watermark only has to stay below the window boundary until the straggler lands; it never has to reach back to 12:00:50. Tuning skew to your worst observed delay holds every watermark 89s further back than this window needs.
+And note the threshold is **not** id 7's 230s of delay (its processing time minus its event time), which is the number most readers would reach for. It is `12:04:20 − 12:02 + 1` — the highest event time seen before the straggler, minus the **window's end**. The watermark only has to stay below the window boundary until the straggler lands; it never has to reach back to 12:00:50. Tuning skew to your worst observed delay holds every watermark 89s further back than this window needs.
 
 #### When to tune skew up, when to track per source, and what neither fixes
 
@@ -207,7 +209,7 @@ Read the last column down the table: 2, 1, 1, 0, then 0. The same 9 events, the 
 
 <img src="../diagrams/anim/ch03-skew/frames/step-03.svg" alt="Step 3: too SLOW: correct, and the answer arrives much later" width="1040">
 
-The number a reader expects here is 230s — the straggler's skew. The actual threshold is 141s, and the derivation is in the note: the watermark only needs to stay below the window's END, not below the late event's event time. Worth knowing, because tuning skew to your worst observed delay holds every watermark 89s further back than this window needs.
+The number a reader expects here is 230s — the straggler's delay, its processing time minus its event time. The actual threshold is 141s, and the derivation is in the note: the watermark only needs to stay below the window's END, not below the late event's event time. Worth knowing, because tuning skew to your worst observed delay holds every watermark 89s further back than this window needs.
 
 </details>
 <details>
@@ -229,9 +231,9 @@ Tracking per source means one idle source holds the whole stage back — source 
 
 **What is being answered.** Where "late" comes from — as one function, `evaluate(lag)`, run at four different skew bounds over the same 9 events.
 
-The line to read twice is in `isLate`: `return c < i`. It compares the **window's closing index** with the **event's arrival index**, and never looks at the event's own skew. That is the mechanical form of "late is a verdict, not a property".
+The line to read twice is in `isLate`: `return c < i`. It compares the **window's closing index** with the **event's arrival index**, and never looks at the event's own delay (processing time minus event time). That is the mechanical form of "late is a verdict, not a property".
 
-`LAG_MIN` = 141 is derived rather than chosen: the highest event time seen before the straggler (260) minus the window's end (120), plus one. It is far below the straggler's 230s of skew, because the watermark only has to stay under the window boundary.
+`LAG_MIN` = 141 is derived rather than chosen: the highest event time seen before the straggler (260) minus the window's end (120), plus one. It is far below the straggler's 230s of delay, because the watermark only has to stay under the window boundary.
 
 The animation steps through the code, holding each line long enough to read the STACK (call frames and their locals) and the HEAP (allocated arrays and objects) as they are AT THAT MOMENT. Expand any step to study it on its own.
 
@@ -266,7 +268,7 @@ The animation steps through the code, holding each line long enough to read the 
 
 <img src="../diagrams/anim/ch03-skew-memory/frames/step-04.svg" alt="Step 4: and at the threshold, nothing is late at all" width="980">
 
-`right` publishes 19 with an empty `lateIds`. Read the three heap rows together: late counts 2, 1, 0 — from identical data. And note 141 is well below id 7's 230s of skew: the watermark only had to stay under 120, never reach back to 50.
+`right` publishes 19 with an empty `lateIds`. Read the three heap rows together: late counts 2, 1, 0 — from identical data. And note 141 is well below id 7's 230s of delay: the watermark only had to stay under 120, never reach back to 50.
 
 </details>
 
@@ -1044,7 +1046,7 @@ def show_examples():
     over quickly (the nine-day series, the ties, the single day, the warming run), because it
     pays a push per day whether or not that day does any work, and the forward scan stops at
     the first warmer day.  It wins on the cooling and flat runs and the late-record series,
-    where no warmer day comes soon and the forward scan runs to the end for every day.  Its win is asymptotic, and the 20,000-day rows are where it shows.
+    where no warmer day comes soon and the forward scan runs to the end for every day.  Its win needs a longer series: the crossover is measured at the end of the program, and the 20,000-day rows are where the gap is wide.
 
     On the small series each row additionally pins the bounded lookahead from BOTH sides: a
     lookahead equal to the true wait gives the true answer, and one day shorter gives 0 --
@@ -1157,8 +1159,8 @@ def main():
     # CORRECTED.  The expectation was that the stack is cheaper here.  It is NOT: 16 steps
     # against 14 comparisons on nine days, because the forward scan stops at the first
     # warmer day and these temperatures turn over quickly, while the stack pays a push for
-    # every day whether or not it does any work.  The stack's win is asymptotic, and the
-    # crossover is measured at the end of this program rather than assumed here.
+    # every day whether or not it does any work.  The stack only wins on longer series, and
+    # the crossover is measured at the end of this program rather than assumed here.
     assert pushes + pops > naive_ops, (pushes + pops, naive_ops)
     print(f"  the {len(unresolved)} days never resolved are {unresolved} "
           f"(temps {[TEMPS[i] for i in unresolved]}), which is")
@@ -1839,6 +1841,14 @@ forever, with no recovery.  Bounding the maximum to the last W events fixes that
 -- and a bounded sliding maximum is exactly the problem above.  Both watermarks
 are implemented here and the corrupt event is fed to both.
 
+"Late" in this program is a per-event test with no windows: an event is late
+when its event time is below the watermark seen just before it arrives.  The
+chapter's Flow sections call an event late when its WINDOW has already closed.
+That is the narrower test: a closed window means the watermark is past the
+window's end, which is past the event's time, so every window-late event is
+late here too, but not the other way round.  On the clean stream both tests
+pick out the same single event, et = 50 (id 7).
+
 Run it:  python3 programs/ch03.py
 """
 
@@ -2343,7 +2353,7 @@ _Role: window assigner — assigns events to event-time windows_
 _Role: trigger/emitter — fires on the watermark and handles late data_
 
 - the on-time trigger fires when the watermark passes the window end — at 12:04:06, publishing 15
-- id 7 {event_time: "12:00:50"} lands in an already-closed window, so it is late; it is accepted if allowed lateness is at least 81 s
+- id 7 {event_time: "12:00:50"} lands in an already-closed window, so it is late; it is accepted if allowed lateness is at least 81 s: the window keeps its state while the watermark is below 12:02 + allowed lateness, and when id 7 arrives the watermark is 12:04:20 − 60 s = 12:03:20, 80 s past 12:02
 - a late pane re-emits the updated window result, 19, to the dashboard
 
 
@@ -2493,6 +2503,8 @@ A mobile analytics pipeline groups events by event time into 2-minute windows, b
 //   watermark = 12:04:05 - 1:00 = 12:03:05
 //   window [12:00,12:02) -> closed (12:03:05 >= 12:02:00), publishes 15
 //   id 7 @ 12:00:50 arrives at 12:04:40 -> its window is closed -> late
+//   when id 7 arrives, max_seen = 12:04:20 (id 5) -> watermark 12:03:20, 80 s past 12:02
+//   window state survives while watermark < 12:02 + allowed lateness -> needs more than 80 s
 //   allowed lateness >= 81 s -> still accepted -> re-emit 19
 ```
 

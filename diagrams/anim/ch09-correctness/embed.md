@@ -2,7 +2,7 @@
 
 #### Why a correct windowed join still fails to deliver most of its matches here
 
-**Join state is bounded by the window, and only by it.** A buffered row may be dropped once both watermarks pass its event time plus 60s. Peak buffer here: **5 of 9 rows**, and the formula is arrival rate × join window per side. Doubling the window doubles the state, which is why "just widen it" is never free.
+**Join state is bounded by the window, and only by it.** A buffered row may be dropped once both watermarks pass its event time plus 60s. Peak buffer here: **5 of 9 rows**, both sides together (4 clicks + 1 impression), and the formula is arrival rate × join window per side, summed over both sides. Doubling the window doubles the state, which is why "just widen it" is never free.
 
 **A late row can contradict a result already emitted.** Click 0 reaches its emission point after event 5 and publishes **no match** — nothing within 60s had arrived. Then impression 7 arrives at event 7 and it *does* match, 49s apart.
 
@@ -41,7 +41,7 @@ The animation loops through all 4 steps. Expand any step to study it on its own.
 
 <img src="../diagrams/anim/ch09-correctness/frames/step-01.svg" alt="Step 1: join state is bounded by the window, and only by it" width="1040">
 
-The sizing formula is the whole of it: buffered rows ≈ arrival rate × join window, per side. 5 rows here on a 9-row stream. It matters because the two obvious responses to a join missing matches — widen the window, raise allowed lateness — both scale this number linearly.
+The sizing formula is the whole of it: buffered rows ≈ arrival rate × join window, per side, and the buffer is the sum of both sides. 5 rows here on a 9-row stream, both sides together; per side, the click buffer peaks at 4 and the impression buffer at 2. It matters because the two obvious responses to a join missing matches — widen the window, raise allowed lateness — both scale this number linearly.
 
 </details>
 <details>

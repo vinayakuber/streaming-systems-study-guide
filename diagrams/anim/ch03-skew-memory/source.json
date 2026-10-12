@@ -43,7 +43,7 @@
     "}",
     "",
     "// function: isLate(e, i, lag) — was this event's window already closed when it",
-    "//   arrived? Note it asks about the WINDOW, never about the event's own skew.",
+    "//   arrived? Note it asks about the WINDOW, never about the event's own delay.",
     "//   isLate(EVENTS[7], 7, 60) = true      isLate(EVENTS[7], 7, 141) = false",
     "fun isLate(e, i, lag) {",
     "    val c = closesAt(winOf(e.et), lag)",

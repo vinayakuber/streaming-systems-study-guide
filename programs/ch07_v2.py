@@ -411,7 +411,7 @@ def main():
     print(f"\n  at {VISITORS_PER_DAY:,} distinct visitors a day:")
     print(f"    exact  : {bytes_exact / 1e9:.2f} GB of visitor ids, per counter, per day")
     print(f"    sketch : {bytes_sketch:,} bytes, whatever the cardinality")
-    print(f"    {bytes_exact // bytes_sketch:,}x, and the sketch's cost does not depend on the answer --")
+    print(f"    the sketch is {bytes_exact // bytes_sketch:,} times smaller, and its cost does not depend on the answer --")
     print(f"    which is the property the chapter's one-number accumulator had and the exact")
     print(f"    distinct count never did.")
     assert bytes_exact // bytes_sketch == 234_375

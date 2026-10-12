@@ -4,11 +4,13 @@
 
 **A query over a stream never finishes.** The same text over a finite table reads 9 rows, emits 7 result rows and exits; over an unbounded stream it emits those 7 rows and keeps running. A batch query **returns**; a continuous query **maintains** — and everything else follows from that.
 
+**The table throughout is `clicks`:** the 9 seed rows, each a click whose `key` column names its source, "a" or "b". Only the join, which needs two streams, splits it by source.
+
 **The relational operations map straight across.** `SELECT` is a transform, `WHERE v > 5` is a filter (4 of 9 rows: ids 2, 4, 6, 8), `GROUP BY key` is a keyed aggregation (2 groups). Nothing new so far.
 
 The one row with no batch equivalent is `GROUP BY key, TUMBLE(et, INTERVAL '120' SECOND)`, which needs a **time column** — and batch SQL has no notion of event time. Adding the window takes the group count from 2 to 7. **Streaming SQL is relational SQL plus a column whose values are a clock.**
 
-**And which clock is a one-token choice with different answers.** `TUMBLE(et, …)` and `TUMBLE(pt, …)` differ by three characters, and over this dataset they disagree on **3 of the 4 windows** — window [12:00, 12:02) reads 19 by event time and 15 by processing time. Both are valid SQL producing valid results, and no engine can flag the wrong one.
+**And which clock is a one-token choice with different answers.** `TUMBLE(et, …)` and `TUMBLE(pt, …)` differ by one letter, `e` against `p`, and over this dataset they disagree on **3 of the 4 windows** — window [12:00, 12:02) reads 19 by event time and 15 by processing time. Both are valid SQL producing valid results, and no engine can flag the wrong one.
 
 **So some results append and others update.** `SELECT * FROM clicks WHERE v > 5` is **append-only**: 4 rows, each a fact that can never be revised, because a row either matched or it did not. The windowed total `SELECT SUM(v) FROM clicks GROUP BY TUMBLE(et, INTERVAL '120' SECOND)` is **updating**: 1 of its 4 window rows gets revised — window [12:00, 12:02) emits 15 and later becomes 19.
 
@@ -53,7 +55,7 @@ Three of these four rows are plain SQL doing plain SQL things. The fourth is the
 
 <img src="../diagrams/anim/ch08-sql/frames/step-03.svg" alt="Step 3: and the time attribute is a CHOICE with different answers" width="1040">
 
-This is ch01's two-clock problem arriving as a one-token edit. `TUMBLE(et, ...)` and `TUMBLE(pt, ...)` differ by three characters and disagree on 3 of 4 windows — window [12:00, 12:02) reads 19 against 15. Both are valid SQL and the engine cannot flag either.
+This is ch01's two-clock problem arriving as a one-token edit. `TUMBLE(et, ...)` and `TUMBLE(pt, ...)` differ by one letter, `e` against `p`, and disagree on 3 of 4 windows — window [12:00, 12:02) reads 19 against 15. Both are valid SQL and the engine cannot flag either.
 
 </details>
 <details>

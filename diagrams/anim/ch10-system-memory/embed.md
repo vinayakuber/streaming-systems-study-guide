@@ -6,7 +6,7 @@
 
 `replayThrough` is the architecture's only recovery mechanism, and it works: 45 from 9 retained events through the fixed pipeline.
 
-`verify` then names what that result depends on. Step 2: 6 retained events give 30 — a confident wrong answer with no error. Step 3: a pipeline flagged non-deterministic gives 45, the **right** total with `trustworthy` false — the same additions as the healthy replay, since the program models determinism only as a flag, so only `verify`'s check can tell them apart. The totals alone cannot tell you which replay to believe.
+`verify` then names what that result depends on. Step 2: the newest 6 retained events (offsets 3–8) give 30 — a confident wrong answer with no error. Step 3: a pipeline flagged non-deterministic gives 45, the **right** total with `trustworthy` false — the same additions as the healthy replay, since the program models determinism only as a flag, so only `verify`'s check can tell them apart. The totals alone cannot tell you which replay to believe.
 
 The animation steps through the code, holding each line long enough to read the STACK (call frames and their locals) and the HEAP (allocated arrays and objects) as they are AT THAT MOMENT. Expand any step to study it on its own.
 
@@ -25,7 +25,7 @@ All 9 retained events through the fixed pipeline: `total` = 45. This is the arch
 
 <img src="../diagrams/anim/ch10-system-memory/frames/step-02.svg" alt="Step 2: short retention produces a smaller total and no error" width="980">
 
-With 6 of 9 events retained the replay returns 30 — a complete, confident, wrong answer. Only this explicit check distinguishes it from 45; the replay itself raises nothing. "We can always reprocess" is true exactly as far back as retention.
+With only the newest 6 of 9 events retained (offsets 3–8) the replay returns 30 — a complete, confident, wrong answer. Only this explicit check distinguishes it from 45; the replay itself raises nothing. "We can always reprocess" is true exactly as far back as retention.
 
 </details>
 <details>

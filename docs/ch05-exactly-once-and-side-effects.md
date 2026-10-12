@@ -1,5 +1,7 @@
 # Chapter 5: Exactly-Once and Side Effects
 
+> ▶ **Narrated decks:** [part 1](../decks/ch05-exactly-once-and-side-effects-part1.html) · [part 2](../decks/ch05-exactly-once-and-side-effects-part2.html) · [part 3](../decks/ch05-exactly-once-and-side-effects-part3.html) · [part 4](../decks/ch05-exactly-once-and-side-effects-part4.html) · [part 5](../decks/ch05-exactly-once-and-side-effects-part5.html) · [part 6](../decks/ch05-exactly-once-and-side-effects-part6.html) · [part 7](../decks/ch05-exactly-once-and-side-effects-part7.html) · [part 8](../decks/ch05-exactly-once-and-side-effects-part8.html) · [part 9](../decks/ch05-exactly-once-and-side-effects-part9.html) — this chapter explained step by step, with voice-over and questions to answer. GitHub shows HTML as source, so download the file and open it in Chrome.
+
 > Exactly-once means every record affects the output exactly once, and it decomposes into two problems — replaying sources and shuffles without double-counting (solved with deduplication and idempotency) and external side effects (the genuinely hard part).
 
 _Also known as: SS Ch05 · Exactly-Once · Idempotency · Deduplication · Side Effects · End-to-End Exactly-Once_
@@ -91,7 +93,7 @@ This split is the chapter's structure. Making per-key state exactly-once is near
 
 **What is being answered.** Why exactly-once is two guarantees — as three delivery lists built by one function and summed by another.
 
-`deliver(mode)` produces the list of record ids a stage actually receives: 9 ids for exactly-once, 5 for at-most-once (the replay never happens), and 13 for at-least-once (the replay is not deduplicated).
+`deliver(mode)` produces the list of record ids a stage actually receives: 9 ids for exactly-once, 5 for at-most-once (the first sends of ids 5–8 were lost in the crash and are never re-sent), and 13 for at-least-once (those first sends landed, and the replay is not deduplicated).
 
 `aggregate(ids)` then sums them, and step 3 is the point: it is **identical and correct** for all three lists and produces 23, 45 and 67. The duplicates are visible in the list and invisible in the number.
 
@@ -104,7 +106,7 @@ The animation steps through the code, holding each line long enough to read the 
 
 <img src="../diagrams/anim/ch05-meaning-memory/frames/step-01.svg" alt="Step 1: at-most-once DROPS everything after the checkpoint" width="980">
 
-`indexOf(EVENTS[5])` is 5, which is > CHK = 4, so the record is skipped. All 4 records after the checkpoint are dropped and the list holds 5 ids. That is a COMPLETENESS failure: the sum will be 23, and nothing downstream can recover it.
+`indexOf(EVENTS[5])` is 5, which is > CHK = 4, so the record is skipped. Their first sends were lost in the crash and at-most-once never re-sends, so all 4 records after the checkpoint are missing and the list holds 5 ids. That is a COMPLETENESS failure: the sum will be 23, and nothing downstream can recover it.
 
 </details>
 <details>
@@ -158,7 +160,7 @@ This connects straight back to ch02. An **accumulating** pane carries the window
 
 **Dedup at the shuffle** is a set of ids already accepted plus one membership test. Replay ids 5, 6, 7, 8 into it and all 4 are recognised and dropped: total 45, correct. Two things make it non-free — the ids must be **stable** across the retry (an id generated at send time gets a new value and defeats it), and the seen-set is unbounded state that needs a horizon, so dedup has a memory beyond which it stops working.
 
-**Now put all three guards in a table.** After a crash at event 4 with the state committed and the offset not, the 8 combinations of (replayable source × deduplicating shuffle × idempotent sink) produce exactly **three** totals: 23, 45 and 67.
+**Now put all three guards in a table.** The pipeline crashes after event 4. The checkpoint covers events 0–4; events 5–8 were sent once, past the committed offset, and the pipeline cannot know whether those first sends landed. Each row reports its **worst case** over that unknown: a source that cannot replay loses them if they did not land, and an unguarded replay counts them twice if they did. The 8 combinations of (replayable source × deduplicating shuffle × idempotent sink) produce exactly **three** totals: 23, 45 and 67.
 
 3 of the 8 rows reach 45, and reading them refines the usual claim. "End-to-end exactly-once = source + shuffle + sink, drop any one and it breaks" is **not quite right for an aggregation**: the replayable source is load-bearing, and then dedup **or** an idempotent sink is enough. The two accuracy guards are redundant.
 
@@ -508,7 +510,10 @@ This is **the file that is half uploaded** solved on its own: a complete file, e
                                              so a backup exists that nothing knows about
     a ZERO-chunk backup, rename -> an EMPTY file   zero bytes, and it EXISTS: the rename
                                              still runs, so a restore finds a real file
-    a ZERO-chunk backup, direct -> ABSENT    nothing was ever written, so there is no file
+    a ZERO-chunk backup, direct -> ABSENT, record SET   nothing was ever written, so there
+                                             is no file -- yet the record says the backup
+                                             succeeded.  The direct ordering breaks the
+                                             statement's second rule here, with no crash
   And on a generated 5,000-chunk file:
     rename, no crash          -> COMPLETE    19,995 bytes
     rename, crash at 2500     -> ABSENT      half the file staged, and a restore sees none
@@ -531,8 +536,7 @@ commit boundary for the rename (killed before the last chunk, killed with every 
 but the rename not yet run, and not killed at all) and the matching crash rows for direct and
 record_first, a crash point past the end of the
 stream that never fires, a zero-chunk backup, a one-chunk backup, and a 5,000-chunk file at
-scale; each row prints what a restart costs with and without resuming the staging file.  Every
-row is ASSERTED, so the table cannot drift from the code.
+scale; each row prints what a restart costs with and without resuming the staging file.
 
 Run it:  python3 programs/ch05_v2.py
 """
@@ -856,10 +860,16 @@ def main():
     one_store, one_rec = {}, {"ok": False}
     attempt(["z"], "rename", 0, one_store, one_rec)
     assert visible(one_store) is None and one_store.get(TEMP) == "", one_store
+    direct_store, direct_rec = {}, {"ok": False}
+    attempt([], "direct", None, direct_store, direct_rec)
+    assert visible(direct_store) is None and direct_rec["ok"] is True, (direct_store, direct_rec)
     print(f"\n  boundaries: an empty backup commits as a zero-byte file -- {visible(empty_store)!r} is not")
     print(f"  None, which is what lets 'the file exists' be the position.  A single-chunk upload")
     print(f"  killed before its only chunk leaves an empty STAGING file and nothing under the")
-    print(f"  real name, which is the state a restore must read as 'no backup'.")
+    print(f"  real name, which is the state a restore must read as 'no backup'.  And the")
+    print(f"  direct write of an empty backup sets the record with no file under the real")
+    print(f"  name: rec={direct_rec['ok']}, visible={visible(direct_store)} -- a record claiming a")
+    print(f"  backup that is not there, with no crash at all.")
 
     # ---- many files, every crash point
     rng = random.Random(20260303)
@@ -966,7 +976,10 @@ the finished file is 45 bytes: 'aaaaabbbcccccccddeeeeeefggggggggghhhhiiiiiiii'
   boundaries: an empty backup commits as a zero-byte file -- '' is not
   None, which is what lets 'the file exists' be the position.  A single-chunk upload
   killed before its only chunk leaves an empty STAGING file and nothing under the
-  real name, which is the state a restore must read as 'no backup'.
+  real name, which is the state a restore must read as 'no backup'.  And the
+  direct write of an empty backup sets the record with no file under the real
+  name: rec=True, visible=None -- a record claiming a
+  backup that is not there, with no crash at all.
 
   300 random files x every crash point: the rename leaves the real name absent or
   complete, and complete exactly when the job was not killed.  record_first always
@@ -1068,7 +1081,6 @@ never fires, the rebuild interval on both sides of the staleness bound (every ev
 and an interval longer than the whole stream), the zero-valued event that makes the two stores
 AGREE while still being split, a one-event stream, an empty stream that has nothing to split,
 and a 3,000-event stream at scale; each row prints what both designs cost for that same input.
-Every row is ASSERTED, so the table cannot drift from the code.
 
 Run it:  python3 programs/ch05_v3.py
 """
@@ -1584,8 +1596,7 @@ fires, both sides of the dedupe boundary (remember-then-send against send-then-r
 sides of the far-end idempotency key including the case where the key does NOT rescue the
 design, an empty queue and a one-item queue, a run crashed at every item at once, and a
 20,000-item queue at scale; each row prices its own outcome for both messages, so the row
-shows which message it is acceptable for.  Every row is ASSERTED, so the table cannot drift
-from the code.
+shows which message it is acceptable for.
 
 Run it:  python3 programs/ch05_v4.py
 """
@@ -2430,7 +2441,7 @@ _Role: dedup shuffle — drops duplicate record deliveries_
 _Role: idempotent sink — applies effects exactly once_
 
 - the sink writes with an idempotency key = order-4
-- a SET/upsert replaces the value rather than incrementing
+- a charge cannot be SET like a window total, so the key is what makes repeating it safe
 - a retry with the same key is a no-op at the sink
 
 ### external system
@@ -2587,7 +2598,7 @@ A payment pipeline charges cards from a stream; after a crash, some charges were
 
 **System-design components:**
 - Idempotency key — stable per-order id
-- Idempotent sink — SET/upsert, not increment
+- Idempotent sink — the charge carries the key, so a repeat is a no-op (a charge cannot be SET like a total)
 - Replayable source — Kafka offset
 - Dedup — drop duplicate deliveries
 

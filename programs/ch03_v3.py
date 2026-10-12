@@ -123,7 +123,7 @@ def show_examples():
     over quickly (the nine-day series, the ties, the single day, the warming run), because it
     pays a push per day whether or not that day does any work, and the forward scan stops at
     the first warmer day.  It wins on the cooling and flat runs and the late-record series,
-    where no warmer day comes soon and the forward scan runs to the end for every day.  Its win is asymptotic, and the 20,000-day rows are where it shows.
+    where no warmer day comes soon and the forward scan runs to the end for every day.  Its win needs a longer series: the crossover is measured at the end of the program, and the 20,000-day rows are where the gap is wide.
 
     On the small series each row additionally pins the bounded lookahead from BOTH sides: a
     lookahead equal to the true wait gives the true answer, and one day shorter gives 0 --
@@ -236,8 +236,8 @@ def main():
     # CORRECTED.  The expectation was that the stack is cheaper here.  It is NOT: 16 steps
     # against 14 comparisons on nine days, because the forward scan stops at the first
     # warmer day and these temperatures turn over quickly, while the stack pays a push for
-    # every day whether or not it does any work.  The stack's win is asymptotic, and the
-    # crossover is measured at the end of this program rather than assumed here.
+    # every day whether or not it does any work.  The stack only wins on longer series, and
+    # the crossover is measured at the end of this program rather than assumed here.
     assert pushes + pops > naive_ops, (pushes + pops, naive_ops)
     print(f"  the {len(unresolved)} days never resolved are {unresolved} "
           f"(temps {[TEMPS[i] for i in unresolved]}), which is")

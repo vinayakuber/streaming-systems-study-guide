@@ -1,5 +1,7 @@
 # Chapter 2: The What, Where, When, and How of Data Processing
 
+> ▶ **Narrated decks:** [part 1](../decks/ch02-the-what-where-when-and-how-of-data-processing-part1.html) · [part 2](../decks/ch02-the-what-where-when-and-how-of-data-processing-part2.html) · [part 3](../decks/ch02-the-what-where-when-and-how-of-data-processing-part3.html) · [part 4](../decks/ch02-the-what-where-when-and-how-of-data-processing-part4.html) · [part 5](../decks/ch02-the-what-where-when-and-how-of-data-processing-part5.html) — this chapter explained step by step, with voice-over and questions to answer. GitHub shows HTML as source, so download the file and open it in Chrome.
+
 > The four questions that completely describe any pipeline: what results are computed (transformations), where in event time they are computed (windowing), when in processing time they are materialized (triggers + watermarks), and how later refinements relate to earlier results (accumulation).
 
 _Also known as: SS Ch02 · Beam Model · Transformations · Windowing · Triggers · Watermarks · Accumulation_
@@ -28,10 +30,10 @@ _Also known as: SS Ch02 · Beam Model · Transformations · Windowing · Trigger
 
 - **global window** — one result: **45**.
 - **fixed 120s windows** — 4 results: 19, 11, 7, 8, totalling 45.
-- **sliding, 120s wide every 60s** — 7 results, totalling **78**.
+- **sliding, 120s wide every 60s, the first starting at 12:00** — 7 results, one per non-empty window (starting 12:00, 12:01, 12:02, 12:03, 12:04, 12:08, 12:09), totalling **78**.
 - **session windows, 120s gap** — key `a` gets 3 sessions, key `b` gets 2.
 
-Read the sliding row twice. Its results sum to 78 over a dataset containing 45, because each event falls into up to 2 overlapping windows. Nothing was duplicated — **overlap is a property of the windowing**, and partitioning windowings (fixed, global) preserve the total while overlapping ones do not.
+Read the sliding row twice. Its results sum to 78 over a dataset containing 45, because each event falls into up to 2 overlapping windows. The count depends on one stated rule: **no sliding window starts before 12:00**, where this book's time begins, so events of the first 60s (ids 0, 1, 7) sit in just one window. A windowing that also opened [11:59, 12:01) would add a result of 12 — 8 results totalling 90. Nothing was duplicated — **overlap is a property of the windowing**, and partitioning windowings (fixed, global) preserve the total while overlapping ones do not.
 
 **And the two axes are genuinely independent.** The grid in the walkthrough below picks 3 of those transforms and 3 of those windowings — 9 legal pipelines — and picking a row constrains no column. So "we sum purchases" leaves the answer undetermined, and so does "we use session windows".
 
@@ -167,9 +169,9 @@ A window is useless until something decides to emit it. That decision is a **tri
 
 15, not 19: id 7 has not arrived. **The claim of completeness and the error are the same event** — the watermark was the pipeline's best estimate and it was wrong.
 
-**So a real pipeline wants three triggers on one window,** not a choice between them: **early** (speculative, before the watermark — 8, 15, 15, 15 at 12:01:00, 12:02:00, 12:03:00, 12:04:00), **on-time** (at the watermark — 15), and **late** (once per straggler — 19 at 12:04:40). They serve three different consumers and all three fire.
+**So a real pipeline wants three triggers on one window,** not a choice between them: **early** (speculative, before the watermark — 8, 15, 15, 15 at 12:01:00, 12:02:00, 12:03:00, 12:04:00), **on-time** (at the watermark — 15), and **late** (once per straggler — 19 at 12:04:40). They serve three different consumers and all three fire. The early trigger is the same 60s clock as above with one added rule: **it stops once the on-time pane has fired**. That is why its list ends at 12:04:00, while the bare clock runs on and reaches 19 at 12:05:00.
 
-**Allowed lateness** bounds the waiting: it is how long window state is kept after the watermark passes, which is garbage collection for that state. And it has an exact threshold here. When id 7 arrives, the watermark stands at 12:03:20 (200s); state survives while the watermark is below 12:02 + allowed, so **allowed lateness must be at least 81s** for the correction to land. At 80s the state is already gone and 15 stands forever.
+**Allowed lateness** bounds the waiting: it is how long window state is kept after the watermark passes, which is garbage collection for that state. And it has an exact threshold here. When id 7 arrives, the watermark stands at 12:03:20 (200s) — the check reads it after id 7 is fed, and it is the same before, because an event as old as id 7 cannot raise the highest event time seen. State survives while the watermark is below 12:02 + allowed, so **allowed lateness must be at least 81s** for the correction to land. At 80s the state is already gone and 15 stands forever.
 
 Note that 81s is *not* id 7's 230s of skew, which is the number a reader would guess. It comes from how far the watermark had advanced — it jumped from 12:01:10 to 12:03:05 in a single event. **The knob is calibrated against the watermark, not against the data.**
 
@@ -518,7 +520,7 @@ Note where the four questions live: **WHERE** is the collector's single rule (as
 1. **Allowed lateness is memory.** Holding state past the watermark costs (open windows × state per window). With 4 windows it is free; with a million open windows it is the pipeline's dominant cost.
 2. **Retractions require a sink that accepts negatives.** -15 has to be representable and meaningful downstream.
 3. **The 81s threshold was computed from watermarks visible in full.** A live pipeline sets that number before observing them, and is therefore guessing.
-4. **Only one window was specified.** The window starting 12:08 is never published by the on-time or late trigger, because the watermark never passes its end — only the speculative early pane (8 at 12:10:00) ever reports it, so its only published value is one the pipeline never claims is complete. A complete answer to all four questions still says nothing about a window whose "when" never arrives.
+4. **Only one window was specified.** The window starting 12:08 is never published by the on-time or late trigger, because the watermark never passes its end — only the early trigger reports it: 8 at 12:10:00, the first clock tick after its data arrives, then 8 again every 60s for as long as the pipeline runs, because no on-time pane ever fires to stop it. Every value it publishes is one the pipeline never claims is complete. A complete answer to all four questions still says nothing about a window whose "when" never arrives.
 
 #### Visual walkthrough — four stages, 11 published values, two thresholds
 
@@ -555,7 +557,7 @@ Two settings, and each has a threshold that is a number rather than a judgement.
 
 <img src="../diagrams/anim/ch02-system/frames/step-04.svg" alt="Step 4: and what this design does NOT settle" width="1040">
 
-The last gap is the sharpest: this chapter fully specified ONE window, and the final window of the same dataset is never published by the on-time or late trigger, because the watermark never passes its end — only the clock reports it (8 at 12:10:00), a value the pipeline never claims is complete. A complete answer to all four questions still says nothing about a window whose "when" never arrives.
+The sharpest gap: the final window is never published by the on-time or late trigger, because the watermark never passes its end. Only the early trigger reports it — 8 at 12:10:00, then again every 60s, since no on-time pane ever stops it — and every value is speculative. Four answered questions still say nothing about a window whose "when" never arrives.
 
 </details>
 
@@ -646,7 +648,7 @@ _From the 28 problems:_ 21-ad-click-aggregation · 20-metrics-monitoring
 
 ### Q2
 
-Two teams build 'the same' streaming aggregation, but one emits a running total and the other replaces each number — downstream sums them and double-counts.
+Two teams build 'the same' streaming aggregation. Team A's pipeline emits a running total each time a window is refined (15, then 19 — accumulating panes). Team B's sink was written for panes that each carry only new data, so it adds every number it receives, where it should replace the stored value with each new one. Joined, the sink stores 15 + 19 = 34 and double-counts the 15.
 
 **Interviewer's question:** What axis did the teams fail to specify, and how do you fix the double-count?
 

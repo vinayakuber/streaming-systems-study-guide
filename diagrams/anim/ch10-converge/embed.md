@@ -2,7 +2,7 @@
 
 #### Why batch already has all four mechanisms, and what reprocessing becomes
 
-**Batch is streaming over a bounded input,** and the reframing is the whole claim. Batch does not *lack* watermarks — it has the easiest possible one, which reaches infinity at end of input and closes every window at once. It has a trigger too: fire once, at EOF. Three of the four mechanisms are **trivial** in batch rather than absent.
+**Batch is streaming over a bounded input,** and the reframing is the whole claim. Batch does not *lack* watermarks — it has the easiest possible one, which reaches infinity at end of input and closes every window at once. It has a trigger too: fire once, at EOF. Of the four mechanisms — windows, watermarks, triggers and accumulation — three (the watermark, the trigger and the accumulation mode) are **trivial** in batch rather than absent, and the fourth, windowing, is identical in both modes.
 
 Seeing it that way is what makes one codebase possible: you are not adding streaming machinery to a batch job, you are removing a special case.
 
@@ -37,7 +37,7 @@ The animation loops through all 4 steps. Expand any step to study it on its own.
 
 <img src="../diagrams/anim/ch10-converge/frames/step-01.svg" alt="Step 1: batch is streaming over a bounded input" width="1040">
 
-The reframing is the content of the claim. Batch has a watermark — the simplest one, which jumps to infinity at end of input — and a trigger, which fires once. Three of the four mechanisms are trivial rather than absent, and recognising that is what lets one pipeline serve both modes instead of two pipelines serving one each.
+The reframing is the content of the claim. Batch has a watermark — the simplest one, which jumps to infinity at end of input — and a trigger, which fires once. Three of the four mechanisms — watermark, trigger and accumulation — are trivial rather than absent, and the fourth, windowing, is the same in both modes; recognising that is what lets one pipeline serve both modes instead of two pipelines serving one each.
 
 </details>
 <details>

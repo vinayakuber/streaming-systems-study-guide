@@ -1,5 +1,7 @@
 # Chapter 8: Streaming SQL
 
+> ▶ **Narrated decks:** [part 1](../decks/ch08-streaming-sql-part1.html) · [part 2](../decks/ch08-streaming-sql-part2.html) · [part 3](../decks/ch08-streaming-sql-part3.html) · [part 4](../decks/ch08-streaming-sql-part4.html) · [part 5](../decks/ch08-streaming-sql-part5.html) — this chapter explained step by step, with voice-over and questions to answer. GitHub shows HTML as source, so download the file and open it in Chrome.
+
 > SQL gives stream processing a declarative face — relational operations map onto streams, windows become explicit time constructs (TUMBLE/HOP/SESSION), and a watermark tells the query engine when results are ready.
 
 _Also known as: SS Ch08 · Streaming SQL · Continuous Query · TUMBLE · HOP · SESSION · Time Attribute_
@@ -24,11 +26,13 @@ _Also known as: SS Ch08 · Streaming SQL · Continuous Query · TUMBLE · HOP ·
 
 **A query over a stream never finishes.** The same text over a finite table reads 9 rows, emits 7 result rows and exits; over an unbounded stream it emits those 7 rows and keeps running. A batch query **returns**; a continuous query **maintains** — and everything else follows from that.
 
+**The table throughout is `clicks`:** the 9 seed rows, each a click whose `key` column names its source, "a" or "b". Only the join, which needs two streams, splits it by source.
+
 **The relational operations map straight across.** `SELECT` is a transform, `WHERE v > 5` is a filter (4 of 9 rows: ids 2, 4, 6, 8), `GROUP BY key` is a keyed aggregation (2 groups). Nothing new so far.
 
 The one row with no batch equivalent is `GROUP BY key, TUMBLE(et, INTERVAL '120' SECOND)`, which needs a **time column** — and batch SQL has no notion of event time. Adding the window takes the group count from 2 to 7. **Streaming SQL is relational SQL plus a column whose values are a clock.**
 
-**And which clock is a one-token choice with different answers.** `TUMBLE(et, …)` and `TUMBLE(pt, …)` differ by three characters, and over this dataset they disagree on **3 of the 4 windows** — window [12:00, 12:02) reads 19 by event time and 15 by processing time. Both are valid SQL producing valid results, and no engine can flag the wrong one.
+**And which clock is a one-token choice with different answers.** `TUMBLE(et, …)` and `TUMBLE(pt, …)` differ by one letter, `e` against `p`, and over this dataset they disagree on **3 of the 4 windows** — window [12:00, 12:02) reads 19 by event time and 15 by processing time. Both are valid SQL producing valid results, and no engine can flag the wrong one.
 
 **So some results append and others update.** `SELECT * FROM clicks WHERE v > 5` is **append-only**: 4 rows, each a fact that can never be revised, because a row either matched or it did not. The windowed total `SELECT SUM(v) FROM clicks GROUP BY TUMBLE(et, INTERVAL '120' SECOND)` is **updating**: 1 of its 4 window rows gets revised — window [12:00, 12:02) emits 15 and later becomes 19.
 
@@ -73,7 +77,7 @@ Three of these four rows are plain SQL doing plain SQL things. The fourth is the
 
 <img src="../diagrams/anim/ch08-sql/frames/step-03.svg" alt="Step 3: and the time attribute is a CHOICE with different answers" width="1040">
 
-This is ch01's two-clock problem arriving as a one-token edit. `TUMBLE(et, ...)` and `TUMBLE(pt, ...)` differ by three characters and disagree on 3 of 4 windows — window [12:00, 12:02) reads 19 against 15. Both are valid SQL and the engine cannot flag either.
+This is ch01's two-clock problem arriving as a one-token edit. `TUMBLE(et, ...)` and `TUMBLE(pt, ...)` differ by one letter, `e` against `p`, and disagree on 3 of 4 windows — window [12:00, 12:02) reads 19 against 15. Both are valid SQL and the engine cannot flag either.
 
 </details>
 <details>
@@ -95,7 +99,7 @@ The update mode is readable from the query, which makes it a design input rather
 
 **What is being answered.** Why a streaming query's clock and its update mode are both properties of the query text — as two query functions over the same rows.
 
-`runTumble(clock)` takes the clock as a **parameter**. There is no second code path for processing time: step 2 shows the same line producing bucket 0 or 240 for id 7 depending on one argument. In SQL that argument is three characters.
+`runTumble(clock)` takes the clock as a **parameter**. There is no second code path for processing time: step 2 shows the same line producing bucket 0 or 240 for id 7 depending on one argument. In SQL that argument is the time column, `et` or `pt` — one letter.
 
 `sinkNeeds(r)` reads only `r.mode`, which `runFilter` and `runTumble` set from their own shape — so "does my sink need UPSERT?" is answerable from the query before anything runs.
 
@@ -116,7 +120,7 @@ The animation steps through the code, holding each line long enough to read the 
 
 <img src="../diagrams/anim/ch08-sql-memory/frames/step-02.svg" alt="Step 2: the clock is a PARAMETER, not a second code path" width="980">
 
-For id 7, `b` is 240 with `clock` = "pt" and 0 with "et" — 2 windows apart. One argument, and the row lands somewhere else entirely. In SQL that argument is three characters of the query text.
+For id 7, `b` is 240 with `clock` = "pt" and 0 with "et" — 2 windows apart. One argument, and the row lands somewhere else entirely. In SQL that argument is the time column, `et` or `pt` — one letter of the query text.
 
 </details>
 <details>
@@ -156,15 +160,15 @@ Read the two heap rows against each other at bucket 0: 19 and 15. Both Results c
 
 #### Why the three window functions are three different cost profiles
 
-**TUMBLE(size)** is the fixed window: equal, contiguous, non-overlapping. 4 output rows here (19, 11, 7, 8), every input row counted once, and the sums total 45 — the whole dataset. That reconciliation against a batch run is what makes it the easy case.
+**TUMBLE(size)** is the fixed window: equal, contiguous, non-overlapping. 4 output rows here (19, 11, 7, 8), every input row counted once, and the engine's window sums total 45 — the whole dataset. That reconciliation against a batch run is what makes it the easy case; what the sink receives is another matter, below.
 
-**HOP(slide, size)** is the sliding window: fixed length, advancing by `slide`. With 120s windows every 60s, 6 of the 9 input rows land in 2 output rows, so there are **7 rows totalling 78** against a dataset of 45. Output volume is size / slide = 2×, and a HOP total must never be compared to an input total.
+**HOP(slide, size)** is the sliding window: fixed length, advancing by `slide`. With 120s windows every 60s, 6 of the 9 input rows land in 2 output rows, so there are **7 rows totalling 78** against a dataset of 45. In steady state each row lands in size / slide = 2 windows, so plan for 2× the output; this short run sits below that because the 3 rows before 12:01 (ids 0, 1, 7) have no earlier window to land in — 7 rows against TUMBLE's 4, a total of 78 against 45. Either way a HOP total must never be compared to an input total.
 
 **SESSION(gap)** is the data-driven window, and it is the one whose **row count cannot be predicted from the query**: key "a" gets 3 rows and key "b" gets 2 over the same time range, because that is how bursty each key's activity was. The engine also **merges** sessions as rows arrive, which means a window boundary can move after the fact — so a SESSION result is always an updating stream.
 
 **And the watermark is what makes any of them correct.** The time attribute picks the bucket; the watermark picks the moment the bucket speaks. Window [12:00, 12:02) emits after event 4 holding 15, against a final 19.
 
-Without a watermark a windowed query over an unbounded stream could never emit anything, because "this window is done" would never become true. And **1 of the 4 windows here is never emitted at all** — the SQL gives no hint of that, and the sink simply never sees the row.
+Without a watermark a windowed query over an unbounded stream could never emit anything, because "this window is done" would never become true. And **1 of the 4 windows here is never emitted at all** — the SQL gives no hint of that, and the sink simply never sees the row. So the rows the sink finally holds total 37, not 45: the missing 8 is window [12:08, 12:10).
 
 #### When to use each window function, and how to capacity-plan them
 
@@ -288,11 +292,11 @@ The loop runs out: no `watermarkAfter(i)` ever reaches 600, so `emitsAt` returns
 
 #### Why a join is where the time decisions cost the most
 
-**Joining two unbounded streams needs a time bound, or the query has no meaning.** A batch join completes when both tables are read — here 5 × 4 candidate pairs, then done. A stream-stream join never completes on its own: either side may still produce a match.
+**Joining two unbounded streams needs a time bound, or the query has no meaning.** A batch join completes when both tables are read — here 5 × 4 candidate pairs, then done. The two streams are the table's two sources: the key-"a" rows on one side and the key-"b" rows on the other (ch09 names them clicks and impressions). A stream-stream join never completes on its own: either side may still produce a match.
 
 So SQL **requires** a window on such a join, and the bound does two jobs at once — it ends the wait, and it bounds the buffered state. Without it the engine would have to keep every row of both sides forever in case a match arrives.
 
-**The watermark decides when a result may be emitted**, and it is ch03's minimum rule applied to two inputs. Side "a" reaches 12:08:00 and side "b" reaches 12:03:20, so the join claims the **minimum**, 12:03:20.
+**The watermark decides when a result may be emitted**, and it is ch03's minimum rule applied to two inputs: a pair is emitted once the join's watermark, the lower of the two sides', passes the pair's join bound. By the end of the run side "a" has reached 12:08:00 and side "b" 12:03:20, so the join's watermark ends at the **minimum**, 12:03:20.
 
 A join is where that rule hurts most, because it has two inputs by construction: one slow or idle side holds back every result, however fast the other is.
 
@@ -363,7 +367,7 @@ The honest summary of streaming SQL: it is a shorter notation, not a simpler mod
 
 `joinWatermark(i)` has the line that matters: `if (w == NONE) { return NONE }`. A side that has produced nothing blocks the claim entirely, and a join has two sides by construction — so either one going quiet stops every result.
 
-`matches(clock)` then shows the sharper cost. A mis-clocked aggregate puts a number in the wrong bucket; a mis-clocked join **pairs the wrong rows**, emitting an assertion that two things coincided. Step 4 compares the two pair sets from identical data.
+`matches(clock)` then shows the sharper cost. A mis-clocked aggregate puts a number in the wrong bucket; a mis-clocked join **pairs the wrong rows**, emitting an assertion that two things coincided. Step 4 compares the two pair sets from identical data: by event time 0–7, 1–7, 3–2, 4–5, 4–6; by processing time 3–2, 4–5, 4–6, 4–7.
 
 The animation steps through the code, holding each line long enough to read the STACK (call frames and their locals) and the HEAP (allocated arrays and objects) as they are AT THAT MOMENT. Expand any step to study it on its own.
 
@@ -398,7 +402,7 @@ Side "a" has reached 480 and side "b" 200, so `lowest` ends at 200. Every join e
 
 <img src="../diagrams/anim/ch08-joins-memory/frames/step-04.svg" alt="Step 4: so the same join on pt pairs a different set of rows" width="980">
 
-Compare the heap rows. Pairing on `et` and on `pt` gives different pair sets from identical data — id 7 arrived 230s after it happened, so on the arrival clock it sits next to rows it had nothing to do with. The output rows look equally plausible in both cases.
+Compare the heap rows. Pairing on `et` gives 5 pairs (0–7, 1–7, 3–2, 4–5, 4–6) and on `pt` 4 (3–2, 4–5, 4–6, 4–7), from identical data — id 7 arrived 230s after it happened, so on the arrival clock it sits next to rows it had nothing to do with. The output rows look equally plausible in both cases.
 
 </details>
 
@@ -426,13 +430,13 @@ Concepts this chapter mentions but does not fully unpack are linked below — ea
 
 > **The question:** Design a continuous SQL query that keeps a click total current. Premise: the query buckets clicks into a TUMBLE window and updates the result only when the watermark closes the window, so the count stays correct as late clicks arrive.
 
-**The pipeline:** streams (clicks, impressions) -> SQL engine (continuous query) -> watermark + window -> updating result -> sink
+**The pipeline:** click stream (sources a, b) -> SQL engine (continuous query) -> watermark + window -> updating result -> sink
 
 <a href="../diagrams/d2/decomp/ch08-0.png"><img src="../diagrams/d2/decomp/ch08-0.png" alt="system design pipeline" width="246"></a>
 
-### streams (clicks, impressions)
+### click stream (sources a, b)
 
-_Role: streams — feed the SQL engine with event-time data_
+_Role: click stream — feeds the SQL engine all nine click rows, from sources a and b, with event-time data_
 
 - id 4 {key: "a", et: "12:04:05", v: 6} arrives at 12:04:06
 - id 7 {key: "b", et: "12:00:50", v: 4} arrives at 12:04:40, after its window has emitted
@@ -450,9 +454,9 @@ _Role: SQL engine — runs the query forever_
 
 _Role: watermark + window — decides when results emit_
 
-- the watermark reaches 12:03:05 after id 4 (et 12:04:05 − 60 s) and closes [12:00, 12:02), which emits 15
+- the watermark passes 12:02:00 after id 4, jumping to 12:03:05 (et 12:04:05 − 60 s), and closes [12:00, 12:02), which emits 15
 - a HOP(60 s, 120 s) window would put id 4 into 2 rows, [12:03, 12:05) + [12:04, 12:06)
-- a join waits for both sides' watermarks: min(12:08:00, 12:03:20) = 12:03:20
+- a join waits for both sides' watermarks: at the end of the run, min(12:08:00, 12:03:20) = 12:03:20
 
 ### sink
 
@@ -610,7 +614,8 @@ A team wants analysts to write ad-click aggregations in SQL over a live stream, 
 SELECT window_start, SUM(v)
 FROM clicks
 GROUP BY TUMBLE(et, INTERVAL '120' SECOND)
--- [12:00, 12:02) emits 15 once the watermark reaches 12:03:05,
+-- [12:00, 12:02) emits 15 once the watermark passes 12:02:00
+--   (after id 4 it jumps from below 12:02:00 to 12:03:05),
 -- then 19 when late id 7 arrives at 12:04:40
 ```
 
@@ -634,11 +639,14 @@ A SQL query joins clicks with impressions, but it emits matches before a late im
 - Hold — buffer until complete
 
 ```java
+-- c = the seed's key-"a" rows, i = its key-"b" rows (ch09's clicks and impressions)
 SELECT ...
 FROM clicks c JOIN impressions i
   ON i.et BETWEEN c.et - INTERVAL '60' SECOND
               AND c.et + INTERVAL '60' SECOND
--- emits when min(12:08:00, 12:03:20) = 12:03:20 passes the bound
+-- a pair emits once the join watermark, the minimum of the two sides',
+--   passes that click's c.et + 60 s; at the end of the run it is
+--   min(12:08:00, 12:03:20) = 12:03:20
 ```
 
 _This is exactly the windowed-join material in this chapter._

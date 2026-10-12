@@ -44,6 +44,8 @@ const sweep = (k) => {
 const KS = [1, 3, 5, EVENTS.length];
 const SWEEP = KS.map(sweep);
 const CHOSEN = sweep(3);
+const SHORT = SWEEP.filter(sw => sw.at[sw.at.length - 1] < EVENTS.length - 1);
+const SWEEP_WORDS = SWEEP.map((sw, i) => `${i === SWEEP.length - 1 ? 'Once' : `Every ${sw.k}`}: ${sw.incr} entry-uploads, replay ${sw.worst}`);
 const SAVING = Math.round(100 * (CHOSEN.full - CHOSEN.incr) / CHOSEN.full);
 // BARRIER ALIGNMENT: the barrier is injected into each source after its 2nd event.
 // A stage must wait for the barrier from EVERY input, buffering anything that
@@ -80,6 +82,8 @@ if (replayFrom(CHK) >= EVENTS.length) fail('checkpointing does not reduce the re
 if (AFTER_CHK <= 0) fail('nothing follows the checkpoint');
 if (STALE_TOTAL !== TOTAL + PREFIX) fail(`a stale-offset restore gives ${STALE_TOTAL}, not ${TOTAL} + ${PREFIX}`);
 if (errBound(1) !== 0) fail(`checkpointing every event should bound the error at 0, got ${errBound(1)}`);
+if (SHORT.length !== 1 || SHORT[0].k !== CHK + 1) fail(`the sweep rows that leave a tail uncheckpointed are k = ${SHORT.map(s => s.k).join(', ')}; the prose was checked against k = ${CHK + 1} alone`);
+if (errBound(CHK + 1) !== AFTER_CHK) fail(`errBound(${CHK + 1}) = ${errBound(CHK + 1)}, but the single-checkpoint prose says ${AFTER_CHK}`);
 if (errBound(CHOSEN.k) !== 13) fail(`errBound(${CHOSEN.k}) = ${errBound(CHOSEN.k)}, the prose was checked against 13`);
 
 const W = 1140;
@@ -193,10 +197,10 @@ const C2 = [
         s += c.cv.text(c.P.main.x + 720, y + 21, `worst-case replay: ${sw.worst} event${sw.worst === 1 ? '' : 's'}`, { size: 11, weight: 700, fill: sw.worst > 4 ? c.C.hot : c.C.ink, band: 'swr' + i });
       });
       return s + c.note('w1', c.P.main.x + 24, c.P.main.y + 78 + SWEEP.length * 36, 1040, [
-        `k = ${SWEEP[0].k} replays ${SWEEP[0].worst} events and uploads ${SWEEP[0].incr} times; k = ${SWEEP[SWEEP.length - 1].k} replays ${SWEEP[SWEEP.length - 1].worst} and uploads ${SWEEP[SWEEP.length - 1].incr}.`,
+        `k = ${SWEEP[0].k} replays ${SWEEP[0].worst} events and uploads ${SWEEP[0].incr} entries; k = ${SWEEP[SWEEP.length - 1].k} replays ${SWEEP[SWEEP.length - 1].worst} and uploads ${SWEEP[SWEEP.length - 1].incr}.`,
         `Both ends are correct. The choice is a failure-budget question: how long may recovery take, and how much steady-state I/O is affordable?`,
       ], c.C.warn, c.C.warnFill); },
-    cap: `Four frequencies, and the trade is monotone in both directions — no setting is free. Checkpoint every event and recovery replays ${SWEEP[0].worst} but you pay ${SWEEP[0].incr} uploads; checkpoint once and you pay ${plural(SWEEP[SWEEP.length - 1].incr, 'upload')} and replay ${SWEEP[SWEEP.length - 1].worst} events. The number to start from is the recovery time you can tolerate, not the I/O you would prefer.` },
+    cap: `The sweep has ${SWEEP.length} frequencies, counted in incremental entry-uploads. Replay grows with every step of the interval (${SWEEP.map(sw => sw.worst).join(', ')}); uploads mostly fall (${SWEEP.map(sw => sw.incr).join(', ')}), and k = ${SHORT[0].k} is cheapest only because its one checkpoint, at event ${SHORT[0].at[0]}, never covers the last ${EVENTS.length - 1 - SHORT[0].at[0]} events. No setting is free: checkpoint every event and recovery replays ${SWEEP[0].worst} but you pay ${SWEEP[0].incr} entry-uploads; checkpoint once and you pay ${SWEEP[SWEEP.length - 1].incr} and replay ${SWEEP[SWEEP.length - 1].worst} events. The number to start from is the recovery time you can tolerate, not the I/O you would prefer.` },
 ];
 
 // ============== CONCEPT 3 — CONSISTENCY AND RECOVERY ========================
@@ -287,10 +291,10 @@ const C4 = [
   { t: 'the two settings, and what each one buys', draw: (c) =>
       c.panel('FREQUENCY AND MODE', 'a')
       + c.mapRows('kb', c.P.main.x + 24, c.P.main.y + 52, [
-        [`checkpoint every ${SWEEP[0].k} event`, `${SWEEP[0].incr} uploads · replay ${SWEEP[0].worst} · at-least-once error up to ${errBound(SWEEP[0].k)}`],
-        [`checkpoint every ${CHOSEN.k} events`, `${CHOSEN.incr} uploads · replay ${CHOSEN.worst} · error up to ${errBound(CHOSEN.k)}`],
-        [`checkpoint once`, `${plural(SWEEP[SWEEP.length - 1].incr, 'upload')} · replay ${SWEEP[SWEEP.length - 1].worst} · error up to ${errBound(EVENTS.length)}`],
-        [`incremental rather than full`, `${CHOSEN.incr} uploads instead of ${CHOSEN.full} at k = ${CHOSEN.k} — ${SAVING}% less, and widening`],
+        [`checkpoint every ${SWEEP[0].k} event`, `${SWEEP[0].incr} entry-uploads · replay ${SWEEP[0].worst} · at-least-once error up to ${errBound(SWEEP[0].k)}`],
+        [`checkpoint every ${CHOSEN.k} events`, `${CHOSEN.incr} entry-uploads · replay ${CHOSEN.worst} · error up to ${errBound(CHOSEN.k)}`],
+        [`checkpoint once`, `${plural(SWEEP[SWEEP.length - 1].incr, 'entry-upload')} · replay ${SWEEP[SWEEP.length - 1].worst} · error up to ${errBound(EVENTS.length)}`],
+        [`incremental rather than full`, `${CHOSEN.incr} entry-uploads instead of ${CHOSEN.full} at k = ${CHOSEN.k} — ${SAVING}% less, and widening`],
       ], { w: 1040, rh: 36, hot: 1, label: 'the frequency sets recovery time AND the at-least-once error bound' })
       + c.note('k2', c.P.main.x + 24, c.P.main.y + 212, 1040, [
         `The third column is the one people forget: under at-least-once recovery, a longer checkpoint interval widens the worst-case double count.`,
@@ -333,15 +337,15 @@ const DIAGRAMS = [
     heading: 'Why a checkpoint is two things, and why the frequency is never free',
     why: [
       `**A checkpoint is a snapshot PLUS a stream position**, and the pairing is the whole mechanism. Taken after event ${CHK}, it writes ${new Set(EVENTS.slice(0, CHK + 1).map(entryOf)).size} state entries holding ${PREFIX}, and the offset **${CHK}** that those entries correspond to.`, '',
-      `The offset is not bookkeeping — a snapshot that does not say *where* it was taken cannot be resumed from. And the two must be committed **atomically**: state-then-crash re-applies ${EVENTS.length - 1 - CHK} events worth **${AFTER_CHK}**, and offset-then-crash loses the same amount.`, '',
+      `The offset is not bookkeeping — a snapshot that does not say *where* it was taken cannot be resumed from. And the two must be committed **atomically**: state-then-crash leaves the offset stale at ${STALE} and re-applies the ${CHK + 1} events worth **${PREFIX}** that the state already holds (total ${STALE_TOTAL}), and offset-then-crash loses the same ${PREFIX} (total ${AFTER_CHK}).`, '',
       `**A state store is where the bytes live, and it changes nothing semantic.** This stream's ${ENTRIES.length} entries fit in memory trivially; what makes real state not fit is that the entry count scales with keys × *open windows*, both unbounded. An embedded store (RocksDB and similar) keeps hot entries in memory and the rest on local disk. The entries, their values and their collection times are identical either way — what changes is that checkpointing now means reading those bytes back and uploading them.`, '',
       `**Incremental checkpointing uploads the churn rather than the state.** Checkpointing every ${CHOSEN.k} events, the full uploads are ${CHOSEN.at.map(cp => new Set(EVENTS.slice(0, cp + 1).map(entryOf)).size).join(', ')} entries and the incremental ones are ${CHOSEN.at.map((cp, i) => new Set(EVENTS.slice((i ? CHOSEN.at[i - 1] : -1) + 1, cp + 1).map(entryOf)).size).join(', ')} — **${CHOSEN.full} against ${CHOSEN.incr}**, a ${SAVING}% saving on ${EVENTS.length} events.`, '',
       `And the gap **widens**, because full scales with total state while incremental scales with how fast it changes. On a large, mostly-idle state that is the difference between uploading 10 GB and 10 KB.`, '',
-      `**The frequency is a trade with no free point.** Checkpoint every ${SWEEP[0].k} event: ${SWEEP[0].incr} uploads, worst-case replay ${SWEEP[0].worst}. Every ${CHOSEN.k}: ${CHOSEN.incr} uploads, replay ${CHOSEN.worst}. Once: ${plural(SWEEP[SWEEP.length - 1].incr, 'upload')}, replay ${SWEEP[SWEEP.length - 1].worst}. Both ends are correct.`],
+      `**The frequency is a trade with no free point.** Counting incremental entry-uploads — one per state entry a checkpoint writes — the sweep has ${SWEEP.length} settings. ${SWEEP_WORDS.join('. ')}. Replay grows with the interval; the uploads mostly fall, and k = ${SHORT[0].k} undercuts once only because its single checkpoint, at event ${SHORT[0].at[0]}, leaves the last ${EVENTS.length - 1 - SHORT[0].at[0]} events uncovered. Both ends are correct.`],
     whenHeading: 'When to checkpoint how often, and what the store choice actually decides',
     when: [
       `**Pick the frequency from the recovery time you can tolerate, not the I/O you would prefer.** Recovery time is (events since the last checkpoint ÷ replay throughput), so start from the SLA and derive the interval — the I/O then is what it is.`, '',
-      `**Use incremental checkpointing unconditionally when the store supports it.** It is the one setting in this chapter with no trade: ${CHOSEN.incr} uploads instead of ${CHOSEN.full} here, with identical recovery behaviour.`, '',
+      `**Use incremental checkpointing unconditionally when the store supports it.** It is the one setting in this chapter with no trade: ${CHOSEN.incr} entry-uploads instead of ${CHOSEN.full} here, with identical recovery behaviour.`, '',
       `**Reach for an embedded state store when the entry count stops fitting**, which is a function of key cardinality times open windows. It is a storage decision and changes nothing about windowing, triggers or watermarks.`, '',
       `**Do not treat the local store as durable.** It is fast and it dies with the machine; the remote checkpoint is what survives. Collapsing those two roles gives you a processor that recovers from a restart but not from a failure.`, '',
       `**What this does not settle:** whether a snapshot taken across several stages is internally consistent. Taking each stage's snapshot at a different point in the stream produces a checkpoint no single position corresponds to — which is what barriers are for, and they have a cost this concept has not priced.`],
@@ -360,7 +364,7 @@ const DIAGRAMS = [
       `- state, **offset reset to ${STALE}** (nothing folded) → replay all ${EVENTS.length}, total **${STALE_TOTAL}** — double counted`,
       `- **offset ${CHK}, state lost** → replay ${replayFrom(CHK)}, total **${AFTER_CHK}** — the prefix is missing`, '',
       `The two failures are wrong in **opposite directions**, which is the clearest argument for atomicity: a half-committed checkpoint is not a slightly-stale checkpoint, it is a wrong one.`, '',
-      `**At-least-once and exactly-once recovery differ exactly here.** Under at-least-once the ${replayFrom(CHK)} events after the checkpoint may be applied twice — up to **${AFTER_CHK} double-counted, ${Math.round(100 * AFTER_CHK / TOTAL)}% of the ${TOTAL} total**. Exactly-once aligns state and offsets so they are applied once, and pays for it with the alignment above plus a two-phase commit at the sink.`, '',
+      `**At-least-once and exactly-once recovery differ exactly here.** Under at-least-once, with the single checkpoint after event ${CHK}, the ${replayFrom(CHK)} events after it may be applied twice — up to **${AFTER_CHK} double-counted, ${Math.round(100 * AFTER_CHK / TOTAL)}% of the ${TOTAL} total**. That is the k = ${CHK + 1} row of the sweep above; checkpointing every ${CHOSEN.k} events lowers the bound to ${errBound(CHOSEN.k)}, as the next concept computes. Exactly-once aligns state and offsets so they are applied once, and pays for it with the alignment above plus a two-phase commit at the sink.`, '',
       `Which couples the two settings from the previous concept: **the checkpoint interval you chose for recovery time also sets the worst-case double count.**`],
     whenHeading: 'When to pay for exactly-once recovery, and what bounds the state',
     when: [
@@ -385,7 +389,7 @@ const DIAGRAMS = [
       `3. Replay events ${CHK + 1}..${EVENTS.length - 1} — ${replayFrom(CHK)} events worth ${AFTER_CHK}.`,
       `4. Final state: ${ENTRIES.length} entries holding **${TOTAL}**.`, '',
       `That is the design's entire claim, as one equation: **${PREFIX} loaded + ${AFTER_CHK} replayed = ${TOTAL}**, the no-crash total. Every failed recovery earlier in this chapter failed that equation, and always because the state and the offset did not match.`, '',
-      `**Two settings, and one of them is free.** Incremental rather than full checkpointing is ${CHOSEN.incr} uploads instead of ${CHOSEN.full} at k = ${CHOSEN.k}, with identical recovery behaviour — no trade at all. The frequency trades in three directions at once: I/O, recovery time, and under at-least-once the error bound (up to ${errBound(CHOSEN.k)} of ${TOTAL} at a checkpoint every ${CHOSEN.k} events).`],
+      `**Two settings, and one of them is free.** Incremental rather than full checkpointing is ${CHOSEN.incr} entry-uploads instead of ${CHOSEN.full} at k = ${CHOSEN.k}, with identical recovery behaviour — no trade at all. The frequency trades in three directions at once: I/O, recovery time, and under at-least-once the error bound (up to ${errBound(CHOSEN.k)} of ${TOTAL} at a checkpoint every ${CHOSEN.k} events).`],
     whenHeading: 'When this design is enough, and the four things it does not settle',
     when: [
       `**It is enough when the sink is inside the system** — another stream, a keyed store you control. Then the atomic commit of state and offset is a local transaction and the design is complete as drawn.`, '',

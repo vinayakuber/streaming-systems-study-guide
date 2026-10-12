@@ -18,7 +18,10 @@
 
   One person's calendar holds three meetings -- 1..3, 130..245 and 540..540 -- and you are
   asked for their free time in the window 0..600.  A year of minutes is 525,600 of them, so
-  whatever you do may not walk the range minute by minute.
+  whatever you do may not walk the range minute by minute.  The spans and the window are
+  the interview's own integers; in the book's dataset (tools/stream_seed.js) they are
+  SECONDS past 12:00, and this variation reads the same integers as minutes because a
+  calendar is kept by the minute.  The numbers carry over; the unit is this surface's own.
 
   GIVEN THE BUSY SPANS AND A WINDOW, WHAT ARE THE FREE SPANS?
 
@@ -82,7 +85,8 @@ import random
 
 # The chapter's LEFT list as one person's busy spans -- its key 'a' sessions at a gap of 120 --
 # and the chapter's own window of 0 to 600.  Spans are CLOSED: busy from 130 to 245 means minute
-# 245 is busy and 246 is not.
+# 245 is busy and 246 is not.  The seed counts these integers in seconds; this calendar reads
+# the same integers in minutes -- the values carry over, the unit does not.
 BUSY = [(1, 3), (130, 245), (540, 540)]
 START, END = 0, 600
 YEAR_MINUTES = 525_600

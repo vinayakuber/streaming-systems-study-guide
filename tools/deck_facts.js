@@ -24,7 +24,7 @@ const seed = require(path.join(__dirname, 'stream_seed.js'));
 const SEED = [...seed.EVENTS.flatMap(e => [e.et, e.pt, e.v]), seed.LAG, seed.WIN, seed.GAP, ...seed.WATERMARKS,
   ...seed.WIN_STARTS, ...seed.WIN_STARTS.map(w => w + seed.WIN)].map(v => String(Math.abs(v)));
 
-const norm = s => s.replace(/(\d),(?=\d{3}\b)/g, '$1');      // 1,600 -> 1600, so both spellings match
+const norm = s => s.replace(/(\d),(?=\d{3}(?!\d))/g, '$1');  // 1,600 -> 1600 (and 234,375x -> 234375x), so both spellings match
 
 function numbersIn(text) {
   const t = norm(text.replace(/<[^>]+>/g, ' ').replace(/\[\[[a-z]+:[^\]]*\]\]/g, ' '));

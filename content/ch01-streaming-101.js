@@ -79,32 +79,32 @@ registerChapter({
   ],
   systemDesign: {
     walkthroughs: ['ch01-system', 'ch01-system-memory'],
-    question: 'Design a real-time clicks-per-minute dashboard. Use case: ops watches live click counts. Premise: each click is stamped with its event time, but the network delays it by minutes, so a click at 12:00:50 processed at 12:04:40 must land in the 12:00 window (event time), not 12:04.',
+    question: 'Design a real-time clicks-per-minute dashboard. Use case: ops watches live click counts. Premise: each event reports v clicks and is stamped with its event time, but the network delays it by minutes, so an event at 12:00:50 processed at 12:04:40 must add its clicks to the 12:00 window (event time), not 12:04.',
     pipeline: 'writer (event producer) -> transport (unbounded stream) -> collector (processor) -> aggregator/store (window state) -> reader (dashboard)',
     decomposition: [
       { box: 'writer (event producer)', role: 'writer — stamps events with event time',
         parts: [
-          'a device stamps click id 7 {key: "b", v: 4, event_time: "12:00:50"}',
+          'a device stamps event id 7, a report of 4 clicks: {key: "b", v: 4, event_time: "12:00:50"}',
           'the timestamp is the user-interaction instant, not the send instant',
           'each event is immutable once emitted'
         ] },
       { box: 'transport (unbounded stream)', role: 'transport — carries events and delays them',
         parts: [
-          'the click is queued and delayed 3m50s (230 s) by the network',
+          'the event is queued and delayed 3m50s (230 s) by the network',
           'processing time trails event time by the accumulated lag',
           'a watermark of 12:03:20 (max event time seen 12:04:20 − 60 s lag) declares how complete event time is'
         ] },
       { box: 'collector (processor)', role: 'collector — reads events and assigns buckets',
         parts: [
-          'the processor reads the click at processing time 12:04:40',
-          'it buckets by event time, placing the click in the 12:00 window',
+          'the processor reads the event at processing time 12:04:40',
+          'it buckets by event time, placing the event in the 12:00 window',
           'a straggler arriving after the watermark is flagged late'
         ] },
-      { box: 'aggregator/store (window state)', role: 'aggregator/store — holds per-window counts',
+      { box: 'aggregator/store (window state)', role: 'aggregator/store — holds per-window click totals (sums of v)',
         parts: [
-          'window 12:00 sum : 8 -> 12 as the late click (id 7, v 4) is folded in',
-          'window 12:04 keeps 7 (ids 4, 5) — it does NOT get id 7\'s 4, which belongs to 12:00',
-          'the dashboard reads the live window counts'
+          'window 12:00 sum : 8 -> 12 clicks as the late event (id 7, v 4) is folded in',
+          'window 12:04 keeps 7 clicks (ids 4, 5: 6 + 1) — it does NOT get id 7\'s 4 clicks, which belong to 12:00',
+          'the dashboard reads the live window click totals'
         ] }
     ],
     

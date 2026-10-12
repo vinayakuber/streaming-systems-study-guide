@@ -28,7 +28,7 @@ registerChapter({
         { num: 1, title: 'Assign', detail: 'Each element is assigned to a set of windows by its event time and the windowing function. <strong>A sliding window assigns one event to several windows at once.</strong>' },
         { num: 2, title: 'Merge', detail: 'Session windows <strong>merge</strong>: when a new event lands inside the gap of two existing sessions, the two sessions and the event collapse into one window. Merging is what makes sessions dynamic.' },
         { num: 3, title: 'Group and trigger', detail: 'Elements are <strong>grouped by (key, window)</strong> into the state that will be aggregated, then <strong>triggers</strong> decide when that state emits.' },
-        { num: 4, title: 'Accumulate and garbage-collect', detail: 'Each emitted pane is <strong>accumulated</strong> per the accumulation mode, and the window state is <strong>garbage-collected</strong> once the watermark passes the window end plus allowed lateness.' }
+        { num: 4, title: 'Accumulate and garbage-collect', detail: 'Each emitted pane is <strong>accumulated</strong> per the accumulation mode, and the window state is <strong>garbage-collected</strong> once the watermark passes the window end plus allowed lateness. For a session the window end is its last event time plus the gap.' }
       ],
     },
     {
@@ -38,7 +38,7 @@ registerChapter({
       motivation: `Sessions are powerful but subtle — their boundaries change as data arrives, so this section covers what the lifecycle implies and where implementations get it wrong.`,
       steps: [
         { num: 1, title: 'A session can merge late', detail: 'A late event can bridge two sessions that were already emitted separately. <strong>The pipeline must retract the two earlier panes and emit the merged one</strong> — this is why accumulation mode matters.' },
-        { num: 2, title: 'Sessions are garbage-collected by watermark', detail: 'A session is not done when it looks idle; it is done when the <strong>watermark passes the session end plus allowed lateness</strong>. Until then, a late event can revive it.' },
+        { num: 2, title: 'Sessions are garbage-collected by watermark', detail: 'A session is not done when it looks idle; it is done when the <strong>watermark passes the session\'s window end (its last event time plus the gap) plus allowed lateness</strong>. Until then, a late event can revive it.' },
         { num: 3, title: 'Session windows are keyed', detail: 'Sessions are per key — <strong>user A\'s session and user B\'s session never merge</strong> because they are in different key groups. The gap is measured within a key.' },
         { num: 4, title: 'Choose the window to match the question', detail: 'Fixed windows for periodic aggregates, sliding windows for moving averages, sessions for user behavior. <strong>The window shape is part of the answer, not an implementation detail.</strong>' }
       ],

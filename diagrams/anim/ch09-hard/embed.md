@@ -8,7 +8,7 @@ Reading this book's two keys as two streams — "a" is clicks, "b" is impression
 
 So SQL requires a **time bound**, and with a 60s bound there are exactly **5 true matches** here: 0-7, 1-7, 3-2, 4-5, 4-6. Without the bound the join would retain every row of both sides forever, so the bound makes the state finite *and* the semantics defined.
 
-**The join must buffer.** A row cannot be matched and discarded — it waits for a counterpart that may never come. The buffer peaks at **5 rows** on this 9-row stream, and the sizing formula is (arrival rate × join window) per side.
+**The join must buffer.** A row cannot be matched and discarded — it waits for a counterpart that may never come. The buffer peaks at **5 rows** on this 9-row stream — that counts both streams together, 4 clicks + 1 impression after event 4. The sizing formula is (arrival rate × join window) per side, and the buffer is the sum of the two sides.
 
 **The watermark ends the wait, and it is the minimum over both inputs** — ch03's rule, now structural because a join always has two. Trace each click's emission point and **2 of the 5 never emit at all**, because the minimum watermark never passes its bound. Those rows hold **2 of the 5 true matches**: computed, sitting in state, never published.
 
@@ -18,7 +18,7 @@ So SQL requires a **time bound**, and with a 60s bound there are exactly **5 tru
 
 **Use a windowed join when both sides are genuinely streams** and a match means "these happened close together". The window width is a domain statement — how close counts as together — not a tuning parameter.
 
-**Size it as arrival rate × window, per side**, and treat that as a hard number in the capacity plan. 5 rows here; at 10k rows/sec with a 60s window it is 600k rows per side.
+**Size it as arrival rate × window, per side**, add the two sides, and treat that as a hard number in the capacity plan. 5 rows here for both sides together (per side, the click buffer peaks at 4 and the impression buffer at 2). At an illustrative 10k rows/sec per side — a rate assumed for scale, not one measured on this stream — a 60s window holds 10k × 60 = 600k rows per side, and twice that across both.
 
 **Expect the accounting, not just the matches.** On out-of-order data a correct windowed join delivers 1 of 5 matches correctly first time, 2 after a retraction, and 2 not at all. If that split is unacceptable, the answer is a different join or a different guarantee — not a wider window.
 
@@ -45,7 +45,7 @@ A batch join over these inputs tests 20 pairs and finishes. The streaming versio
 
 <img src="../diagrams/anim/ch09-hard/frames/step-02.svg" alt="Step 2: the join must BUFFER one side while waiting for the other" width="1040">
 
-Rows cannot be matched and discarded immediately — each one waits for a counterpart. The buffer peaks at 5 rows here, and the only reason it peaks at all rather than growing is the 60s window. That makes join state (arrival rate × join window), which is the sizing formula to carry away.
+Rows cannot be matched and discarded immediately — each one waits for a counterpart. The buffer peaks at 5 rows of both streams together (4 clicks + 1 impression, after event 4); per side, the click buffer peaks at 4 and the impression buffer at 2. The only reason it peaks at all rather than growing is the 60s window. That makes each side's join state (its arrival rate × join window), and the whole buffer the sum over both sides, which is the sizing formula to carry away.
 
 </details>
 <details>

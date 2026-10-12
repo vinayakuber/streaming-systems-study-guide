@@ -11,8 +11,7 @@ RIGHT = [(50, 150), (220, 320)]
   with a bound of 220 on how late RIGHT may be: droppable [(1, 3)], kept [(130, 245), (540, 540)]
 
   double-booked room: busiest 2 at t=5, 2 overlapping pairs
-  attributed click: answering at once gives [(200, None)] (lost), waiting gives [(200, 180)]
-                    a click at 160: at once 100, waiting 150
+  attributed click: wait 0 -> 1, wait 60 -> 1, wait 85 -> 2 attributed
   unavailable hours: free [(0, 129), (246, 539), (541, 600)]
 
   800 random span-list pairs: sweep == every pair, never more than m + n

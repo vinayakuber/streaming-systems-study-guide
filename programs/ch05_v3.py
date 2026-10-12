@@ -72,7 +72,6 @@ never fires, the rebuild interval on both sides of the staleness bound (every ev
 and an interval longer than the whole stream), the zero-valued event that makes the two stores
 AGREE while still being split, a one-event stream, an empty stream that has nothing to split,
 and a 3,000-event stream at scale; each row prints what both designs cost for that same input.
-Every row is ASSERTED, so the table cannot drift from the code.
 
 Run it:  python3 programs/ch05_v3.py
 """

@@ -4,7 +4,7 @@
 
 **What is being answered.** Why exactly-once is two guarantees — as three delivery lists built by one function and summed by another.
 
-`deliver(mode)` produces the list of record ids a stage actually receives: 9 ids for exactly-once, 5 for at-most-once (the replay never happens), and 13 for at-least-once (the replay is not deduplicated).
+`deliver(mode)` produces the list of record ids a stage actually receives: 9 ids for exactly-once, 5 for at-most-once (the first sends of ids 5–8 were lost in the crash and are never re-sent), and 13 for at-least-once (those first sends landed, and the replay is not deduplicated).
 
 `aggregate(ids)` then sums them, and step 3 is the point: it is **identical and correct** for all three lists and produces 23, 45 and 67. The duplicates are visible in the list and invisible in the number.
 
@@ -17,7 +17,7 @@ The animation steps through the code, holding each line long enough to read the 
 
 <img src="../diagrams/anim/ch05-meaning-memory/frames/step-01.svg" alt="Step 1: at-most-once DROPS everything after the checkpoint" width="980">
 
-`indexOf(EVENTS[5])` is 5, which is > CHK = 4, so the record is skipped. All 4 records after the checkpoint are dropped and the list holds 5 ids. That is a COMPLETENESS failure: the sum will be 23, and nothing downstream can recover it.
+`indexOf(EVENTS[5])` is 5, which is > CHK = 4, so the record is skipped. Their first sends were lost in the crash and at-most-once never re-sends, so all 4 records after the checkpoint are missing and the list holds 5 ids. That is a COMPLETENESS failure: the sum will be 23, and nothing downstream can recover it.
 
 </details>
 <details>

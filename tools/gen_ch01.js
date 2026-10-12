@@ -34,6 +34,7 @@ const DISAGREE = MINUTES.filter(m => sumOf(BY_ET[m]) !== sumOf(BY_PT[m]));
 const SKEWS = EVENTS.map(skewOf);
 const MAX_SKEW = Math.max(...SKEWS);
 const WORST = EVENTS[SKEWS.indexOf(MAX_SKEW)];
+const NEXT_SKEW = Math.max(...SKEWS.filter(x => x !== MAX_SKEW));
 const dropAt = (budget) => EVENTS.filter(e => skewOf(e) > budget).map(e => e.id);
 const DROP_LAG = dropAt(LAG), DROP_MAX = dropAt(MAX_SKEW);
 const MISPLACED = EVENTS.filter(e => chunkOf(e.pt) !== winOf(e.et)).map(e => e.id);
@@ -49,6 +50,7 @@ const M0_DECL_PT = EVENTS[M0_DECL].pt;
 const M0_FIX_PT = Math.max(...EVENTS.filter(e => minOf(e.et) === M0).map(e => e.pt));
 const M0_BLIND = M0_FIX_PT - M0_DECL_PT;
 const M0_ERR = Math.round(100 * (M0_TRUE - M0_SHOWN) / M0_TRUE);
+const TOTAL_V = EVENTS.reduce((s, e) => s + e.v, 0);
 const fail = (m) => { throw new Error(`gen_ch01: ${m}`); };
 if (DISAGREE.length < 2) fail(`only ${DISAGREE.length} minute(s) disagree between the clocks — the chapter's central contrast would not be visible`);
 if (MAX_SKEW <= 3 * LAG) fail(`max skew ${MAX_SKEW}s is not far beyond LAG ${LAG}s — "the lag is a guess" would have no teeth`);
@@ -99,9 +101,9 @@ const C1 = [
         `Nothing is broken. A phone was offline, a queue backed up, a retry fired. This gap is the normal case, not the exception.`,
       ], c.C.hot, c.C.hotFill),
     cap: `Read the two times on any row and they differ. Read event ${L.id} and they differ by ${secs(skewOf(L))} — it happened in the first minute and arrived in the fifth. Every difficulty in this book follows from that one gap, so the dataset is built to contain it rather than to be tidy.` },
-  { t: 'count by the wrong clock and the answer changes', draw: (c) => {
-      let s = c.panel('THE SAME NINE EVENTS, COUNTED TWO WAYS', 'a');
-      s += c.line(c.P.main.x + 24, c.P.main.y + 46, 'per-minute sum of v, by EVENT time (what users did) and by PROCESSING time (when we noticed)', { size: 11, weight: 700, fill: c.C.line });
+  { t: 'total the clicks by the wrong clock and the answer changes', draw: (c) => {
+      let s = c.panel('THE SAME NINE EVENTS, TOTALLED TWO WAYS', 'a');
+      s += c.line(c.P.main.x + 24, c.P.main.y + 46, 'per-minute click total (sum of v), by EVENT time (what users did) and by PROCESSING time (when we noticed)', { size: 11, weight: 700, fill: c.C.line });
       MINUTES.forEach((m, i) => {
         const y = c.P.main.y + 66 + i * 34, bad = DISAGREE.includes(m);
         s += c.cv.rect('mm' + i, c.P.main.x + 24, y, 1040, 30, { fill: bad ? c.C.hotFill : c.C.paper, stroke: bad ? c.C.hot : c.C.faint, rx: 3, sw: bad ? 2 : 1 });
@@ -111,10 +113,10 @@ const C1 = [
         s += c.cv.text(c.P.main.x + 1050, y + 20, bad ? 'DIFFERENT' : 'agrees', { size: 10, anchor: 'end', weight: 700, fill: bad ? c.C.hot : c.C.good, band: 'mF' + i });
       });
       return s + c.note('d1', c.P.main.x + 24, c.P.main.y + 80 + MINUTES.length * 34, 1040, [
-        `${DISAGREE.length} of the ${MINUTES.length} minutes get a DIFFERENT answer depending on which clock you count by.`,
-        `No event was lost and no arithmetic is wrong. The two columns are counting two different questions.`,
+        `${DISAGREE.length} of the ${MINUTES.length} minutes get a DIFFERENT click total depending on which clock you bucket by.`,
+        `No event was lost and no arithmetic is wrong. The two columns are answering two different questions.`,
       ], c.C.hot, c.C.hotFill); },
-    cap: `This is the whole problem in one table. Bucketing by processing time says the ${hhmmss(MINUTES[0]).slice(0, 5)} minute saw ${sumOf(BY_PT[M0])}; bucketing by event time says ${M0_TRUE}. ${DISAGREE.length} of ${MINUTES.length} minutes disagree. A processing-time dashboard is not a slightly-stale event-time dashboard — it answers a different question and can be arbitrarily far off.` },
+    cap: `This is the whole problem in one table. Bucketing by processing time says the ${hhmmss(MINUTES[0]).slice(0, 5)} minute saw ${sumOf(BY_PT[M0])} clicks; bucketing by event time says ${M0_TRUE}. ${DISAGREE.length} of ${MINUTES.length} minutes disagree. A processing-time dashboard is not a slightly-stale event-time dashboard — it answers a different question and can be arbitrarily far off.` },
   { t: 'so the book asks four questions of every pipeline', draw: (c) =>
       c.panel('WHAT · WHERE · WHEN · HOW', 'a')
       + c.mapRows('q4', c.P.main.x + 24, c.P.main.y + 52, [
@@ -143,7 +145,7 @@ const C2 = [
         `Eight of the nine arrive within ${secs(Math.max(...SKEWS.filter(x => x !== MAX_SKEW)))}. One — id ${WORST.id} — takes ${secs(MAX_SKEW)}.`,
         `Skew is not a constant you can look up. It is a long tail, and the tail is where correctness lives.`,
       ], c.C.hot, c.C.hotFill); },
-    cap: `Skew is the single measured quantity this chapter rests on. Note its SHAPE: a cluster of small values and one outlier ${Math.round(MAX_SKEW / Math.max(...SKEWS.filter(x => x !== MAX_SKEW)))}× larger. Any system that picks a waiting time from the typical case is correct for eight events in nine and silently wrong about the ninth.` },
+    cap: `Skew is the single measured quantity this chapter rests on. Note its SHAPE: a cluster of small values and one outlier about ${Math.round(MAX_SKEW / NEXT_SKEW)}× the next worst (${secs(MAX_SKEW)} against ${secs(NEXT_SKEW)}). Any system that picks a waiting time from the typical case is correct for eight events in nine and silently wrong about the ninth.` },
   { t: 'the watermark is a GUESS about skew', draw: (c) => {
       let s = c.panel(`THE WATERMARK AFTER EACH EVENT — max event time seen, minus LAG = ${secs(LAG)}`, 'a');
       s += c.line(c.P.main.x + 24, c.P.main.y + 46, 'row 1 = the arriving event, in processing order  ·  row 2 = its event time  ·  row 3 = the watermark after it', { size: 11, weight: 700, fill: c.C.line });
@@ -155,20 +157,20 @@ const C2 = [
         `A watermark is one claim: "no event with an event time earlier than this will arrive." Here it is computed as the highest event time seen so far, minus ${secs(LAG)}.`,
         `By the time id ${L.id} arrives the watermark stands at ${hhmmss(WATERMARKS[EVENTS.indexOf(L)])}, which already claims ${hhmmss(L.et)} is settled. The claim is false. Nothing detected that.`,
       ], c.C.hot, c.C.hotFill); },
-    cap: `The watermark never stalls and never apologises — it is arithmetic on the events that did arrive, so it cannot know about one that has not. The ${secs(LAG)} lag is a human guess at the skew tail, and id ${L.id}'s ${secs(skewOf(L))} is ${Math.round(skewOf(L) / LAG)}x it. A heuristic watermark being wrong is its normal mode, not a failure.` },
+    cap: `The watermark never stalls and never apologises — it is arithmetic on the events that did arrive, so it cannot know about one that has not. The ${secs(LAG)} lag is a human guess at the skew tail, and id ${L.id}'s ${secs(skewOf(L))} is nearly ${Math.round(skewOf(L) / LAG)}× it (${secs(skewOf(L))} against ${secs(LAG)}) — a different ratio from the 5× above, which compares skews with each other, not with the lag. A heuristic watermark being wrong is its normal mode, not a failure.` },
   { t: 'what completeness costs: wait longer, or drop events', draw: (c) =>
       c.panel('THE TRADE, PRICED', 'a')
       + c.mapRows('tr', c.P.main.x + 24, c.P.main.y + 52, [
         [`wait ${secs(LAG)} (the watermark's lag)`, `drops ${DROP_LAG.length} event(s): id ${DROP_LAG.join(', ')}`],
         [`wait ${secs(MAX_SKEW)} (the worst skew seen)`, `drops ${DROP_MAX.length} events — complete`],
         [`added delay per answer`, `${secs(MAX_SKEW - LAG)} more, on every window, forever`],
-        [`across this seed's ${WIN_STARTS.length} windows`, `${secs(LAG * WIN_STARTS.length)} total → ${secs(MAX_SKEW * WIN_STARTS.length)} total`],
+        [`across the seed's ${WIN_STARTS.length} two-minute windows`, `${secs(LAG * WIN_STARTS.length)} total → ${secs(MAX_SKEW * WIN_STARTS.length)} total`],
       ], { w: 1040, rh: 36, hot: 2, label: 'two budgets, and what each one buys' })
       + c.note('t1', c.P.main.x + 24, c.P.main.y + 212, 1040, [
         `Completeness is bought with latency, at a fixed exchange rate: ${secs(MAX_SKEW - LAG)} of extra delay on EVERY answer to stop losing ${DROP_LAG.length} event in ${EVENTS.length}.`,
         `Nobody can tell you that is worth it. That is the point — it is a product decision wearing an engineering costume.`,
       ], c.C.warn, c.C.warnFill),
-    cap: `Both rows are correct systems. The first is fast and loses ${DROP_LAG.length} of ${EVENTS.length} events; the second is complete and makes every answer ${secs(MAX_SKEW - LAG)} later — ${secs((MAX_SKEW - LAG) * WIN_STARTS.length)} across the ${WIN_STARTS.length} windows. And the second budget was only knowable AFTER seeing id ${WORST.id}, so in a live system you are choosing it blind.` },
+    cap: `Both rows are correct systems. The first is fast and loses ${DROP_LAG.length} of ${EVENTS.length} events; the second is complete and makes every answer ${secs(MAX_SKEW - LAG)} later — ${secs((MAX_SKEW - LAG) * WIN_STARTS.length)} more across the seed's ${WIN_STARTS.length} two-minute (${secs(WIN)}) event-time windows. And the second budget was only knowable AFTER seeing id ${WORST.id}, so in a live system you are choosing it blind.` },
   { t: 'so each clock is correct for a different question', draw: (c) =>
       c.panel('WHICH CLOCK ANSWERS WHICH QUESTION', 'p')
       + c.mapRows('cl', c.P.main.x + 24, c.P.main.y + 52, [
@@ -181,7 +183,7 @@ const C2 = [
         `Processing time is not the lazy choice — it is the right answer to questions about the SYSTEM.`,
         `It is the wrong answer to questions about the WORLD, and those are most of the questions anyone asks.`,
       ], c.C.good, c.C.goodFill),
-    cap: `The useful habit is to read the question for whose clock it mentions. "How many clicks happened at 12:00" names the users' clock, so the answer is ${M0_TRUE}. "How many did we receive in that minute" names ours, so the answer is ${sumOf(BY_PT[M0])}. Both are right; only one of them is what a dashboard labelled "clicks at 12:00" is promising.` },
+    cap: `The useful habit is to read the question for whose clock it mentions. "How many clicks happened at 12:00" names the users' clock, so the answer is ${M0_TRUE}. "How many clicks did we receive in that minute" names ours, so the answer is ${sumOf(BY_PT[M0])}. Both are right; only one of them is what a dashboard labelled "clicks at 12:00" is promising.` },
 ];
 
 // ============================ CONCEPT 3 — THREE SHAPES ======================
@@ -286,7 +288,7 @@ const C4 = [
       c.panel('SCOPE', 'p')
       + c.note('x1', c.P.main.x + 24, c.P.main.y + 46, 1040, [`The ${secs(LAG)} lag is a GUESS. It was wrong about id ${L.id} by ${secs(skewOf(L) - LAG)} and nothing in the pipeline could detect that.`], c.C.hot, c.C.hotFill)
       + c.note('x2', c.P.main.x + 24, c.P.main.y + 112, 1040, [`One minute here NEVER closes — ${LAST_MIN_SPAN} still holds ${sumOf(BY_ET[LAST_MIN])}. Unbounded input means unbounded STATE unless something expires it.`], c.C.warn, c.C.warnFill)
-      + c.note('x3', c.P.main.x + 24, c.P.main.y + 178, 1040, [`Nothing here is exactly-once. If the transport redelivers id ${L.id}, the ${hhmmss(M0).slice(0, 5)} minute reads ${M0_TRUE + L.v}, and this design cannot tell that from a real click.`], c.C.hot, c.C.hotFill)
+      + c.note('x3', c.P.main.x + 24, c.P.main.y + 178, 1040, [`Nothing here is exactly-once. If the transport redelivers id ${L.id}, the ${hhmmss(M0).slice(0, 5)} minute reads ${M0_TRUE + L.v}, and this design cannot tell that from a real report of ${L.v} more clicks.`], c.C.hot, c.C.hotFill)
       + c.note('x4', c.P.main.x + 24, c.P.main.y + 244, 1040, [`And the dashboard shows ${MINUTES.length} minutes because the seed has ${EVENTS.length} events. Nothing here says what happens at a million per second.`], c.C.blue, c.C.blueFill),
     cap: `Four honest gaps, and the first two are the ones that bite. The lag is unverifiable from inside the system; the state is unbounded unless something expires it; duplicates are indistinguishable from clicks; and the whole thing is sized for ${EVENTS.length} events. Each gets its own chapter later — which is the actual reason this book has ten of them.` },
 ];
@@ -303,8 +305,9 @@ const DIAGRAMS = [
       `**Then the fact that makes it hard.** Every event carries two timestamps:`, '',
       `- **event time** — when the thing actually happened, stamped by whatever produced it.`,
       `- **processing time** — when the pipeline observed it, read off the pipeline's own clock.`, '',
+      `Each event also carries a value, **v**: the number of clicks it reports. A device batches its clicks, so one event can carry several — event ${EVENTS[0].id} reports ${EVENTS[0].v}, event ${L.id} reports ${L.v}. **Every per-minute figure in this chapter is a sum of v — a click total, not a number of events.** The ${EVENTS.length} events carry ${TOTAL_V} clicks between them.`, '',
       `They disagree, always, by an amount nobody controls. In this book's dataset event ${L.id} happened at **${hhmmss(L.et)}** and was seen at **${hhmmss(L.pt)}** — ${secs(skewOf(L))} apart. A phone was offline; a queue backed up. Nothing is broken.`, '',
-      `**And that gap changes answers, not just timings.** Count the same ${EVENTS.length} events per minute by event time and then by processing time: **${DISAGREE.length} of the ${MINUTES.length} minutes get a different number.** The ${hhmmss(M0).slice(0, 5)} minute is ${M0_TRUE} by event time and ${sumOf(BY_PT[M0])} by processing time. No event was lost and no sum is miscalculated — the two columns are answering two different questions.`],
+      `**And that gap changes answers, not just timings.** Total the clicks of the same ${EVENTS.length} events per minute, once by event time and once by processing time: **${DISAGREE.length} of the ${MINUTES.length} minutes get a different total.** The ${hhmmss(M0).slice(0, 5)} minute holds ${M0_TRUE} clicks by event time (ids ${BY_ET[M0].join(', ')}: ${BY_ET[M0].map(i => EVENTS[i].v).join(' + ')}) and ${sumOf(BY_PT[M0])} by processing time (ids ${BY_PT[M0].join(', ')}: ${BY_PT[M0].map(i => EVENTS[i].v).join(' + ')}). No event was lost and no sum is miscalculated — the two columns are answering two different questions.`],
     whenHeading: 'When each meaning of the word is the one you want',
     when: [
       `**You want the engine (this book's meaning) when your input has no end** — a click stream, a sensor feed, a log. The test is not "is it fast?" but "can I ever read to the end?" If you cannot, you need a model that says when to speak, because "when the input is finished" is not available.`, '',
@@ -319,19 +322,19 @@ const DIAGRAMS = [
     heading: 'Why one of the two clocks is the meaningful one, and the other is the cheap one',
     why: [
       `**Skew** is the name for the gap: \`skew = processing time − event time\`, in seconds. It is the one quantity this concept rests on, so measure it on all ${EVENTS.length} events rather than reasoning about it.`, '',
-      `Eight of the nine arrive within ${secs(Math.max(...SKEWS.filter(x => x !== MAX_SKEW)))}. One — id ${WORST.id} — takes **${secs(MAX_SKEW)}**, about ${Math.round(MAX_SKEW / Math.max(...SKEWS.filter(x => x !== MAX_SKEW)))}× the next worst. **Skew is a long tail, not a constant**, and that shape is why you cannot look it up.`, '',
+      `Eight of the nine arrive within ${secs(Math.max(...SKEWS.filter(x => x !== MAX_SKEW)))}. One — id ${WORST.id} — takes **${secs(MAX_SKEW)}**, about ${Math.round(MAX_SKEW / NEXT_SKEW)}× the next worst (${secs(NEXT_SKEW)}), and nearly ${Math.round(MAX_SKEW / LAG)}× the ${secs(LAG)} lag introduced below. **Skew is a long tail, not a constant**, and that shape is why you cannot look it up.`, '',
       `**A watermark is a claim about completeness:** "no event with an event time earlier than *t* will arrive from here on." It is what lets a pipeline decide a window is done. The usual way to produce one is a heuristic: take the highest event time seen so far and subtract an assumed worst-case lag — here **${secs(LAG)}**.`, '',
       `That heuristic is arithmetic on the events that *did* arrive, so it cannot know about one that has not. When id ${L.id} shows up, the watermark already stands at ${hhmmss(WATERMARKS[EVENTS.indexOf(L)])} — it has already claimed ${hhmmss(L.et)} is settled. **The claim is simply false, and nothing in the pipeline detects it.**`, '',
-      `**Now price the fix.** Waiting ${secs(LAG)} drops ${DROP_LAG.length} event (id ${DROP_LAG.join(', ')}). Waiting ${secs(MAX_SKEW)} drops none. The difference is **${secs(MAX_SKEW - LAG)} of extra delay on every answer this pipeline ever produces** — across this seed's ${WIN_STARTS.length} windows, ${secs(LAG * WIN_STARTS.length)} of total delay becomes ${secs(MAX_SKEW * WIN_STARTS.length)}. That is the exchange rate between completeness and latency, and it is fixed by the data, not by your cleverness.`],
+      `**Now price the fix.** Waiting ${secs(LAG)} drops ${DROP_LAG.length} event (id ${DROP_LAG.join(', ')}). Waiting ${secs(MAX_SKEW)} drops none. The difference is **${secs(MAX_SKEW - LAG)} of extra delay on every answer this pipeline ever produces** — counted over the seed's ${WIN_STARTS.length} two-minute event-time windows (the fixed ${secs(WIN)} windows the rest of the book uses, not the one-minute buckets above), ${secs(LAG * WIN_STARTS.length)} of total delay becomes ${secs(MAX_SKEW * WIN_STARTS.length)}. That is the exchange rate between completeness and latency, and it is fixed by the data, not by your cleverness.`],
     whenHeading: 'When to use which clock, and why the budget is a product decision',
     when: [
-      `**Use event time for any question about the world.** "How many clicks happened at ${hhmmss(M0).slice(0, 5)}?" is a fact about users; the answer is ${M0_TRUE} and it does not change because your pipeline was busy. Session lengths, conversion windows, latency percentiles — all event time.`, '',
-      `**Use processing time for any question about the system.** "What is our ingest rate right now?" is a fact about you; the answer is ${sumOf(BY_PT[M0])} for that minute and it is *correct*. Processing time is not the lazy choice — it is the right answer to a different question.`, '',
+      `**Use event time for any question about the world.** "How many clicks happened at ${hhmmss(M0).slice(0, 5)}?" is a fact about users; the answer is ${M0_TRUE} clicks and it does not change because your pipeline was busy. Session lengths, conversion windows, latency percentiles — all event time.`, '',
+      `**Use processing time for any question about the system.** "What is our ingest rate right now?" is a fact about you; the answer is ${sumOf(BY_PT[M0])} clicks received in that minute, and it is *correct*. Processing time is not the lazy choice — it is the right answer to a different question.`, '',
       `**Use both to measure yourself:** the gap between the two clocks *is* your lag. That is the number to alert on.`, '',
       `**And accept that the budget cannot be derived.** Nobody can tell you whether ${secs(MAX_SKEW - LAG)} of extra latency on every answer is worth not losing ${DROP_LAG.length} event in ${EVENTS.length}. It depends on who reads the number and what they do with it — a product decision wearing an engineering costume.`, '',
       `**What this does not settle:** the ${secs(MAX_SKEW)} budget was only knowable *after* id ${WORST.id} arrived. In a live pipeline you choose the lag before you have seen your worst skew, and you will be wrong in the direction you cannot measure. The honest design response is not a better guess — it is to make late data a case you handle rather than a case you prevent.`],
     diagramHeading: 'Visual walkthrough — measured skew, a guessing watermark, and the bill',
-    sub: `Skews, watermarks and drop counts are computed from the seed and asserted: max skew ${secs(MAX_SKEW)} > 3× lag, and waiting ${secs(MAX_SKEW)} drops nothing.` },
+    sub: `Skews, watermarks and drop counts are computed from the seed and asserted: max skew ${secs(MAX_SKEW)} is more than 3× the ${secs(LAG)} lag, and waiting ${secs(MAX_SKEW)} drops nothing.` },
   { name: 'ch01-shapes', steps: C3,
     title: 'Three shapes of data — and why batch is the special case',
     subtitle: `bounded · unbounded-as-batch (${MISPLACED.length} of ${EVENTS.length} events misplaced) · unbounded-as-streaming`,
@@ -361,7 +364,7 @@ const DIAGRAMS = [
       `**The pipeline:** writer (click producer) → transport (unbounded stream) → collector (window assigner) → aggregator/store (window state) → reader (dashboard).`, '',
       `**One stage creates all the difficulty: the transport.** It is the only stage that reorders or delays, and it is where a click that happened at ${hhmmss(L.et)} becomes a record delivered at ${hhmmss(L.pt)}. Every other stage is then written to *tolerate* what it did. In particular the collector buckets on \`e.et\` and **never consults its own clock** — a stage that asks "what time is it?" in order to bucket data is precisely the bug this chapter is about.`, '',
       `**Now the number that decides the design.** Follow the ${hhmmss(M0).slice(0, 5)} minute all the way through:`, '',
-      `- Clicks that actually happened in it: ids ${BY_ET[M0].join(', ')} — sum **${M0_TRUE}**.`,
+      `- Clicks that actually happened in it: ids ${BY_ET[M0].join(', ')}, carrying ${BY_ET[M0].map(i => EVENTS[i].v).join(' + ')} — **${M0_TRUE}** clicks.`,
       `- The watermark crosses ${hhmmss(M0 + MIN).slice(0, 5)} at event id ${EVENTS[M0_DECL].id}, which arrives at **${hhmmss(M0_DECL_PT)}**. At that moment only ids ${EVENTS.filter((e, i) => i <= M0_DECL && minOf(e.et) === M0).map(e => e.id).join(', ')} have landed.`,
       `- So the dashboard declares the minute complete and publishes **${M0_SHOWN}** — **${M0_ERR}% low**.`,
       `- The truth is not knowable until id ${L.id} lands at **${hhmmss(M0_FIX_PT)}**.`, '',
@@ -376,7 +379,7 @@ const DIAGRAMS = [
       `**What this design does NOT settle — four gaps, each a later chapter:**`, '',
       `1. **The ${secs(LAG)} lag is a guess.** It was wrong about id ${L.id} by ${secs(skewOf(L) - LAG)}, and nothing inside the pipeline could detect that. Option C's ${secs(MAX_SKEW)} was only knowable *after* id ${WORST.id} happened.`,
       `2. **One minute never closes.** ${LAST_MIN_SPAN} still holds ${sumOf(BY_ET[LAST_MIN])}. Unbounded input means unbounded state unless something expires it.`,
-      `3. **Nothing here is exactly-once.** If the transport redelivers id ${L.id}, the ${hhmmss(M0).slice(0, 5)} minute reads ${M0_TRUE + L.v}, and this design cannot distinguish that from a real click.`,
+      `3. **Nothing here is exactly-once.** If the transport redelivers id ${L.id}, the ${hhmmss(M0).slice(0, 5)} minute reads ${M0_TRUE + L.v}, and this design cannot distinguish that from a real report of ${L.v} more clicks.`,
       `4. **It is sized for ${EVENTS.length} events.** Nothing here says what happens at a million per second.`],
     diagramHeading: 'Visual walkthrough — five stages, one wrong number, three options',
     sub: `The publish time, the published value and the ${secs(M0_BLIND)} error window are all derived from the seed's watermarks and asserted.` },
@@ -402,7 +405,7 @@ const COMMON = [
   '// primitive: len(xs) — element count.  len([1,2]) = 2',
   '// Two of an event\'s five fields are CLOCKS, which is the whole subject of ch01:',
   '//   et = event time, when the thing happened  ·  pt = processing time, when we saw it',
-  '//   v  = the value being summed (clicks, here)  ·  key = which stream it belongs to',
+  '//   v  = how many clicks the event reports; every total is a sum of v  ·  key = which stream',
   'type Event { id, key, et, pt, v }',
   `// primitive: EVENTS — the book's ${EVENTS.length} events, in PROCESSING order (tools/stream_seed.js).`,
   `//   EVENTS[0] = (id 0, key "a", et ${EVENTS[0].et}, pt ${EVENTS[0].pt}, v ${EVENTS[0].v})`,
@@ -468,11 +471,11 @@ PROGRAMS.push({
       { t: `the late event is bucketed by its EVENT time`, line: at('fun countBy(events, clock)', 'fun countBy(events, clock)::val minute = minOf(e[clock])'),
         stack: [MAIN(), { name: 'countBy', locals: ['events = EVENTS', 'clock = "et"', 'm = @0x100', `e = EVENTS[${L.id}]`, `minute = ${minOf(L.et)}`] }],
         heap: [{ key: 'byEvent', hot: true }],
-        cap: `On the pass for id ${L.id}, \`clock\` is \`"et"\`, so \`minute\` is \`minOf(${L.et})\` = ${minOf(L.et)} — the ${hhmmss(M0).slice(0, 5)} minute, where the click actually happened. Its ${L.v} joins ids ${BY_ET[M0].filter(i => i !== L.id).join(' and ')} for a total of ${M0_TRUE}.` },
+        cap: `On the pass for id ${L.id}, \`clock\` is \`"et"\`, so \`minute\` is \`minOf(${L.et})\` = ${minOf(L.et)} — the ${hhmmss(M0).slice(0, 5)} minute, where the click actually happened. Its ${L.v} clicks join the ${BY_ET[M0].filter(i => i !== L.id).map(i => EVENTS[i].v).join(' + ')} of ids ${BY_ET[M0].filter(i => i !== L.id).join(' and ')} for a total of ${M0_TRUE}.` },
       { t: 'the SAME line, with clock = "pt", sends it somewhere else', line: at('fun countBy(events, clock)::val minute = minOf(e[clock])', 'fun countBy(events, clock)::add(m, minute, e.v)'),
         stack: [MAIN({ byEvent: '@0x100' }), { name: 'countBy', locals: ['events = EVENTS', 'clock = "pt"', 'm = @0x200', `e = EVENTS[${L.id}]`, `minute = ${minOf(L.pt)}`] }],
         heap: [{ key: 'byEvent' }, { key: 'byProc', hot: true }],
-        cap: `Identical code, one argument changed. Now \`minute\` is \`minOf(${L.pt})\` = ${minOf(L.pt)} — the ${hhmmss(minOf(L.pt)).slice(0, 5)} minute, ${Math.round((minOf(L.pt) - minOf(L.et)) / MIN)} minutes away from where the click happened. The ${L.v} lands in a minute during which this user did nothing.` },
+        cap: `Identical code, one argument changed. Now \`minute\` is \`minOf(${L.pt})\` = ${minOf(L.pt)} — the ${hhmmss(minOf(L.pt)).slice(0, 5)} minute, ${Math.round((minOf(L.pt) - minOf(L.et)) / MIN)} minutes away from where the click happened. Its ${L.v} clicks land in a minute during which this user did nothing.` },
       { t: `so ${DISAGREE.length} of ${MINUTES.length} minutes hold different numbers`, line: at('fun disagree(a, b)', 'if (a.byMinute[minute] != b.byMinute[minute]) { out.append(minute) }'),
         stack: [MAIN({ byEvent: '@0x100', byProc: '@0x200' }), { name: 'disagree', locals: ['a = @0x100', 'b = @0x200', 'out = @0x300', `minute = ${DISAGREE[DISAGREE.length - 1]}`] }],
         heap: [{ key: 'byEvent' }, { key: 'byProc' }, { key: 'diff', hot: true }],
@@ -480,11 +483,11 @@ PROGRAMS.push({
       { t: 'and neither counter is wrong', line: at('    val diff    = disagree(byEvent, byProc)'),
         stack: [MAIN({ byEvent: '@0x100', byProc: '@0x200', diff: '@0x300' })],
         heap: [{ key: 'byEvent' }, { key: 'byProc' }, { key: 'diff' }],
-        cap: `Every event was counted exactly once in both counters — ${EVENTS.reduce((s, e) => s + e.v, 0)} total in each. Nothing was dropped and no sum is wrong. The two Counters are answers to two different questions, and \`diff\` is the list of minutes where choosing the wrong one would mislead someone.` },
+        cap: `Every event was added exactly once to both counters — ${TOTAL_V} clicks in each. Nothing was dropped and no sum is wrong. The two Counters are answers to two different questions, and \`diff\` is the list of minutes where choosing the wrong one would mislead someone.` },
     ];
   },
   intro: [
-    `**What is being answered.** Why "count clicks per minute" is ambiguous — as one loop, run twice.`, '',
+    `**What is being answered.** Why "count clicks per minute" — the per-minute sum of v — is ambiguous, as one loop run twice.`, '',
     `\`countBy(events, clock)\` takes the clock as a **parameter**. There is no branch per clock and no separate code path: the only difference between the two calls is the string \`"et"\` or \`"pt"\`. Watch \`minute\` on the highlighted line in steps 1 and 2 — the same expression evaluates to ${minOf(L.et)} and then to ${minOf(L.pt)} for the same event.`, '',
     `That is the point. A processing-time dashboard is not a buggy event-time dashboard. It is the same program given a different argument, and it is **correct** — just about a different question.`],
   sub: `The per-minute sums and the disagreement list are computed from the seed and asserted by the generator.` });
@@ -502,7 +505,7 @@ PROGRAMS.push({
     '// primitive: skewOf(e) — how late an event was: pt minus et, in seconds.',
     `//   skewOf(EVENTS[0]) = ${skewOf(EVENTS[0])}      skewOf(EVENTS[${L.id}]) = ${skewOf(L)}`,
     '// primitive: max(xs) — the largest element.  max([1, 3, 2]) = 3',
-    `// primitive: WINDOWS_N — how many windows this pipeline produces.  WINDOWS_N = ${WIN_STARTS.length}`,
+    `// primitive: WINDOWS_N — how many ${WIN}s (two-minute) event-time windows the seed fills.  WINDOWS_N = ${WIN_STARTS.length}`,
     '',
     '// function: watermarkAfter(i) — the completeness CLAIM after event i:',
     '//   the highest event time seen through i, minus LAG.',

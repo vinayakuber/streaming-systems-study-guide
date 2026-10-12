@@ -46,7 +46,16 @@ const NEVER_MATCHES = NEVER.reduce((n, p) => n + p.all.length, 0);
 const bufferAt = (i) => EVENTS.filter((e, j) => j <= i && EVENTS.slice(j).some(() => true)
   && (minWm(i) === null || e.et + J >= minWm(i))).length;
 const MAX_BUFFER = Math.max(...EVENTS.map((_, i) => bufferAt(i)));
-// the TEMPORAL join: each left row probes the right side's state AS OF its own et
+// the same buffer split by side: the peak above counts rows of BOTH streams together
+const bufferSide = (i, k) => EVENTS.filter((e, j) => j <= i && e.key === k && (minWm(i) === null || e.et + J >= minWm(i))).length;
+const PEAK_I = EVENTS.findIndex((_, i) => bufferAt(i) === MAX_BUFFER);
+const PEAK_L = bufferSide(PEAK_I, LEFT), PEAK_R = bufferSide(PEAK_I, RIGHT);
+const SIDE_MAX_L = Math.max(...EVENTS.map((_, i) => bufferSide(i, LEFT)));
+const SIDE_MAX_R = Math.max(...EVENTS.map((_, i) => bufferSide(i, RIGHT)));
+// an ILLUSTRATIVE traffic rate for the sizing formula — assumed for scale, not taken from the seed
+const RATE = 10000, RATE_TXT = `${RATE / 1000}k`, RATE_BUF_TXT = `${RATE * J / 1000}k`;
+// the TEMPORAL join: each left row probes the right side's state AS OF its own et.
+// That state is the IMPRESSION TOTAL: the sum of v over every impression with et <= the probe time.
 const temporalAt = (et) => rights.filter(r => r.et <= et).reduce((s, r) => s + r.v, 0);
 const arrivedBy = (l) => rights.filter(r => idx(r) < idx(l) && r.et <= l.et);
 const TEMPORAL = lefts.map(l => ({ l, value: rights.some(r => r.et <= l.et) ? temporalAt(l.et) : null,
@@ -69,6 +78,11 @@ if (!TEMPORAL_NULL) fail('no left row probes an empty table; the temporal-join N
 if (!STALE.length) fail('every temporal lookup on arrival already equals its as-of answer; the settled-table caveat has no worked case');
 if (STALE.some(t => t.value === null)) fail('a lookup on arrival found a version the as-of answer lacks; the arrival filter is wrong');
 if (MAX_BUFFER < 2) fail('the join never buffers more than one row');
+if (PEAK_L + PEAK_R !== MAX_BUFFER) fail('the per-side buffer split does not add up to the peak');
+if (!PEAK_L || !PEAK_R) fail('the peak buffer holds rows of only one side, so "both sides together" has no worked case');
+const BUF_BOTH = `${MAX_BUFFER} rows of both streams together (${PEAK_L} clicks + ${PEAK_R} ${pl(PEAK_R, 'impression', 'impressions')}, after event ${PEAK_I})`;
+const BUF_SIDES = `per side, the click buffer peaks at ${SIDE_MAX_L} and the impression buffer at ${SIDE_MAX_R}`;
+const V_DEF = `each impression's value \`v\` (the seed's per-event number)`;
 
 const W = 1140;
 
@@ -94,10 +108,10 @@ const C1 = [
       s += c.cells('bv', c.P.main.x + 60, c.P.main.y + 96, EVENTS.map((_, i) => String(bufferAt(i))), { cw: 110, ch: 26, size: 11,
         hotSet: new Set(EVENTS.map((_, i) => bufferAt(i) === MAX_BUFFER ? i : -1).filter(i => i >= 0)), hotFill: c.C.warnFill, hotEdge: c.C.warn });
       return s + c.note('b1', c.P.main.x + 24, c.P.main.y + 140, 1040, [
-        `The buffer peaks at ${MAX_BUFFER} rows on this ${EVENTS.length}-row stream, and it is bounded only because the join window is.`,
+        `The buffer peaks at ${MAX_BUFFER} rows of both streams together (${PEAK_L} clicks + ${PEAK_R} ${pl(PEAK_R, 'impression', 'impressions')}) on this ${EVENTS.length}-row stream, bounded only because the join window is.`,
         `Each buffered row is waiting for a counterpart that may never come. A join's state is therefore proportional to arrival rate times the join window.`,
       ], c.C.warn, c.C.warnFill); },
-    cap: `Rows cannot be matched and discarded immediately — each one waits for a counterpart. The buffer peaks at ${MAX_BUFFER} rows here, and the only reason it peaks at all rather than growing is the ${secs(J)} window. That makes join state (arrival rate × join window), which is the sizing formula to carry away.` },
+    cap: `Rows cannot be matched and discarded immediately — each one waits for a counterpart. The buffer peaks at ${BUF_BOTH}; ${BUF_SIDES}. The only reason it peaks at all rather than growing is the ${secs(J)} window. That makes each side's join state (its arrival rate × join window), and the whole buffer the sum over both sides, which is the sizing formula to carry away.` },
   { t: 'and the watermark is what ends the wait', draw: (c) =>
       c.panel('WHEN EACH CLICK\'S RESULT MAY BE EMITTED', 'a')
       + c.mapRows('wt', c.P.main.x + 24, c.P.main.y + 52, PLAN.map(p =>
@@ -154,15 +168,16 @@ const C2 = [
             : `impression total ${t.value}, from ${rights.filter(r => r.et <= t.l.et).map(r => r.id).join(',')}`]),
         { w: 1040, rh: 32, hot: TEMPORAL.findIndex(t => t.value === null), label: 'one lookup per row, against the table as it stood at that event time' })
       + c.note('j1', c.P.main.x + 24, c.P.main.y + 66 + TEMPORAL.length * 32, 1040, [
+        `The table's state at time t is the impression total: the sum of v over every impression with et at or before t.`,
         `No window, no buffer, no wait on the other side's watermark. ${TEMPORAL_NULL} row${TEMPORAL_NULL === 1 ? ' gets' : 's get'} NULL because the table had no version yet at that event time.`,
         `What it DOES need is a VERSIONED table, complete for that time: the lookup is "as of ${hhmmss(TEMPORAL[2].l.et)}", not "now".`,
       ], c.C.good, c.C.goodFill),
-    cap: `A temporal join is a lookup, and it behaves completely differently: no buffer, and no wait on a second watermark. The price is in the note — it needs the table's **history**, because "as of ${hhmmss(TEMPORAL[2].l.et)}" is not the same question as "now", and it needs that history to be **complete**. The values above are the as-of answers; looked up the moment each click arrives, ${STALE_TXT}, because ${IMPS_TXT} ${pl(LATE_IMPS.length, 'has', 'have')} not arrived yet.` },
+    cap: `A temporal join is a lookup, and it behaves completely differently: no buffer, and no wait on a second watermark. The price is in the note — it needs the table's **history**, because "as of ${hhmmss(TEMPORAL[2].l.et)}" is not the same question as "now", and it needs that history to be **complete**. The values above are the as-of impression totals (sums of v); looked up the moment each click arrives, ${STALE_TXT}, because ${IMPS_TXT} ${pl(LATE_IMPS.length, 'has', 'have')} not arrived yet.` },
   { t: 'so the two joins are bounded by entirely different things', draw: (c) =>
       c.panel('SIDE BY SIDE, ON THE SAME DATA', 'a')
       + c.mapRows('sb', c.P.main.x + 24, c.P.main.y + 52, [
         [`what bounds it`, `windowed: the ${secs(J)} window · temporal: the table, finite per key`],
-        [`what it buffers`, `windowed: up to ${MAX_BUFFER} rows · temporal: nothing`],
+        [`what it buffers`, `windowed: up to ${MAX_BUFFER} rows, both sides together · temporal: nothing`],
         [`when it emits`, `windowed: when both watermarks pass · temporal: on arrival, trusting the table`],
         [`what it needs`, `windowed: watermarks on both sides · temporal: a VERSIONED table`],
       ], { w: 1040, rh: 36, hot: 2, label: 'not two implementations of one idea — two different operations' })
@@ -192,7 +207,7 @@ const C3 = [
       c.panel('WHAT MAY BE DROPPED, AND WHEN', 'a')
       + c.mapRows('jb', c.P.main.x + 24, c.P.main.y + 52, [
         [`a buffered row may be dropped when`, `both watermarks pass its event time plus ${secs(J)}`],
-        [`peak buffer on this stream`, `${MAX_BUFFER} of ${EVENTS.length} rows`],
+        [`peak buffer on this stream`, `${MAX_BUFFER} of ${EVENTS.length} rows, both sides: ${PEAK_L} clicks + ${PEAK_R} ${pl(PEAK_R, 'impression', 'impressions')}`],
         [`what sets that peak`, `arrival rate x the join window — nothing else`],
         [`what happens with no window`, `every row of both sides retained forever`],
       ], { w: 1040, rh: 36, hot: 2, label: 'the sizing formula for a windowed join, in one row' })
@@ -200,7 +215,7 @@ const C3 = [
         `A ${secs(J)} window on a stream arriving at R rows/sec buffers about R x ${J} rows per side. That is the number to put in a capacity plan.`,
         `Doubling the window doubles the state, which is why "just widen it" is never free.`,
       ], c.C.warn, c.C.warnFill),
-    cap: `The sizing formula is the whole of it: buffered rows ≈ arrival rate × join window, per side. ${MAX_BUFFER} rows here on a ${EVENTS.length}-row stream. It matters because the two obvious responses to a join missing matches — widen the window, raise allowed lateness — both scale this number linearly.` },
+    cap: `The sizing formula is the whole of it: buffered rows ≈ arrival rate × join window, per side, and the buffer is the sum of both sides. ${MAX_BUFFER} rows here on a ${EVENTS.length}-row stream, both sides together; ${BUF_SIDES}. It matters because the two obvious responses to a join missing matches — widen the window, raise allowed lateness — both scale this number linearly.` },
   { t: 'a late row can contradict a result already emitted', draw: (c) =>
       c.panel('THE RETRACTION CASE, WITH REAL ROWS', 'a')
       + c.mapRows('rc', c.P.main.x + 24, c.P.main.y + 52, NEEDS_RETRACTION.slice(0, 2).flatMap(p => [
@@ -252,7 +267,7 @@ const C4 = [
       c.panel('AD ATTRIBUTION — A WINDOWED JOIN OF CLICKS AND IMPRESSIONS', 'a')
       + c.mapRows('pp', c.P.main.x + 24, c.P.main.y + 52, [
         [`click stream + impression stream`, `${lefts.length} clicks, ${rights.length} impressions, out of order`],
-        [`windowed join (buffer + watermark)`, `${secs(J)} window · peak buffer ${MAX_BUFFER} rows · claims min(both watermarks)`],
+        [`windowed join (buffer + watermark)`, `${secs(J)} window · peak buffer ${MAX_BUFFER} rows (both sides) · claims min(both watermarks)`],
         [`retraction emitter`, `because ${NEEDS_RETRACTION.length} emitted result${NEEDS_RETRACTION.length === 1 ? ' gets' : 's get'} contradicted`],
         [`attribution store`, `must accept a retraction, including of a NO-MATCH`],
       ], { w: 1040, rh: 36, hot: 2, label: 'four stages, and the third exists only because results can be contradicted' })
@@ -291,7 +306,7 @@ const C4 = [
       c.panel('SCOPE', 'p')
       + c.note('x1', c.P.main.x + 24, c.P.main.y + 46, 1040, [`${NEVER_MATCHES} of the ${MATCHES.length} true matches are never published, and nothing reports it. An absent attribution is indistinguishable from a click that genuinely matched nothing.`], c.C.hot, c.C.hotFill)
       + c.note('x2', c.P.main.x + 24, c.P.main.y + 112, 1040, [`The store must retract a NEGATIVE result: "click ${NEEDS_RETRACTION[0].l.id} matched nothing" is published and later false. Updating a number is easy; un-publishing an absence is not.`], c.C.hot, c.C.hotFill)
-      + c.note('x3', c.P.main.x + 24, c.P.main.y + 178, 1040, [`Buffer is arrival rate x ${secs(J)} per side — ${MAX_BUFFER} rows here. Nothing in this design bounds it for a real traffic rate, and both tuning knobs scale it linearly.`], c.C.warn, c.C.warnFill)
+      + c.note('x3', c.P.main.x + 24, c.P.main.y + 178, 1040, [`Buffer is arrival rate x ${secs(J)} per side — ${MAX_BUFFER} rows here, both sides together. Nothing in this design bounds it for a real traffic rate, and both tuning knobs scale it linearly.`], c.C.warn, c.C.warnFill)
       + c.note('x4', c.P.main.x + 24, c.P.main.y + 244, 1040, [`And one click matches ${Math.max(...PLAN.map(p => p.all.length))} impressions here, so the join's OUTPUT can exceed either input. Attribution policy (first touch? last? split?) is a question this design does not answer.`], c.C.blue, c.C.blueFill),
     cap: `The fourth gap is the one that is a business question rather than an engineering one: one click matches ${Math.max(...PLAN.map(p => p.all.length))} impressions, so the join emits more rows than it received and somebody has to decide which impression gets the credit. Nothing about windows, watermarks or retractions answers that — but the design cannot ship without it being answered.` },
 ];
@@ -306,13 +321,13 @@ const DIAGRAMS = [
       `Reading this book's two keys as two streams — "${LEFT}" is clicks, "${RIGHT}" is impressions — gives a real join to measure.`, '',
       `**A batch join completes; a stream-stream join does not.** Over these inputs a batch join tests ${lefts.length} × ${rights.length} = ${lefts.length * rights.length} candidate pairs and finishes. The streaming version never finishes on its own: either side may still produce a match.`, '',
       `So SQL requires a **time bound**, and with a ${secs(J)} bound there are exactly **${MATCHES.length} true matches** here: ${MATCHES.map(p => `${p[0]}-${p[1]}`).join(', ')}. Without the bound the join would retain every row of both sides forever, so the bound makes the state finite *and* the semantics defined.`, '',
-      `**The join must buffer.** A row cannot be matched and discarded — it waits for a counterpart that may never come. The buffer peaks at **${MAX_BUFFER} rows** on this ${EVENTS.length}-row stream, and the sizing formula is (arrival rate × join window) per side.`, '',
+      `**The join must buffer.** A row cannot be matched and discarded — it waits for a counterpart that may never come. The buffer peaks at **${MAX_BUFFER} rows** on this ${EVENTS.length}-row stream — that counts both streams together, ${PEAK_L} clicks + ${PEAK_R} ${pl(PEAK_R, 'impression', 'impressions')} after event ${PEAK_I}. The sizing formula is (arrival rate × join window) per side, and the buffer is the sum of the two sides.`, '',
       `**The watermark ends the wait, and it is the minimum over both inputs** — ch03's rule, now structural because a join always has two. Trace each click's emission point and **${NEVER.length} of the ${PLAN.length} never ${pl(NEVER.length, 'emits', 'emit')} at all**, because the minimum watermark never passes its bound. Those rows hold **${NEVER_MATCHES} of the ${MATCHES.length} true matches**: computed, sitting in state, never published.`, '',
       `**And the input type picks the join type.** Stream ⋈ stream is bounded by *time*; stream ⋈ table is bounded by the *table*, one lookup per row. On this data the windowed join publishes ${EMITTED_ONTIME} of ${MATCHES.length} matches on time, while a temporal join answers all ${TEMPORAL.length} clicks on arrival — ${STALE.length} of them short, because an impression stream is not a settled table. Mistaking one for the other, in either direction, is the common streaming-join bug.`],
     whenHeading: 'When a windowed join is the right tool, and how to size it',
     when: [
       `**Use a windowed join when both sides are genuinely streams** and a match means "these happened close together". The window width is a domain statement — how close counts as together — not a tuning parameter.`, '',
-      `**Size it as arrival rate × window, per side**, and treat that as a hard number in the capacity plan. ${MAX_BUFFER} rows here; at 10k rows/sec with a ${secs(J)} window it is 600k rows per side.`, '',
+      `**Size it as arrival rate × window, per side**, add the two sides, and treat that as a hard number in the capacity plan. ${MAX_BUFFER} rows here for both sides together (${BUF_SIDES}). At an illustrative ${RATE_TXT} rows/sec per side — a rate assumed for scale, not one measured on this stream — a ${secs(J)} window holds ${RATE_TXT} × ${J} = ${RATE_BUF_TXT} rows per side, and twice that across both.`, '',
       `**Expect the accounting, not just the matches.** On out-of-order data a correct windowed join delivers ${EMITTED_ONTIME} of ${MATCHES.length} matches correctly first time, ${EMITTED_LATE} after a retraction, and ${NEVER_MATCHES} not at all. If that split is unacceptable, the answer is a different join or a different guarantee — not a wider window.`, '',
       `**Reach for a temporal join the moment the right-hand side is dimension-like.** Ask "could this side still produce a row that changes an old answer?" If not, it is a table, and windowing it adds a wait the data never needed.`, '',
       `**What this does not settle:** what a temporal join requires in exchange for not waiting. It needs the table's *history*, because the lookup is "as of this event time" rather than "now" — which is the next concept.`],
@@ -325,11 +340,11 @@ const DIAGRAMS = [
     why: [
       `**The windowed (interval) join** matches rows whose event times are within a window of each other. One subtraction per candidate pair: ${MATCHES.length} of the ${lefts.length * rights.length} pairs are within ${secs(J)}.`, '',
       `Worth noticing early: **one click matches ${Math.max(...PLAN.map(p => p.all.length))} impressions**, so a windowed join is not one-to-one and its output can exceed either input. That is a capacity surprise people usually meet after shipping.`, '',
-      `**The temporal (stream-table) join** enriches each row with the version of a table that was current *at that row's event time*. Here each click probes the impression side as of its own \`et\`: ${TEMPORAL.filter(t => t.value !== null).slice(0, 2).map(t => `click ${t.l.id} → ${t.value}`).join(', ')}, and ${TEMPORAL_NULL} click${TEMPORAL_NULL === 1 ? ' gets' : 's get'} NULL because no impression existed yet at that time.`, '',
+      `**The temporal (stream-table) join** enriches each row with the version of a table that was current *at that row's event time*. Here the impression side is read as a table whose state at time t is the **impression total** — the sum of ${V_DEF} over every impression with \`et\` ≤ t — and each click probes that total as of its own \`et\`: ${TEMPORAL.filter(t => t.value !== null).slice(0, 2).map(t => `click ${t.l.id} → ${t.value}`).join(', ')}, and ${TEMPORAL_NULL} click${TEMPORAL_NULL === 1 ? ' gets' : 's get'} NULL because no impression existed yet at that time.`, '',
       `No window, no buffer, no wait on the other side's watermark — each of the ${TEMPORAL.length} rows is looked up as it arrives. The price is that it needs a **versioned** table that is **complete** for that time: "as of ${hhmmss(TEMPORAL[2].l.et)}" is not the same question as "now", and a table holding only current values cannot answer it. These impressions are not complete in time: looked up on arrival, ${STALE_TXT}, because ${IMPS_TXT} arrive after the clicks they precede.`, '',
       `**So the two are bounded by entirely different things:**`, '',
       `- what bounds it — windowed: the ${secs(J)} window · temporal: the table, finite per key`,
-      `- what it buffers — windowed: up to ${MAX_BUFFER} rows · temporal: nothing`,
+      `- what it buffers — windowed: up to ${MAX_BUFFER} rows, both sides together · temporal: nothing`,
       `- when it emits — windowed: when both watermarks pass · temporal: on arrival, trusting the table to be settled`,
       `- what it needs — windowed: watermarks on both sides · temporal: a versioned table`, '',
       `The third row is the substantive difference: a windowed join waits because a counterpart may still arrive, and a temporal join does not because it trusts the table's state at that event time to be settled. On this data that is ${NEVER.length} ${pl(NEVER.length, 'click', 'clicks')} never emitting versus all ${TEMPORAL.length} answered on arrival, ${STALE.length} of them short — the trust holds for a dimension table, not for a stream of impressions.`, '',
@@ -348,7 +363,7 @@ const DIAGRAMS = [
     subtitle: `${EMITTED_ONTIME} + ${EMITTED_LATE} + ${NEVER_MATCHES} = ${MATCHES.length} true matches · peak buffer ${MAX_BUFFER}`,
     heading: 'Why a correct windowed join still fails to deliver most of its matches here',
     why: [
-      `**Join state is bounded by the window, and only by it.** A buffered row may be dropped once both watermarks pass its event time plus ${secs(J)}. Peak buffer here: **${MAX_BUFFER} of ${EVENTS.length} rows**, and the formula is arrival rate × join window per side. Doubling the window doubles the state, which is why "just widen it" is never free.`, '',
+      `**Join state is bounded by the window, and only by it.** A buffered row may be dropped once both watermarks pass its event time plus ${secs(J)}. Peak buffer here: **${MAX_BUFFER} of ${EVENTS.length} rows**, both sides together (${PEAK_L} clicks + ${PEAK_R} ${pl(PEAK_R, 'impression', 'impressions')}), and the formula is arrival rate × join window per side, summed over both sides. Doubling the window doubles the state, which is why "just widen it" is never free.`, '',
       `**A late row can contradict a result already emitted.** Click ${NEEDS_RETRACTION[0].l.id} reaches its emission point after event ${NEEDS_RETRACTION[0].emitIdx} and publishes ${NEEDS_RETRACTION[0].onTime.length ? `a match with impression ${NEEDS_RETRACTION[0].onTime.join(', ')}` : '**no match** — nothing within ' + secs(J) + ' had arrived'}. Then impression ${NEEDS_RETRACTION[0].lateArrivals.join(', ')} arrives at event ${idx(EVENTS.find(e => e.id === NEEDS_RETRACTION[0].lateArrivals[0]))} and it *does* match, ${Math.abs(NEEDS_RETRACTION[0].l.et - EVENTS.find(e => e.id === NEEDS_RETRACTION[0].lateArrivals[0]).et)}s apart.`, '',
       `So the join must retract and re-emit. And note which result is being retracted: **a no-match**. Downstream that reads as "this click was never attributed", which is a fact rather than a provisional answer — a negative result is still a result.`, '',
       `**The honest accounting for all ${MATCHES.length} true matches:**`, '',
@@ -385,7 +400,7 @@ const DIAGRAMS = [
       `**What this design does NOT settle — four gaps:**`, '',
       `1. **${NEVER_MATCHES} of the ${MATCHES.length} true matches are never published and nothing reports it.** Absence of an attribution is indistinguishable from a genuine non-match, so this gap is invisible from inside the system.`,
       `2. **The store must retract a negative result.** "Click ${NEEDS_RETRACTION[0].l.id} matched nothing" is published and later false — a harder store requirement than revising a value.`,
-      `3. **Buffer is arrival rate × ${secs(J)} per side**, ${MAX_BUFFER} rows on this stream, and both tuning knobs scale it linearly. Nothing here bounds it at a real traffic rate.`,
+      `3. **Buffer is arrival rate × ${secs(J)} per side, summed over both sides** — ${MAX_BUFFER} rows on this stream (${PEAK_L} clicks + ${PEAK_R} ${pl(PEAK_R, 'impression', 'impressions')}), and both tuning knobs scale it linearly. Nothing here bounds it at a real traffic rate.`,
       `4. **One click matches ${Math.max(...PLAN.map(p => p.all.length))} impressions**, so the join's output can exceed either input and somebody must decide which impression gets the credit. First touch, last touch or split is a business decision this design cannot make — and it cannot ship without one.`],
     diagramHeading: 'Visual walkthrough — four stages, the honest count, two knobs',
     sub: `The attribution accounting and both tuning consequences are computed from the seed and asserted.` },

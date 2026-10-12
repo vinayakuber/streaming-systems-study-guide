@@ -65,7 +65,7 @@ VIEWS = a@1  a@3  b@50  b@90  a@130  b@220  a@245  b@260  a@540    (9 views)
   at 30,000,000 distinct visitors a day:
     exact  : 0.48 GB of visitor ids, per counter, per day
     sketch : 2,048 bytes, whatever the cardinality
-    234,375x, and the sketch's cost does not depend on the answer --
+    the sketch is 234,375 times smaller, and its cost does not depend on the answer --
     which is the property the chapter's one-number accumulator had and the exact
     distinct count never did.
 

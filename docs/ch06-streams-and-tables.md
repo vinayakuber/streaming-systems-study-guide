@@ -1,5 +1,7 @@
 # Chapter 6: Streams and Tables
 
+> ▶ **Narrated decks:** [part 1](../decks/ch06-streams-and-tables-part1.html) · [part 2](../decks/ch06-streams-and-tables-part2.html) · [part 3](../decks/ch06-streams-and-tables-part3.html) · [part 4](../decks/ch06-streams-and-tables-part4.html) · [part 5](../decks/ch06-streams-and-tables-part5.html) · [part 6](../decks/ch06-streams-and-tables-part6.html) · [part 7](../decks/ch06-streams-and-tables-part7.html) · [part 8](../decks/ch06-streams-and-tables-part8.html) · [part 9](../decks/ch06-streams-and-tables-part9.html) — this chapter explained step by step, with voice-over and questions to answer. GitHub shows HTML as source, so download the file and open it in Chrome.
+
 > Streams and tables are two views of the same data — a stream is the change log of a table, and a table is the materialized aggregate of a stream — and every data-processing system picks a point on this duality.
 
 _Also known as: SS Ch06 · Stream-Table Duality · Change Log · Materialized View · Stream · Table_
@@ -887,7 +889,7 @@ all assertions passed
 <details>
 <summary><b>Variation 3</b> — the audit log that was compacted <i>(looks like compliance)</i></summary>
 
-> A regulator asks what a record held on a date two years ago. **The log was compacted last year.**
+> A regulator asks what a record held on a date two years ago. **The log was compacted last year:** every entry older than that day was cut to the last one per record, so the entries since then survive and the history before it is gone.
 
 **Why it is not obvious.** The answer is that the question cannot be answered, and the valuable part is that this was decided a year ago by someone optimising disk. The useful framing separates two logs that were conflated: a **state** log, which may be compacted freely, and an **audit** log, which may not — and they have different retention, different access patterns and often different storage. Arriving at "these were never the same log and treating them as one was the mistake" is better than any recovery scheme, because there is no recovery scheme.
 
@@ -1916,10 +1918,12 @@ def compact(log):
     return [(k, last[k]) for k in sorted(last)]
 
 def value_after(log, k, n):
-    """What key k was after its n-th change.  Answerable from the full log and from
-    nothing else.  Returns UNANSWERABLE rather than the current value, because
-    answering "24" to a question about the 2nd change is a confident wrong answer
-    rather than a missing one."""
+    """What key k was after its n-th change.  It counts ENTRIES, so only the full log
+    can be asked: on a compacted log the n-th entry is not the n-th change (the 1st
+    entry left for "a" holds 24, while its 1st change made it 5).  Returns
+    UNANSWERABLE when fewer than n entries exist, never the current value in their
+    place, because answering "24" to a question about the 2nd change is a confident
+    wrong answer rather than a missing one."""
     seen = 0
     for key, v in log:
         if key == k:
@@ -2029,7 +2033,12 @@ def main():
     assert value_after(small, ASKED, mid) == UNANSWERABLE
     # the opposite outcome is forbidden: it must NOT quietly return the current value
     assert value_after(small, ASKED, mid) != table[ASKED], "a confident wrong answer"
-    assert value_after(small, ASKED, 1) == 24, "the present is still answerable"
+    # the present is still answerable -- by FOLDING, not by counting entries: the 1st
+    # entry left on the compacted log is not the 1st change, so value_after belongs to
+    # the full log only
+    assert fold(small)[ASKED] == 24, "the present is still answerable"
+    assert value_after(small, ASKED, 1) == 24 != value_after(CHANGELOG, ASKED, 1) == 5, \
+        "on a compacted log the 1st entry is not the 1st change"
     assert value_after(CHANGELOG, "zz", 1) == UNANSWERABLE, "an unknown key too"
 
     # a deletion must be an ENTRY, not an absence -- and it is the one entry
@@ -2081,7 +2090,7 @@ def main():
                 want = h[n - 1] if n <= len(h) else UNANSWERABLE
                 assert value_after(log, k, n) == want, (log, k, n)
             if len(h) > 1:                             # history is lost by compaction
-                assert value_after(compact(log), k, 1) == h[-1]
+                assert value_after(compact(log), k, 1) == h[-1]   # its LAST value, not its 1st
                 assert value_after(compact(log), k, 2) == UNANSWERABLE
     print("\n  800 random changelogs: folding the compacted log always reproduces the")
     print("  table, emit round-trips the present, and value_after matches a rescan --")
@@ -2441,7 +2450,7 @@ _From the 28 problems:_ 26-payment-system
 
 ### Q2
 
-An ad-click pipeline needs both a per-minute event feed and a per-campaign running total, but the team built two separate systems that disagree.
+An ad-click pipeline receives click reports — each event says that one campaign (a or b) got v more clicks — and needs both a per-minute feed of those events and a per-campaign running total of clicks (the sum of v), but the team built two separate systems that disagree.
 
 **Interviewer's question:** How do you model the event feed and the running total so they never disagree?
 
@@ -2449,12 +2458,12 @@ An ad-click pipeline needs both a per-minute event feed and a per-campaign runni
 
 **System-design components:**
 - Stream — the event feed
-- Table — the per-campaign total
+- Table — the per-campaign click total (sum of v)
 - Aggregation — stream -> table
 
 ```java
-// events a+5 a+3 b+7 a+2 a+6 b+1 b+9 b+4 a+8
-//   stream: 9 events, table: a:24 b:21 (total 45)
+// events a+5 a+3 b+7 a+2 a+6 b+1 b+9 b+4 a+8   (campaign+clicks)
+//   stream: 9 events, table: a:24 b:21 (clicks summed, total 45)
 //   both from the same source -> cannot disagree
 ```
 

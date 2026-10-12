@@ -67,8 +67,8 @@ CLOSE_AFTER = 47, PAGE_AFTER = 2
   there are never two paged incidents for 50 to bridge.  The window has to be wide
   enough to swallow the gap the late firing was going to land in.
   the band is 3 wide out of 121: it opens at 90 - 3 = 87, where the bridge stops
-  forming, and closes at 220 - 130 = 90, where two real incidents start merging into
-  one.  And it only works for THIS arrival order:
+  forming, and its last working value is 220 - 130 - 1 = 89; at 220 - 130 = 90
+  two real incidents start merging into one.  And it only works for THIS arrival order:
     reorder the same nine firings to [90, 220, 1, 3, 260, 245, 130, 540, 50]
     and (87, 0) double-pages 1 time(s) again.  So the pair that worked was fitted to
     an arrival order nobody controls -- which is the honest answer to the question:

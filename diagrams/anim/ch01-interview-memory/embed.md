@@ -869,8 +869,8 @@ def main():
     for t, a, c in bad_one:
         ra, rc = average_at(SAMPLES, t)
         print(f"    t={t:>3}s reports {a:.3f} over {c} samples; the truth is {ra:.3f} over {rc}")
-    # CORRECTED, twice.  The first expectation was that it is wrong only at the three
-    # arrivals where two or more expire -- 90, 220, 540.  Measured: it is wrong at FIVE,
+    # TWO TEMPTING GUESSES, AND WHAT IS MEASURED.  The first guess is that it is wrong
+    # only at the three arrivals where two or more expire -- 90, 220, 540.  Measured: it is wrong at FIVE,
     # including 130 and 245 where only one sample was due to leave.  The reason is that the
     # error does not heal: once an arrival retires one of the two it owed, each later
     # arrival adds one and retires one, so the backlog is carried forever and the count
@@ -1374,9 +1374,9 @@ def main():
                 assert ck["total"] > 0, "these values are all positive, so the total must be"
         print(f"  crash at each of positions 1..{N - 1}, policy {policy:>7}: final answer "
               f"{sorted(set(round(e, 4) for e in ends))}")
-    # CORRECTED.  The first expectation was that a total-only restart simply stops
-    # subtracting, so the final answer would be the whole stream's sum over W.  Measured, it
-    # is not: the window REFILLS after the restart and subtraction resumes once it holds
+    # THE TEMPTING GUESS, AND WHAT IS MEASURED.  It is tempting to expect a total-only
+    # restart to stop subtracting, so the final answer would be the whole stream's sum over
+    # W.  Measured, it is not: the window REFILLS after the restart and subtraction resumes once it holds
     # more than W values.  What is permanent is narrower and much sharper -- the restored
     # total entered the accumulator with no window entries behind it, so it is never taken
     # out, and the final answer is high by EXACTLY the checkpointed total over W.  That
@@ -1411,8 +1411,8 @@ def main():
     print(f"    position ONE AHEAD of the state : {[round(a, 4) for a in ahead]}")
     print(f"    position ONE BEHIND the state   : {[round(a, 4) for a in behind]}")
     print(f"    the truth                       : {[round(a, 4) for a in truth]}")
-    # CORRECTED.  The expectation taken from the problem statement was that an older state
-    # against a newer position double-counts.  Measured, it is the other way round: a
+    # THE TEMPTING GUESS, AND WHAT IS MEASURED.  It is tempting to expect an older state
+    # against a newer position to double-count.  Measured, it is the other way round: a
     # position AHEAD of the state skips the input in between (xs[4] = 6 is never added, so
     # the sequence is SHORT by one answer), and a position BEHIND the state re-reads input
     # already folded in, which is the double count.  The lesson survives intact -- skew is

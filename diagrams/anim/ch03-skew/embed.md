@@ -16,7 +16,7 @@ The common heuristic is one line: **watermark = max event time seen so far − s
 
 **Too slow means correct and slow.** The threshold is exactly **141s**: at 140s the window still publishes 15, at 141s it publishes 19. The cost is **296s** of added latency on this window — and only on this one: [12:02, 12:04), [12:04, 12:06) close at 12:09:02 under both bounds, and [12:08, 12:10) closes under neither.
 
-And note the threshold is **not** id 7's 230s of skew, which is the number most readers would reach for. It is `12:04:20 − 12:02 + 1` — the highest event time seen before the straggler, minus the **window's end**. The watermark only has to stay below the window boundary until the straggler lands; it never has to reach back to 12:00:50. Tuning skew to your worst observed delay holds every watermark 89s further back than this window needs.
+And note the threshold is **not** id 7's 230s of delay (its processing time minus its event time), which is the number most readers would reach for. It is `12:04:20 − 12:02 + 1` — the highest event time seen before the straggler, minus the **window's end**. The watermark only has to stay below the window boundary until the straggler lands; it never has to reach back to 12:00:50. Tuning skew to your worst observed delay holds every watermark 89s further back than this window needs.
 
 #### When to tune skew up, when to track per source, and what neither fixes
 
@@ -55,7 +55,7 @@ Read the last column down the table: 2, 1, 1, 0, then 0. The same 9 events, the 
 
 <img src="../diagrams/anim/ch03-skew/frames/step-03.svg" alt="Step 3: too SLOW: correct, and the answer arrives much later" width="1040">
 
-The number a reader expects here is 230s — the straggler's skew. The actual threshold is 141s, and the derivation is in the note: the watermark only needs to stay below the window's END, not below the late event's event time. Worth knowing, because tuning skew to your worst observed delay holds every watermark 89s further back than this window needs.
+The number a reader expects here is 230s — the straggler's delay, its processing time minus its event time. The actual threshold is 141s, and the derivation is in the note: the watermark only needs to stay below the window's END, not below the late event's event time. Worth knowing, because tuning skew to your worst observed delay holds every watermark 89s further back than this window needs.
 
 </details>
 <details>

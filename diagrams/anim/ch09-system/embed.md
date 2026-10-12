@@ -26,7 +26,7 @@ The never-published group is the one that matters commercially, and the pipeline
 
 1. **2 of the 5 true matches are never published and nothing reports it.** Absence of an attribution is indistinguishable from a genuine non-match, so this gap is invisible from inside the system.
 2. **The store must retract a negative result.** "Click 0 matched nothing" is published and later false — a harder store requirement than revising a value.
-3. **Buffer is arrival rate × 60s per side**, 5 rows on this stream, and both tuning knobs scale it linearly. Nothing here bounds it at a real traffic rate.
+3. **Buffer is arrival rate × 60s per side, summed over both sides** — 5 rows on this stream (4 clicks + 1 impression), and both tuning knobs scale it linearly. Nothing here bounds it at a real traffic rate.
 4. **One click matches 2 impressions**, so the join's output can exceed either input and somebody must decide which impression gets the credit. First touch, last touch or split is a business decision this design cannot make — and it cannot ship without one.
 
 #### Visual walkthrough — four stages, the honest count, two knobs

@@ -16,7 +16,7 @@ That buffer is the alignment cost, and with badly skewed sources it is the laten
 
 The two failures are wrong in **opposite directions**, which is the clearest argument for atomicity: a half-committed checkpoint is not a slightly-stale checkpoint, it is a wrong one.
 
-**At-least-once and exactly-once recovery differ exactly here.** Under at-least-once the 4 events after the checkpoint may be applied twice — up to **22 double-counted, 49% of the 45 total**. Exactly-once aligns state and offsets so they are applied once, and pays for it with the alignment above plus a two-phase commit at the sink.
+**At-least-once and exactly-once recovery differ exactly here.** Under at-least-once, with the single checkpoint after event 4, the 4 events after it may be applied twice — up to **22 double-counted, 49% of the 45 total**. That is the k = 5 row of the sweep above; checkpointing every 3 events lowers the bound to 13, as the next concept computes. Exactly-once aligns state and offsets so they are applied once, and pays for it with the alignment above plus a two-phase commit at the sink.
 
 Which couples the two settings from the previous concept: **the checkpoint interval you chose for recovery time also sets the worst-case double count.**
 

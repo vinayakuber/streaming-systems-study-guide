@@ -13,6 +13,14 @@ forever, with no recovery.  Bounding the maximum to the last W events fixes that
 -- and a bounded sliding maximum is exactly the problem above.  Both watermarks
 are implemented here and the corrupt event is fed to both.
 
+"Late" in this program is a per-event test with no windows: an event is late
+when its event time is below the watermark seen just before it arrives.  The
+chapter's Flow sections call an event late when its WINDOW has already closed.
+That is the narrower test: a closed window means the watermark is past the
+window's end, which is past the event's time, so every window-late event is
+late here too, but not the other way round.  On the clean stream both tests
+pick out the same single event, et = 50 (id 7).
+
 Run it:  python3 programs/ch03.py
 """
 

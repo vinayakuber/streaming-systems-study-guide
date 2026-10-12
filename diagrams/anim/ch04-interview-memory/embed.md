@@ -1019,7 +1019,7 @@ all assertions passed
 
 > A monitor fires repeatedly while a system is unhealthy. **Group the firings into incidents** — no gap longer than `G` — and page once per incident.
 
-**Why it is not obvious.** The grouping is identical and the paging is what breaks: you must page while the incident is open, which means acting on a run **before** you know it is finished, and then a later firing within `G` must not page again. So the retraction problem from the trace becomes a paging problem — if two incidents merge, somebody was paged twice for what turned out to be one. The useful answer is that `G` is now two decisions, not one: how long to wait before paging, and how long before declaring the incident over, and they need not be the same number.
+**Why it is not obvious.** The grouping is identical and the paging is what breaks: you must page while the incident is open, which means acting on a run **before** you know it is finished, and then a later firing within `G` must not page again. So the retraction problem from the trace becomes a paging problem — if two incidents merge, somebody was paged twice for what turned out to be one. The useful answer is that `G` is now two decisions, not one: how long to wait before paging, and how long before declaring the incident over (the program names them `PAGE_AFTER` and `CLOSE_AFTER`), and they need not be the same number. Widening `CLOSE_AFTER` to the book's 120 removes the double page only by merging two real incidents into one, a different error.
 
 **Where it lands.** `absorb` unchanged, with the withdrawal in the traced frames reinterpreted as a page that should not have been sent — which is why the stable-identity point matters here most.
 
@@ -1119,7 +1119,8 @@ FIRINGS = [1, 3, 90, 130, 245, 260, 220, 50, 540]
 # CLOSE_AFTER = 47 is the chapter's G: the quiet period after which an incident is over.  The
 # chapter chose it so that 50 bridges two runs instead of extending one, which is exactly the
 # case this program needs.  120 is the chapter's other gap, kept as the contrast: at 120
-# nothing bridges, so the double page cannot happen at all.
+# nothing bridges, so the double page cannot happen -- but only because two incidents a
+# human would separate are merged into one, which is a different error.
 CLOSE_AFTER = 47
 WIDE = 120
 
@@ -1396,8 +1397,8 @@ def main():
     print(f"  there are never two paged incidents for 50 to bridge.  The window has to be wide")
     print(f"  enough to swallow the gap the late firing was going to land in.")
     print(f"  the band is {len(both)} wide out of {CLOSES}: it opens at 90 - 3 = {90 - 3}, where the bridge stops")
-    print(f"  forming, and closes at 220 - 130 = {220 - 130}, where two real incidents start merging into")
-    print(f"  one.  And it only works for THIS arrival order:")
+    print(f"  forming, and its last working value is 220 - 130 - 1 = {220 - 130 - 1}; at 220 - 130 = {220 - 130}")
+    print(f"  two real incidents start merging into one.  And it only works for THIS arrival order:")
     assert min(c for c, _ in both) == 90 - 3 and max(c for c, _ in both) == 220 - 130 - 1
 
     # the escape is fitted to one arrival order, which is the reason not to trust it
@@ -1528,8 +1529,8 @@ CLOSE_AFTER = 47, PAGE_AFTER = 2
   there are never two paged incidents for 50 to bridge.  The window has to be wide
   enough to swallow the gap the late firing was going to land in.
   the band is 3 wide out of 121: it opens at 90 - 3 = 87, where the bridge stops
-  forming, and closes at 220 - 130 = 90, where two real incidents start merging into
-  one.  And it only works for THIS arrival order:
+  forming, and its last working value is 220 - 130 - 1 = 89; at 220 - 130 = 90
+  two real incidents start merging into one.  And it only works for THIS arrival order:
     reorder the same nine firings to [90, 220, 1, 3, 260, 245, 130, 540, 50]
     and (87, 0) double-pages 1 time(s) again.  So the pair that worked was fitted to
     an arrival order nobody controls -- which is the honest answer to the question:

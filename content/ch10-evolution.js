@@ -105,7 +105,7 @@ registerChapter({
           'windows and watermarks apply whether the input ends or not',
           'there is no separate batch implementation to drift'
         ] },
-      { box: 'speed result', role: 'speed result — the live output',
+      { box: 'speed result', role: 'speed result — the live output (Kappa has no speed layer; this is not Lambda\'s)',
         parts: [
           'the live result reflects the current fold of the log',
           'it is low-latency but uses the same code as any reprocess',

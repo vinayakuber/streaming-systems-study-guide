@@ -8,10 +8,10 @@
 
 - **global window** — one result: **45**.
 - **fixed 120s windows** — 4 results: 19, 11, 7, 8, totalling 45.
-- **sliding, 120s wide every 60s** — 7 results, totalling **78**.
+- **sliding, 120s wide every 60s, the first starting at 12:00** — 7 results, one per non-empty window (starting 12:00, 12:01, 12:02, 12:03, 12:04, 12:08, 12:09), totalling **78**.
 - **session windows, 120s gap** — key `a` gets 3 sessions, key `b` gets 2.
 
-Read the sliding row twice. Its results sum to 78 over a dataset containing 45, because each event falls into up to 2 overlapping windows. Nothing was duplicated — **overlap is a property of the windowing**, and partitioning windowings (fixed, global) preserve the total while overlapping ones do not.
+Read the sliding row twice. Its results sum to 78 over a dataset containing 45, because each event falls into up to 2 overlapping windows. The count depends on one stated rule: **no sliding window starts before 12:00**, where this book's time begins, so events of the first 60s (ids 0, 1, 7) sit in just one window. A windowing that also opened [11:59, 12:01) would add a result of 12 — 8 results totalling 90. Nothing was duplicated — **overlap is a property of the windowing**, and partitioning windowings (fixed, global) preserve the total while overlapping ones do not.
 
 **And the two axes are genuinely independent.** The grid in the walkthrough below picks 3 of those transforms and 3 of those windowings — 9 legal pipelines — and picking a row constrains no column. So "we sum purchases" leaves the answer undetermined, and so does "we use session windows".
 

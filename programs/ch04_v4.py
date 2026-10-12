@@ -87,7 +87,8 @@ FIRINGS = [1, 3, 90, 130, 245, 260, 220, 50, 540]
 # CLOSE_AFTER = 47 is the chapter's G: the quiet period after which an incident is over.  The
 # chapter chose it so that 50 bridges two runs instead of extending one, which is exactly the
 # case this program needs.  120 is the chapter's other gap, kept as the contrast: at 120
-# nothing bridges, so the double page cannot happen at all.
+# nothing bridges, so the double page cannot happen -- but only because two incidents a
+# human would separate are merged into one, which is a different error.
 CLOSE_AFTER = 47
 WIDE = 120
 
@@ -364,8 +365,8 @@ def main():
     print(f"  there are never two paged incidents for 50 to bridge.  The window has to be wide")
     print(f"  enough to swallow the gap the late firing was going to land in.")
     print(f"  the band is {len(both)} wide out of {CLOSES}: it opens at 90 - 3 = {90 - 3}, where the bridge stops")
-    print(f"  forming, and closes at 220 - 130 = {220 - 130}, where two real incidents start merging into")
-    print(f"  one.  And it only works for THIS arrival order:")
+    print(f"  forming, and its last working value is 220 - 130 - 1 = {220 - 130 - 1}; at 220 - 130 = {220 - 130}")
+    print(f"  two real incidents start merging into one.  And it only works for THIS arrival order:")
     assert min(c for c, _ in both) == 90 - 3 and max(c for c, _ in both) == 220 - 130 - 1
 
     # the escape is fitted to one arrival order, which is the reason not to trust it

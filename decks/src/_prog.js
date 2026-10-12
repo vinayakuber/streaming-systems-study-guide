@@ -55,7 +55,7 @@ function snippet(chId, index) {
   const file = fs.readdirSync(dir).find(f => f.startsWith(chId + '-') && f.endsWith('.js'));
   if (!file) throw new Error(`no content/${chId}-*.js`);
   let chapter;
-  new Function('registerChapter', fs.readFileSync(path.join(dir, file), 'utf8'))(c => { chapter = c; });
+  new Function('registerChapter', 'require', fs.readFileSync(path.join(dir, file), 'utf8'))(c => { chapter = c; }, require);
   const q = (chapter.interview || [])[index];
   if (!q || !q.code) throw new Error(`${file}: interview question ${index + 1} has no code snippet`);
   const lines = q.code.replace(/\n+$/, '').split('\n');

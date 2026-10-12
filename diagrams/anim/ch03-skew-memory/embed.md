@@ -4,9 +4,9 @@
 
 **What is being answered.** Where "late" comes from — as one function, `evaluate(lag)`, run at four different skew bounds over the same 9 events.
 
-The line to read twice is in `isLate`: `return c < i`. It compares the **window's closing index** with the **event's arrival index**, and never looks at the event's own skew. That is the mechanical form of "late is a verdict, not a property".
+The line to read twice is in `isLate`: `return c < i`. It compares the **window's closing index** with the **event's arrival index**, and never looks at the event's own delay (processing time minus event time). That is the mechanical form of "late is a verdict, not a property".
 
-`LAG_MIN` = 141 is derived rather than chosen: the highest event time seen before the straggler (260) minus the window's end (120), plus one. It is far below the straggler's 230s of skew, because the watermark only has to stay under the window boundary.
+`LAG_MIN` = 141 is derived rather than chosen: the highest event time seen before the straggler (260) minus the window's end (120), plus one. It is far below the straggler's 230s of delay, because the watermark only has to stay under the window boundary.
 
 The animation steps through the code, holding each line long enough to read the STACK (call frames and their locals) and the HEAP (allocated arrays and objects) as they are AT THAT MOMENT. Expand any step to study it on its own.
 
@@ -41,7 +41,7 @@ The animation steps through the code, holding each line long enough to read the 
 
 <img src="../diagrams/anim/ch03-skew-memory/frames/step-04.svg" alt="Step 4: and at the threshold, nothing is late at all" width="980">
 
-`right` publishes 19 with an empty `lateIds`. Read the three heap rows together: late counts 2, 1, 0 — from identical data. And note 141 is well below id 7's 230s of skew: the watermark only had to stay under 120, never reach back to 50.
+`right` publishes 19 with an empty `lateIds`. Read the three heap rows together: late counts 2, 1, 0 — from identical data. And note 141 is well below id 7's 230s of delay: the watermark only had to stay under 120, never reach back to 50.
 
 </details>
 

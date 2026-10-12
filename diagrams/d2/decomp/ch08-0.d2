@@ -2,9 +2,9 @@ direction: down
 
 S0: {
   label: |md
-    **streams**
+    **click stream**
 
-    clicks, impressions
+    sources a, b
   |
   shape: rectangle
   style: {
@@ -74,7 +74,7 @@ S4: {
   }
 }
 
-S0 -> S1: "1. clicks, impressions"
+S0 -> S1: "1. sources a, b"
 S1 -> S2: "2. continuous query"
 S2 -> S3: "3. watermark + window"
 S3 -> S4: "4. updating result"

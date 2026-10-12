@@ -82,7 +82,7 @@ if (HEUR_VALUE === W0_TRUE) fail('the heuristic already gives the right answer; 
 if (new Set(SWEEP.map(s => s.late.length)).size < 2) fail('the lag sweep does not change the late count — "too fast" would be unobservable');
 if (CORRECT_SWEEP.value !== W0_TRUE) fail(`lag ${LAG_MIN} does not make W0 correct`);
 if (sweep(LAG_MIN - 1).value === W0_TRUE) fail(`lag ${LAG_MIN - 1} is already correct, so ${LAG_MIN} is not the threshold`);
-if (LAG_MIN >= L.pt - L.et) fail(`the threshold ${LAG_MIN} is not below the straggler's ${L.pt - L.et}s skew — the surprise is the point`);
+if (LAG_MIN >= L.pt - L.et) fail(`the threshold ${LAG_MIN} is not below the straggler's ${L.pt - L.et}s delay — the surprise is the point`);
 if (!BLOCKED.length) fail('no window is blocked by the per-source minimum; propagation would have no observable cost');
 if (REGRESSIONS.length < 2) fail(`the naive formula regresses ${REGRESSIONS.length} times — need at least two to show why max() is in the formula`);
 if (LAG_PRICE <= 0) fail('the correct lag is not slower than the default');
@@ -189,13 +189,13 @@ const C2 = [
         [`skew = ${secs(LAG_MIN - 1)}`, `publishes ${sweep(LAG_MIN - 1).value} at ${hhmmss(sweep(LAG_MIN - 1).closeAt)} — still wrong`],
         [`skew = ${secs(LAG_MIN)}`, `publishes ${CORRECT_SWEEP.value} at ${hhmmss(CORRECT_SWEEP.closeAt)} — correct`],
         [`the latency added`, `${secs(LAG_PRICE)} later than the ${secs(LAG)} default, on ${winList(PRICED.map(p => p.w))} only`],
-        [`the straggler's actual skew`, `${secs(L.pt - L.et)} — NOT the threshold, and much larger`],
+        [`the straggler's delay (pt − et)`, `${secs(L.pt - L.et)} — NOT the threshold, and much larger`],
       ], { w: 1040, rh: 36, hot: 1, label: 'one second of configuration separates the first two rows' })
       + c.note('t1', c.P.main.x + 24, c.P.main.y + 212, 1040, [
         `The threshold is ${secs(LAG_MIN)} because the watermark only has to stay below the WINDOW END (${mm(W0_END)}) until id ${L.id} lands — it never has to reach back to ${hhmmss(L.et)}.`,
-        `So it is derived from ${hhmmss(maxEtThrough(LI - 1))} − ${mm(W0_END)}: the highest event time seen before the straggler, minus the window's end. Not from the straggler's skew.`,
+        `So it is derived from ${hhmmss(maxEtThrough(LI - 1))} − ${mm(W0_END)}: the highest event time seen before the straggler, minus the window's end. Not from the straggler's delay.`,
       ], c.C.warn, c.C.warnFill),
-    cap: `The number a reader expects here is ${secs(L.pt - L.et)} — the straggler's skew. The actual threshold is ${secs(LAG_MIN)}, and the derivation is in the note: the watermark only needs to stay below the window's END, not below the late event's event time. Worth knowing, because tuning skew to your worst observed delay holds every watermark ${secs(L.pt - L.et - LAG_MIN)} further back than this window needs.` },
+    cap: `The number a reader expects here is ${secs(L.pt - L.et)} — the straggler's delay, its processing time minus its event time. The actual threshold is ${secs(LAG_MIN)}, and the derivation is in the note: the watermark only needs to stay below the window's END, not below the late event's event time. Worth knowing, because tuning skew to your worst observed delay holds every watermark ${secs(L.pt - L.et - LAG_MIN)} further back than this window needs.` },
   { t: 'and per-source tracking beats one global guess', draw: (c) =>
       c.panel('ONE WATERMARK PER SOURCE, THEN THE MINIMUM', 'p')
       + c.mapRows('ps', c.P.main.x + 24, c.P.main.y + 52, [
@@ -341,7 +341,7 @@ const DIAGRAMS = [
       '',
       `**Too fast means real events look late.** At skew ${secs(SWEEP[0].lag)} the pipeline calls ${SWEEP[0].late.length} events late; at ${secs(LAG_MIN)} it calls ${CORRECT_SWEEP.late.length} late. Nothing about the data changed between those rows. **"Late" is a verdict the watermark passes, not a property of an event** — an over-eager watermark does not detect lateness, it creates it.`, '',
       `**Too slow means correct and slow.** The threshold is exactly **${secs(LAG_MIN)}**: at ${secs(LAG_MIN - 1)} the window still publishes ${sweep(LAG_MIN - 1).value}, at ${secs(LAG_MIN)} it publishes ${CORRECT_SWEEP.value}. The cost is **${secs(LAG_PRICE)}** of added latency on this window — and only on this one: ${winList(UNPRICED.map(p => p.w))} close at ${UNPRICED.map(p => hhmmss(p.a)).filter((v, i, a) => a.indexOf(v) === i).join(', ')} under both bounds, and ${winList(NEVER.map(p => p.w))} closes under neither.`, '',
-      `And note the threshold is **not** id ${L.id}'s ${secs(L.pt - L.et)} of skew, which is the number most readers would reach for. It is \`${hhmmss(maxEtThrough(LI - 1))} − ${mm(W0_END)} + 1\` — the highest event time seen before the straggler, minus the **window's end**. The watermark only has to stay below the window boundary until the straggler lands; it never has to reach back to ${hhmmss(L.et)}. Tuning skew to your worst observed delay holds every watermark ${secs(L.pt - L.et - LAG_MIN)} further back than this window needs.`],
+      `And note the threshold is **not** id ${L.id}'s ${secs(L.pt - L.et)} of delay (its processing time minus its event time), which is the number most readers would reach for. It is \`${hhmmss(maxEtThrough(LI - 1))} − ${mm(W0_END)} + 1\` — the highest event time seen before the straggler, minus the **window's end**. The watermark only has to stay below the window boundary until the straggler lands; it never has to reach back to ${hhmmss(L.et)}. Tuning skew to your worst observed delay holds every watermark ${secs(L.pt - L.et - LAG_MIN)} further back than this window needs.`],
     whenHeading: 'When to tune skew up, when to track per source, and what neither fixes',
     when: [
       `**Tune skew up when a late answer is cheaper than a wrong one** — billing, compliance, anything reconciled against another system. You are buying correctness with latency at a measurable rate: here ${secs(LAG_PRICE)} for ${W0_TRUE - HEUR_VALUE} of ${W0_TRUE}.`, '',
@@ -555,7 +555,7 @@ PROGRAMS.push({
     '}',
     '',
     '// function: isLate(e, i, lag) — was this event\'s window already closed when it',
-    '//   arrived? Note it asks about the WINDOW, never about the event\'s own skew.',
+    '//   arrived? Note it asks about the WINDOW, never about the event\'s own delay.',
     `//   isLate(EVENTS[${L.id}], ${LI}, ${LAG}) = true      isLate(EVENTS[${L.id}], ${LI}, ${LAG_MIN}) = false`,
     'fun isLate(e, i, lag) {',
     '    val c = closesAt(winOf(e.et), lag)',
@@ -612,13 +612,13 @@ PROGRAMS.push({
       { t: 'and at the threshold, nothing is late at all', line: at(`    val right   = evaluate(${LAG_MIN})`),
         stack: [MAIN({ fast: '@0x100', deflt: '@0x200', justOff: `lag ${LAG_MIN - 1}, published ${sweep(LAG_MIN - 1).value}`, right: '@0x300' })],
         heap: [{ key: 'deflt' }, { key: 'right', hot: true }],
-        cap: `\`right\` publishes ${CORRECT_SWEEP.value} with an empty \`lateIds\`. Read the three heap rows together: late counts ${SWEEP[0].late.length}, ${sweep(LAG).late.length}, ${CORRECT_SWEEP.late.length} — from identical data. And note ${LAG_MIN} is well below id ${L.id}'s ${L.pt - L.et}s of skew: the watermark only had to stay under ${W0_END}, never reach back to ${L.et}.` },
+        cap: `\`right\` publishes ${CORRECT_SWEEP.value} with an empty \`lateIds\`. Read the three heap rows together: late counts ${SWEEP[0].late.length}, ${sweep(LAG).late.length}, ${CORRECT_SWEEP.late.length} — from identical data. And note ${LAG_MIN} is well below id ${L.id}'s ${L.pt - L.et}s of delay: the watermark only had to stay under ${W0_END}, never reach back to ${L.et}.` },
     ];
   },
   intro: [
     `**What is being answered.** Where "late" comes from — as one function, \`evaluate(lag)\`, run at four different skew bounds over the same ${EVENTS.length} events.`, '',
-    `The line to read twice is in \`isLate\`: \`return c < i\`. It compares the **window's closing index** with the **event's arrival index**, and never looks at the event's own skew. That is the mechanical form of "late is a verdict, not a property".`, '',
-    `\`LAG_MIN\` = ${LAG_MIN} is derived rather than chosen: the highest event time seen before the straggler (${maxEtThrough(LI - 1)}) minus the window's end (${W0_END}), plus one. It is far below the straggler's ${L.pt - L.et}s of skew, because the watermark only has to stay under the window boundary.`],
+    `The line to read twice is in \`isLate\`: \`return c < i\`. It compares the **window's closing index** with the **event's arrival index**, and never looks at the event's own delay (processing time minus event time). That is the mechanical form of "late is a verdict, not a property".`, '',
+    `\`LAG_MIN\` = ${LAG_MIN} is derived rather than chosen: the highest event time seen before the straggler (${maxEtThrough(LI - 1)}) minus the window's end (${W0_END}), plus one. It is far below the straggler's ${L.pt - L.et}s of delay, because the watermark only has to stay under the window boundary.`],
   sub: `The sweep, the ${LAG_MIN}s threshold and the ${LAG_MIN - 1}s counter-check are computed from the seed and asserted.` });
 
 // ---- concept 3: propagation -------------------------------------------------

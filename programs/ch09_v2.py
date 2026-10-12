@@ -18,6 +18,9 @@
   One list this time: a meeting room's bookings, sorted by start -- (1, 3), (50, 150),
   (130, 245), (220, 320), (540, 540).  Two of those clash: 130..245 overlaps 50..150 over
   minutes 130..150, and 220..320 overlaps 130..245 over 220..245.  Up to 10**6 bookings.
+  These are the interview's own integers; in the book's dataset (tools/stream_seed.js) they
+  are SECONDS past 12:00, and this variation reads the same integers as minutes because a
+  room is booked by the minute.  The numbers carry over; the unit is this surface's own.
 
   GIVEN A ROOM'S BOOKINGS, HOW MANY CLASH AT ONCE, WHERE, AND HOW MANY PAIRS CLASH?
 
@@ -75,7 +78,8 @@ import random
 # its LEFT = [(1, 3), (130, 245), (540, 540)] and RIGHT = [(50, 150), (220, 320)], sorted by
 # start.  Neither list overlapped itself; the union does, and the chapter's two cross-list
 # overlaps (130..150 and 220..245) are now this room's two double-bookings.  Spans are CLOSED:
-# a booking from 130 to 245 occupies 245.
+# a booking from 130 to 245 occupies 245.  The seed counts these integers in seconds; this
+# room reads the same integers in minutes -- the values carry over, the unit does not.
 BOOKINGS = [(1, 3), (50, 150), (130, 245), (220, 320), (540, 540)]
 LEFT = [(1, 3), (130, 245), (540, 540)]      # kept, to check the general sweep against
 RIGHT = [(50, 150), (220, 320)]

@@ -1,5 +1,7 @@
 # Chapter 7: The Practicalities of Persistent State
 
+> ▶ **Narrated decks:** [part 1](../decks/ch07-the-practicalities-of-persistent-state-part1.html) · [part 2](../decks/ch07-the-practicalities-of-persistent-state-part2.html) · [part 3](../decks/ch07-the-practicalities-of-persistent-state-part3.html) · [part 4](../decks/ch07-the-practicalities-of-persistent-state-part4.html) · [part 5](../decks/ch07-the-practicalities-of-persistent-state-part5.html) · [part 6](../decks/ch07-the-practicalities-of-persistent-state-part6.html) · [part 7](../decks/ch07-the-practicalities-of-persistent-state-part7.html) · [part 8](../decks/ch07-the-practicalities-of-persistent-state-part8.html) · [part 9](../decks/ch07-the-practicalities-of-persistent-state-part9.html) — this chapter explained step by step, with voice-over and questions to answer. GitHub shows HTML as source, so download the file and open it in Chrome.
+
 > A stream processor that holds state must be able to persist and recover it — checkpoints, state stores, and incremental snapshots turn in-memory aggregation into durable, restartable computation.
 
 _Also known as: SS Ch07 · Persistent State · Checkpoint · State Store · RocksDB · Recovery · Incremental Snapshot_
@@ -156,7 +158,7 @@ Entry `a@0` holds 8, built from 2 events. Nothing in `st.entries` records which 
 
 **A checkpoint is a snapshot PLUS a stream position**, and the pairing is the whole mechanism. Taken after event 4, it writes 4 state entries holding 23, and the offset **4** that those entries correspond to.
 
-The offset is not bookkeeping — a snapshot that does not say *where* it was taken cannot be resumed from. And the two must be committed **atomically**: state-then-crash re-applies 4 events worth **22**, and offset-then-crash loses the same amount.
+The offset is not bookkeeping — a snapshot that does not say *where* it was taken cannot be resumed from. And the two must be committed **atomically**: state-then-crash leaves the offset stale at -1 and re-applies the 5 events worth **23** that the state already holds (total 68), and offset-then-crash loses the same 23 (total 22).
 
 **A state store is where the bytes live, and it changes nothing semantic.** This stream's 7 entries fit in memory trivially; what makes real state not fit is that the entry count scales with keys × *open windows*, both unbounded. An embedded store (RocksDB and similar) keeps hot entries in memory and the rest on local disk. The entries, their values and their collection times are identical either way — what changes is that checkpointing now means reading those bytes back and uploading them.
 
@@ -164,13 +166,13 @@ The offset is not bookkeeping — a snapshot that does not say *where* it was ta
 
 And the gap **widens**, because full scales with total state while incremental scales with how fast it changes. On a large, mostly-idle state that is the difference between uploading 10 GB and 10 KB.
 
-**The frequency is a trade with no free point.** Checkpoint every 1 event: 9 uploads, worst-case replay 0. Every 3: 8 uploads, replay 2. Once: 7 uploads, replay 8. Both ends are correct.
+**The frequency is a trade with no free point.** Counting incremental entry-uploads — one per state entry a checkpoint writes — the sweep has 4 settings. Every 1: 9 entry-uploads, replay 0. Every 3: 8 entry-uploads, replay 2. Every 5: 4 entry-uploads, replay 4. Once: 7 entry-uploads, replay 8. Replay grows with the interval; the uploads mostly fall, and k = 5 undercuts once only because its single checkpoint, at event 4, leaves the last 4 events uncovered. Both ends are correct.
 
 #### When to checkpoint how often, and what the store choice actually decides
 
 **Pick the frequency from the recovery time you can tolerate, not the I/O you would prefer.** Recovery time is (events since the last checkpoint ÷ replay throughput), so start from the SLA and derive the interval — the I/O then is what it is.
 
-**Use incremental checkpointing unconditionally when the store supports it.** It is the one setting in this chapter with no trade: 8 uploads instead of 14 here, with identical recovery behaviour.
+**Use incremental checkpointing unconditionally when the store supports it.** It is the one setting in this chapter with no trade: 8 entry-uploads instead of 14 here, with identical recovery behaviour.
 
 **Reach for an embedded state store when the entry count stops fitting**, which is a function of key cardinality times open windows. It is a storage decision and changes nothing about windowing, triggers or watermarks.
 
@@ -213,7 +215,7 @@ The numbers make the asymmetry visible: full uploads grow every checkpoint (2, 5
 
 <img src="../diagrams/anim/ch07-checkpoints/frames/step-04.svg" alt="Step 4: and the frequency is a trade with no free point" width="1040">
 
-Four frequencies, and the trade is monotone in both directions — no setting is free. Checkpoint every event and recovery replays 0 but you pay 9 uploads; checkpoint once and you pay 7 uploads and replay 8 events. The number to start from is the recovery time you can tolerate, not the I/O you would prefer.
+The sweep has 4 frequencies, counted in incremental entry-uploads. Replay grows with every step of the interval (0, 2, 4, 8); uploads mostly fall (9, 8, 4, 7), and k = 5 is cheapest only because its one checkpoint, at event 4, never covers the last 4 events. No setting is free: checkpoint every event and recovery replays 0 but you pay 9 entry-uploads; checkpoint once and you pay 7 and replay 8 events. The number to start from is the recovery time you can tolerate, not the I/O you would prefer.
 
 </details>
 
@@ -302,7 +304,7 @@ That buffer is the alignment cost, and with badly skewed sources it is the laten
 
 The two failures are wrong in **opposite directions**, which is the clearest argument for atomicity: a half-committed checkpoint is not a slightly-stale checkpoint, it is a wrong one.
 
-**At-least-once and exactly-once recovery differ exactly here.** Under at-least-once the 4 events after the checkpoint may be applied twice — up to **22 double-counted, 49% of the 45 total**. Exactly-once aligns state and offsets so they are applied once, and pays for it with the alignment above plus a two-phase commit at the sink.
+**At-least-once and exactly-once recovery differ exactly here.** Under at-least-once, with the single checkpoint after event 4, the 4 events after it may be applied twice — up to **22 double-counted, 49% of the 45 total**. That is the k = 5 row of the sweep above; checkpointing every 3 events lowers the bound to 13, as the next concept computes. Exactly-once aligns state and offsets so they are applied once, and pays for it with the alignment above plus a two-phase commit at the sink.
 
 Which couples the two settings from the previous concept: **the checkpoint interval you chose for recovery time also sets the worst-case double count.**
 
@@ -877,7 +879,7 @@ def main():
     print(f"\n  at {VISITORS_PER_DAY:,} distinct visitors a day:")
     print(f"    exact  : {bytes_exact / 1e9:.2f} GB of visitor ids, per counter, per day")
     print(f"    sketch : {bytes_sketch:,} bytes, whatever the cardinality")
-    print(f"    {bytes_exact // bytes_sketch:,}x, and the sketch's cost does not depend on the answer --")
+    print(f"    the sketch is {bytes_exact // bytes_sketch:,} times smaller, and its cost does not depend on the answer --")
     print(f"    which is the property the chapter's one-number accumulator had and the exact")
     print(f"    distinct count never did.")
     assert bytes_exact // bytes_sketch == 234_375
@@ -959,7 +961,7 @@ VIEWS = a@1  a@3  b@50  b@90  a@130  b@220  a@245  b@260  a@540    (9 views)
   at 30,000,000 distinct visitors a day:
     exact  : 0.48 GB of visitor ids, per counter, per day
     sketch : 2,048 bytes, whatever the cardinality
-    234,375x, and the sketch's cost does not depend on the answer --
+    the sketch is 234,375 times smaller, and its cost does not depend on the answer --
     which is the property the chapter's one-number accumulator had and the exact
     distinct count never did.
 
@@ -2571,7 +2573,7 @@ _Role: durable storage — holds the checkpoint bytes_
 
 That is the design's entire claim, as one equation: **23 loaded + 22 replayed = 45**, the no-crash total. Every failed recovery earlier in this chapter failed that equation, and always because the state and the offset did not match.
 
-**Two settings, and one of them is free.** Incremental rather than full checkpointing is 8 uploads instead of 14 at k = 3, with identical recovery behaviour — no trade at all. The frequency trades in three directions at once: I/O, recovery time, and under at-least-once the error bound (up to 13 of 45 at a checkpoint every 3 events).
+**Two settings, and one of them is free.** Incremental rather than full checkpointing is 8 entry-uploads instead of 14 at k = 3, with identical recovery behaviour — no trade at all. The frequency trades in three directions at once: I/O, recovery time, and under at-least-once the error bound (up to 13 of 45 at a checkpoint every 3 events).
 
 #### When this design is enough, and the four things it does not settle
 
@@ -2728,7 +2730,7 @@ A metrics pipeline has 10 GB of state; snapshotting the whole thing every minute
 // the 9 seed events as a scale model, checkpoint every 3
 //   full:        upload 2 + 5 + 7 = 14 entries
 //   incremental: upload 2 + 3 + 3 = 8 entries
-//   -> 57% of the I/O, and the gap widens as state grows
+//   -> 57% of the I/O (a 43% saving), and the gap widens as state grows
 ```
 
 _This is exactly the incremental-checkpoint material in this chapter._

@@ -72,8 +72,7 @@ fires, both sides of the dedupe boundary (remember-then-send against send-then-r
 sides of the far-end idempotency key including the case where the key does NOT rescue the
 design, an empty queue and a one-item queue, a run crashed at every item at once, and a
 20,000-item queue at scale; each row prices its own outcome for both messages, so the row
-shows which message it is acceptable for.  Every row is ASSERTED, so the table cannot drift
-from the code.
+shows which message it is acceptable for.
 
 Run it:  python3 programs/ch05_v4.py
 """

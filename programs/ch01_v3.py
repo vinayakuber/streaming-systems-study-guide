@@ -330,8 +330,8 @@ def main():
     for t, a, c in bad_one:
         ra, rc = average_at(SAMPLES, t)
         print(f"    t={t:>3}s reports {a:.3f} over {c} samples; the truth is {ra:.3f} over {rc}")
-    # CORRECTED, twice.  The first expectation was that it is wrong only at the three
-    # arrivals where two or more expire -- 90, 220, 540.  Measured: it is wrong at FIVE,
+    # TWO TEMPTING GUESSES, AND WHAT IS MEASURED.  The first guess is that it is wrong
+    # only at the three arrivals where two or more expire -- 90, 220, 540.  Measured: it is wrong at FIVE,
     # including 130 and 245 where only one sample was due to leave.  The reason is that the
     # error does not heal: once an arrival retires one of the two it owed, each later
     # arrival adds one and retires one, so the backlog is carried forever and the count

@@ -4,7 +4,7 @@
 
 **What is being answered.** Why a streaming query's clock and its update mode are both properties of the query text — as two query functions over the same rows.
 
-`runTumble(clock)` takes the clock as a **parameter**. There is no second code path for processing time: step 2 shows the same line producing bucket 0 or 240 for id 7 depending on one argument. In SQL that argument is three characters.
+`runTumble(clock)` takes the clock as a **parameter**. There is no second code path for processing time: step 2 shows the same line producing bucket 0 or 240 for id 7 depending on one argument. In SQL that argument is the time column, `et` or `pt` — one letter.
 
 `sinkNeeds(r)` reads only `r.mode`, which `runFilter` and `runTumble` set from their own shape — so "does my sink need UPSERT?" is answerable from the query before anything runs.
 
@@ -25,7 +25,7 @@ The animation steps through the code, holding each line long enough to read the 
 
 <img src="../diagrams/anim/ch08-sql-memory/frames/step-02.svg" alt="Step 2: the clock is a PARAMETER, not a second code path" width="980">
 
-For id 7, `b` is 240 with `clock` = "pt" and 0 with "et" — 2 windows apart. One argument, and the row lands somewhere else entirely. In SQL that argument is three characters of the query text.
+For id 7, `b` is 240 with `clock` = "pt" and 0 with "et" — 2 windows apart. One argument, and the row lands somewhere else entirely. In SQL that argument is the time column, `et` or `pt` — one letter of the query text.
 
 </details>
 <details>

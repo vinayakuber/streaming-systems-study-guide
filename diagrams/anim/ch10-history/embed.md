@@ -12,6 +12,8 @@ Not because it lacks them, but because **the ending answers the time questions f
 
 **So one pipeline can run in both modes.** The grouping is identical: 4 windows with values 19, 11, 7, 8, bounded or unbounded. The only difference is **when each result is final** — batch closes all 4 at event 9, while in streaming 1 is never final at all.
 
+The streaming watermark used throughout this chapter is the seed's rule: **the latest event time seen so far, minus 60s**, and a window is final once that watermark reaches the window's end. After the last event it stands at 12:08, short of 12:10, the end of window [12:08, 12:10) — which is why that window is never final.
+
 #### When the unification pays, and what it does not remove
 
 **It pays whenever the same logic serves history and live traffic** — a backfill, a re-derivation after a schema change, a new consumer over old data. One codebase, with the mode chosen by whether the input ends.

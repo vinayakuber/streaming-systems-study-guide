@@ -10,7 +10,7 @@
 
 **Now the number that decides the design.** Follow the 12:00 minute all the way through:
 
-- Clicks that actually happened in it: ids 0, 1, 7 — sum **12**.
+- Clicks that actually happened in it: ids 0, 1, 7, carrying 5 + 3 + 4 — **12** clicks.
 - The watermark crosses 12:01 at event id 3, which arrives at **12:02:12**. At that moment only ids 0, 1 have landed.
 - So the dashboard declares the minute complete and publishes **8** — **33% low**.
 - The truth is not knowable until id 7 lands at **12:04:40**.
@@ -33,7 +33,7 @@ None of the three is "the right one"; they trade accuracy, latency and downstrea
 
 1. **The 60s lag is a guess.** It was wrong about id 7 by 170s, and nothing inside the pipeline could detect that. Option C's 230s was only knowable *after* id 7 happened.
 2. **One minute never closes.** [12:09, 12:10) still holds 8. Unbounded input means unbounded state unless something expires it.
-3. **Nothing here is exactly-once.** If the transport redelivers id 7, the 12:00 minute reads 16, and this design cannot distinguish that from a real click.
+3. **Nothing here is exactly-once.** If the transport redelivers id 7, the 12:00 minute reads 16, and this design cannot distinguish that from a real report of 4 more clicks.
 4. **It is sized for 9 events.** Nothing here says what happens at a million per second.
 
 #### Visual walkthrough — five stages, one wrong number, three options

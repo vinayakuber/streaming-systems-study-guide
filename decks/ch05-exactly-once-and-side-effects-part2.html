@@ -1,0 +1,1625 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Making Repeats Harmless</title>
+<!-- OPTIONAL web fonts. Delete these three lines to be 100% offline; the deck falls back to
+     Georgia / Helvetica / Menlo and still works. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;0,6..72,700;1,6..72,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* =====================================================================
+   THEME — change colours here. Light theme first, dark theme below.
+   ===================================================================== */
+:root{--ink:#141b28;--soft:#48566e;--faint:#7b879e;--paper:#eceef3;--sheet:#fbfcfe;
+ --panel:#f3f5f9;--rule:#ccd3e0;--hair:#e0e5ee;--acc:#4338ca;--acc-soft:#ecebfb;
+ --up:#0d9488;--dn:#b45309;--upbg:#d7efec;--dnbg:#fae7d3;--nbg:#e7eaf0;--code:#f5f7fb;
+ --warn:#b42318;--warnbg:#fbe3e1;
+ /* diagram box kinds: main = in use, change = in use but changing, new = new, ext = outside */
+ --g-main:#0d9488;--g-change:#b45309;--g-new:#4338ca;--g-ext:#7b879e;
+ --shadow:0 2px 8px rgba(20,27,40,.06);
+ --f-sans:Archivo,"Helvetica Neue",Arial,sans-serif;--f-serif:Newsreader,Georgia,serif;--f-mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace}
+:root[data-theme="dark"]{--ink:#e7ebf4;--soft:#a6b0c6;--faint:#74809a;--paper:#0b1018;
+ --sheet:#161d29;--panel:#121924;--rule:#2a3444;--hair:#222b39;--acc:#a7a2ff;
+ --acc-soft:#1e1d3a;--up:#1f9e91;--dn:#cc7d12;--upbg:#0e3a35;--dnbg:#3a2a10;
+ --nbg:#222b39;--code:#101722;--warn:#e06a60;--warnbg:#3a1a18;
+ --g-main:#2dd4bf;--g-change:#f0a14a;--g-new:#a7a2ff;--g-ext:#8b97b0;--shadow:0 2px 8px rgba(0,0,0,.35)}
+
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--paper);color:var(--ink);overflow:hidden;font-family:var(--f-sans);font-size:16px;line-height:1.5;-webkit-font-smoothing:antialiased}
+/* The whole deck is drawn at 1600x900 and scaled to fit the window (see fit()). */
+#stage{position:absolute;left:50%;top:50%;width:1600px;height:900px;transform:translate(-50%,-50%) scale(var(--s,1));transform-origin:50% 50%;background:var(--paper);overflow:hidden}
+.mast{position:absolute;top:0;left:0;right:0;height:60px;background:var(--sheet);border-bottom:1px solid var(--rule);box-shadow:var(--shadow);display:flex;align-items:center;gap:18px;padding:0 28px;z-index:5}
+.eyebrow{font-family:var(--f-mono);font-size:11px;letter-spacing:.15em;text-transform:uppercase;color:var(--acc);margin:0;white-space:nowrap}
+.tabs{display:flex;gap:4px;flex:1;justify-content:center;flex-wrap:nowrap;overflow:hidden}
+.tabs button{font:inherit;font-size:11.5px;color:var(--soft);background:transparent;border:1px solid var(--hair);border-radius:999px;padding:5px 9px;cursor:pointer;white-space:nowrap}
+.tabs button i{font-style:normal;font-family:var(--f-mono);font-size:10px;color:var(--faint);margin-right:5px}
+.tabs button.on{color:var(--acc);background:var(--acc-soft);border-color:var(--acc);font-weight:600}
+.tabs button.on i{color:var(--acc)}
+.tt{font-family:var(--f-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;padding:8px 12px;border:1px solid var(--rule);color:var(--soft);background:var(--sheet)}
+.tt:hover{color:var(--acc);border-color:var(--acc)}
+.deck{position:absolute;top:60px;left:0;right:0;height:744px}
+/* slide-in / slide-out between slides */
+.slide{position:absolute;inset:0;padding:22px 40px 18px;opacity:0;pointer-events:none;transform:translateX(48px);transition:opacity .6s,transform .6s;display:flex;flex-direction:column;gap:12px}
+.slide.on{opacity:1;pointer-events:auto;transform:none}
+.slide.prev{transform:translateX(-48px)}
+.hd{display:grid;grid-template-columns:auto 1fr;align-items:end;gap:4px 36px}
+.hd .eyebrow{grid-column:1/-1}
+h1{font-family:var(--f-serif);font-weight:600;font-size:44px;line-height:1.02;letter-spacing:-.02em;margin:0;text-wrap:balance}
+.stand{font-family:var(--f-serif);font-size:18px;line-height:1.42;color:var(--soft);margin:0;max-width:70ch}
+.stand em{color:var(--ink);font-style:italic}
+.k{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--faint);margin:0 0 6px;line-height:1.4}
+.card{background:var(--sheet);border:1px solid var(--hair);box-shadow:var(--shadow);padding:14px 16px;min-width:0;min-height:0}
+.chip{display:inline-block;font-family:var(--f-mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;padding:3px 7px;background:var(--nbg);color:var(--soft);border:1px solid var(--hair);margin:0 4px 4px 0;white-space:nowrap}
+.chip.u{background:var(--upbg);color:var(--up);border-color:var(--up)}
+.chip.d{background:var(--dnbg);color:var(--dn);border-color:var(--dn)}
+.chip.a{background:var(--acc-soft);color:var(--acc);border-color:var(--acc)}
+.chip.w{background:var(--warnbg);color:var(--warn);border-color:var(--warn)}
+.src{font-family:var(--f-mono);font-size:10.5px;color:var(--faint);line-height:1.45}
+code{font-family:var(--f-mono);font-size:12px;color:var(--acc)}
+.note{font-size:12.5px;line-height:1.38;color:var(--soft)} .note b{color:var(--ink)}
+
+/* ---- BUILD STEPS: anything with data-st="N" is a ghost until step N, then fades/rises in ---- */
+[data-st]{opacity:.13;filter:grayscale(1);transition:opacity .7s,filter .7s}
+[data-st].lit{opacity:1;filter:none;animation:rise .7s ease}
+@keyframes rise{0%{transform:translateY(8px)}100%{transform:none}}
+/* counters glow while they count, then "land" */
+.ticking{color:var(--acc)!important;text-shadow:0 0 18px color-mix(in srgb,var(--acc) 35%,transparent)}
+.landed{animation:land .6s ease}
+@keyframes land{0%{transform:scale(1.06)}100%{transform:none}}
+
+/* ---- layout: title ---- */
+.tl{flex:1;min-height:0;display:grid;grid-template-columns:600px minmax(0,1fr);gap:26px}
+.tl .l,.tl .r{display:flex;flex-direction:column;gap:14px;min-height:0}
+.tl h1{font-size:54px;margin:4px 0 8px}
+.hero{position:relative;flex:none;padding:12px 18px 10px;border-left:4px solid var(--acc);overflow:hidden}
+.hero::after{content:"";position:absolute;right:0;top:0;width:200px;height:100%;background:radial-gradient(circle at 100% 0,var(--acc-soft),transparent 68%);pointer-events:none}
+.hero p{margin:0;font-family:var(--f-serif);font-size:17px;line-height:1.42;color:var(--soft)}
+.tiles{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;background:var(--rule);border:1px solid var(--rule);box-shadow:var(--shadow)}
+.tiles>div{background:var(--sheet);padding:14px 18px 12px;min-width:0}
+.tiles .v{font-family:var(--f-serif);font-size:48px;font-weight:700;line-height:1;letter-spacing:-.02em;white-space:nowrap;display:inline-block}
+.tiles .d{font-size:12.5px;color:var(--faint);line-height:1.38;margin-top:6px}
+.steps{flex:1;min-height:0;display:grid;grid-auto-rows:1fr;gap:8px}
+.steps .card{display:grid;grid-template-columns:56px 1fr;gap:14px;align-items:center;border-left:4px solid var(--acc);position:relative}
+.steps .n{font-family:var(--f-serif);font-size:40px;font-weight:700;color:var(--acc);text-align:center;line-height:1}
+.steps b{font-size:17px} .steps span.x{display:block;font-size:13.5px;color:var(--soft);line-height:1.38;margin-top:2px}
+/* the coloured bar that "runs" down a card's left edge when it lights up */
+.steps .card::after{content:"";position:absolute;left:-4px;top:0;bottom:0;width:4px;background:var(--up);transform:scaleY(0);transform-origin:top}
+.steps .card.lit::after{animation:run 1.1s ease forwards}
+@keyframes run{to{transform:scaleY(1)}}
+
+/* ---- layout: graph (system map / hub, flow / swimlane, state machine) ---- */
+.gwrap{flex:1;min-height:0;display:flex;flex-direction:column;padding:10px 14px 8px;gap:6px}
+.glegend{display:flex;align-items:center;gap:20px;font-size:12.5px;color:var(--soft);margin:0 0 2px;flex-wrap:wrap}
+.glegend span{display:inline-flex;align-items:center;gap:7px}
+.glegend i{display:inline-block;width:24px;height:0;border-top:3px solid}
+.glegend i.main{border-color:var(--g-main)} .glegend i.change{border-color:var(--g-change)} .glegend i.new{border-color:var(--g-new);border-top-style:dashed} .glegend i.ext{border-color:var(--g-ext);border-top-style:dotted}
+svg.g{flex:1;min-height:0;width:100%;display:block}
+svg.g .glane{fill:var(--panel);stroke:var(--hair)}
+svg.g .gnode rect{fill:var(--sheet);stroke:var(--rule);stroke-width:1.2;transition:fill .6s,stroke .6s}
+svg.g .gnode{opacity:.14;transition:opacity .7s}
+svg.g .gnode.lit{opacity:1}
+svg.g .gnode.k-main.lit rect{stroke:var(--g-main);fill:color-mix(in srgb,var(--g-main) 9%,var(--sheet))}
+svg.g .gnode.k-change.lit rect{stroke:var(--g-change);fill:color-mix(in srgb,var(--g-change) 10%,var(--sheet))}
+svg.g .gnode.k-new.lit rect{stroke:var(--g-new);fill:color-mix(in srgb,var(--g-new) 9%,var(--sheet));stroke-dasharray:5 3}
+svg.g .gnode.k-ext.lit rect{stroke:var(--g-ext);fill:var(--panel);stroke-dasharray:2 3}
+/* boxes introduced on the CURRENT step pulse */
+svg.g .gnode.pulse rect:not(.hubring){animation:npulse 1.8s ease-in-out infinite}
+@keyframes npulse{0%,100%{stroke-width:1.6}50%{stroke-width:3.8}}
+svg.g .gnode text{font-family:var(--f-sans);font-size:14px;font-weight:600;fill:var(--ink)}
+svg.g .gnode text.s{font-family:var(--f-mono);font-size:10.3px;font-weight:400;fill:var(--faint)}
+svg.g .gnode text.val{font-family:var(--f-serif);font-size:24px;font-weight:700;fill:var(--ink)}
+svg.g .gnode.k-hub rect{fill:var(--acc);stroke:none}
+svg.g .gnode.k-hub text{fill:#fff;font-family:var(--f-serif);font-size:28px;font-weight:700}
+svg.g .gnode.k-hub text.s{font-family:var(--f-mono);font-size:10.5px;font-weight:400;fill:#fff;opacity:.85}
+svg.g .hubring{fill:none!important;stroke:var(--acc)!important;stroke-width:2;opacity:0}
+svg.g .hubring.go{animation:ring 2.6s ease-out infinite}
+@keyframes ring{0%{opacity:.5;transform:scale(1)}100%{opacity:0;transform:scale(1.3)}}
+/* arrows "draw" themselves in (dash offset), new arrows keep marching */
+svg.g .gedge{fill:none;stroke-width:2;stroke-dasharray:var(--len);stroke-dashoffset:var(--len);transition:stroke-dashoffset 1.1s ease}
+svg.g .gedge.lit{stroke-dashoffset:0}
+svg.g .gedge.k-main{stroke:var(--g-main)} svg.g .gedge.k-change{stroke:var(--g-change)} svg.g .gedge.k-new{stroke:var(--g-new)} svg.g .gedge.k-ext{stroke:var(--g-ext)} svg.g .gedge.k-hub{stroke:var(--acc)}
+svg.g .gedge.k-new.lit{stroke-dasharray:6 5;animation:march 1.2s linear infinite}
+svg.g .gedge.hot{stroke-width:3}
+@keyframes march{to{stroke-dashoffset:-22}}
+svg.g .gah{opacity:0;transition:opacity .2s 1s} svg.g .gah.lit{opacity:1}
+svg.g .gah.k-main{fill:var(--g-main)} svg.g .gah.k-change{fill:var(--g-change)} svg.g .gah.k-new{fill:var(--g-new)} svg.g .gah.k-ext{fill:var(--g-ext)} svg.g .gah.k-hub{fill:var(--acc)}
+svg.g .glbl{font-family:var(--f-mono);font-size:10.5px;fill:var(--soft);paint-order:stroke;stroke:var(--paper);stroke-width:4px;stroke-linejoin:round;opacity:0;transition:opacity .6s .4s}
+svg.g .glbl.lit{opacity:1} svg.g .glbl.hot{fill:var(--ink);font-weight:600}
+svg.g .gcol{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.13em;text-transform:uppercase;fill:var(--faint)}
+svg.g .pkt{stroke:var(--sheet);stroke-width:1.5;pointer-events:none}
+.row2{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--rule);border:1px solid var(--rule)}
+.row2>div{background:var(--sheet);padding:7px 12px;font-size:12.3px;line-height:1.36;color:var(--soft)}
+.row2 b{color:var(--ink)}
+
+/* ---- layout: sequence ---- */
+svg.seq{flex:1;min-height:0;width:100%}
+svg.seq text{font-family:var(--f-sans);font-size:13px;fill:var(--ink)}
+svg.seq .lbl{font-family:var(--f-mono);font-size:11px;fill:var(--soft)}
+svg.seq .life{stroke:var(--hair);stroke-dasharray:3 4}
+svg.seq .msg{stroke:var(--acc);stroke-width:1.8;fill:none;stroke-dasharray:var(--len);stroke-dashoffset:var(--len);transition:stroke-dashoffset .9s}
+svg.seq .msg.lit{stroke-dashoffset:0}
+svg.seq .mt{opacity:0;transition:opacity .6s .5s} svg.seq .mt.lit{opacity:1}
+svg.seq .ah{fill:var(--acc);opacity:0} svg.seq .ah.lit{opacity:1;transition:opacity .15s .9s}
+svg.seq .actor rect{fill:var(--panel);stroke:var(--rule)}
+svg.seq .actor.new rect{fill:var(--acc-soft);stroke:var(--acc)}
+
+/* ---- layout: table / enum ---- */
+.cols{flex:1;min-height:0;display:grid;gap:12px}
+.cols .card{display:flex;flex-direction:column;gap:8px;overflow:hidden}
+table.t{width:100%;border-collapse:collapse;font-size:14px;line-height:1.35}
+table.t th{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);text-align:left;padding:0 8px 6px;font-weight:500}
+table.t td{padding:9px 8px;border-top:1px solid var(--hair);vertical-align:top;color:var(--soft)}
+table.t td:first-child{color:var(--ink);font-weight:600}
+.tag{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;padding:2px 6px;border:1px solid;margin-left:6px;vertical-align:1px;white-space:nowrap}
+.tag.ok{color:var(--g-main);border-color:var(--g-main);background:var(--upbg)}
+.tag.new{color:var(--g-new);border-color:var(--g-new);background:var(--acc-soft)}
+.tag.unv{color:var(--dn);border-color:var(--dn);background:var(--dnbg)}
+ul.l{margin:0;padding:0 0 0 18px;font-size:14px;line-height:1.45;color:var(--soft)} ul.l li{margin:0 0 6px} ul.l b{color:var(--ink)}
+
+/* ---- layout: timeline + status strip ---- */
+.tline{position:relative;height:150px;margin:18px 10px 4px}
+.tline .track,.tline .fillbar{position:absolute;left:8%;top:44px;height:6px;border-radius:3px}
+.tline .track{right:8%;background:var(--hair)}
+.tline .fillbar{width:0;background:var(--acc);transition:width 1.2s cubic-bezier(.2,.8,.2,1)}
+.ms{position:absolute;top:0;width:240px;transform:translateX(-50%);text-align:center}
+.ms .t{font-family:var(--f-mono);font-size:12px;color:var(--faint);height:18px}
+.ms .dot{position:relative;width:24px;height:24px;border-radius:50%;margin:3px auto 10px;background:var(--sheet);border:3px solid var(--rule);transition:background .5s,border-color .5s}
+.ms.done .dot{background:var(--up);border-color:var(--up)}
+.ms.now .dot{background:var(--acc);border-color:var(--acc)}
+.ms.now .dot::after{content:"";position:absolute;inset:-8px;border-radius:50%;border:2px solid var(--acc);animation:ring 2s ease-out infinite}
+.ms b{display:block;font-size:17px} .ms span{display:block;font-size:13px;color:var(--soft);line-height:1.35}
+.ms .state{display:inline-block;margin-top:6px}
+.strip{display:flex;gap:8px;align-items:stretch;margin:6px 0}
+/* tickets drop in with a little bounce */
+.tkt{flex:1;border:1px solid var(--rule);background:var(--sheet);padding:10px 12px;font-size:13px;line-height:1.3;opacity:0;transform:translateY(-18px) rotate(-3deg);transition:opacity .4s,transform .55s cubic-bezier(.3,1.6,.5,1)}
+.tkt.in{opacity:1;transform:none}
+.tkt b{display:block;font-family:var(--f-serif);font-size:28px;line-height:1;color:var(--acc)}
+.tkt.warn b{color:var(--warn)} .tkt.ok b{color:var(--up)}
+
+/* ---- layout: cards (+ token wall + bars) ---- */
+.grid{display:grid;gap:12px;flex:1;min-height:0}
+.grid .card{display:flex;flex-direction:column;gap:6px}
+.grid .card h3{margin:0;font-family:var(--f-serif);font-size:22px;line-height:1.15}
+.grid .card p{margin:0;font-size:14px;line-height:1.45;color:var(--soft)}
+.tokens{display:flex;flex-wrap:wrap;gap:6px}
+.tk{font-family:var(--f-mono);font-size:12px;padding:3px 7px;background:var(--acc-soft);color:var(--acc);border:1px solid var(--acc);opacity:0;transform:translateY(-10px);transition:opacity .35s,transform .35s,filter .6s}
+.tk.in{opacity:1;transform:none} .tk.fade{opacity:.3;filter:grayscale(1)}
+.bars{display:flex;flex-direction:column;gap:8px}
+.bars .row{display:grid;grid-template-columns:150px 1fr 70px;gap:12px;align-items:center;font-size:14px}
+.bars .track{position:relative;height:18px;background:var(--hair)}
+.bars .fill{position:absolute;left:0;top:0;bottom:0;width:0;background:var(--acc);transition:width 1.4s cubic-bezier(.2,.8,.2,1)}
+.bars .num{font-family:var(--f-mono);font-size:13px;text-align:right}
+
+/* ---- narration bar ---- */
+.narr{position:absolute;left:0;right:0;bottom:0;height:96px;background:var(--panel);border-top:1px solid var(--rule);display:grid;grid-template-columns:1fr auto;gap:24px;align-items:center;padding:0 40px;z-index:5}
+.narr .who{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--acc)}
+.narr .txt{font-family:var(--f-serif);font-size:19px;line-height:1.33;color:var(--ink);transition:opacity .35s;min-height:52px;max-width:122ch}
+.narr .prog{position:absolute;left:0;top:-1px;height:3px;background:var(--acc);width:0}
+.dots{display:flex;gap:6px;margin-top:5px}
+.dots i{width:22px;height:4px;background:var(--rule)} .dots i.on{background:var(--acc)}
+.ctl{display:flex;gap:6px}
+.ctl button{font-family:var(--f-mono);font-size:11px;padding:8px 12px;border:1px solid var(--rule);background:var(--sheet);color:var(--soft);cursor:pointer}
+.ctl button:hover,.ctl button.on{color:var(--acc);border-color:var(--acc)}
+
+/* ---- source links + unverified tags ---- */
+a.sl{display:inline-block;font-family:var(--f-mono);font-size:10px;line-height:1;color:var(--acc);text-decoration:none;margin:0 0 0 3px;padding:1px 3px;border:1px solid color-mix(in srgb,var(--acc) 40%,transparent);border-radius:3px;vertical-align:1px;background:var(--sheet)}
+a.sl:hover,a.sl:focus-visible{background:var(--acc);color:#fff;outline:none}
+a.srcl{color:inherit;text-decoration:underline dotted;text-underline-offset:2px} a.srcl:hover{color:var(--acc)}
+svg a{cursor:pointer}
+svg a:hover .gnode.lit rect{stroke-width:2.4}
+svg a .glbl,svg.seq a .lbl{text-decoration:underline dotted}
+svg text.lnk{font-family:var(--f-mono);font-size:10px;font-weight:600;fill:var(--acc)}
+svg.g .k-hub text.lnk{fill:#fff}
+svg text.unvt{font-family:var(--f-mono);font-size:8.5px;font-weight:600;letter-spacing:.06em;fill:var(--dn)}
+/* ---- extension: ask + array layouts ---- */
+.askwrap,.arrwrap{display:flex;flex-direction:column;gap:12px;flex:1;min-height:0}
+.askq .qtext{font-family:var(--f-serif);font-size:24px;line-height:1.35;color:var(--ink);margin:0 0 14px;max-width:62ch}
+.opts{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.opt{display:flex;gap:12px;align-items:flex-start;text-align:left;font:inherit;font-size:15px;line-height:1.35;color:var(--ink);background:var(--sheet);border:1.5px solid var(--rule);padding:12px 14px;cursor:pointer;transition:border-color .2s,background .2s,opacity .3s}
+.opt:hover:not(:disabled),.opt:focus-visible{border-color:var(--acc);outline:none}
+.opt i{font-style:normal;font-family:var(--f-mono);font-size:12px;font-weight:700;color:var(--acc);border:1px solid var(--acc);padding:1px 7px;flex:none}
+.opt.right{border-color:var(--up);background:var(--upbg)} .opt.right i{color:var(--up);border-color:var(--up)}
+.opt.wrong{border-color:var(--dn);background:var(--dnbg)} .opt.wrong i{color:var(--dn);border-color:var(--dn)}
+.opt.dim{opacity:.45} .opt:disabled{cursor:default}
+.fb{margin-top:12px;font-size:15px;line-height:1.45;color:var(--ink);min-height:22px} .fb p{margin:0 0 6px;max-width:100ch}
+.fb .verdict{font-family:var(--f-mono);font-size:12px;letter-spacing:.1em;text-transform:uppercase;font-weight:700}
+.fb .verdict.ok{color:var(--up)} .fb .verdict.no{color:var(--dn)} .fb .hint{color:var(--acc);font-family:var(--f-mono);font-size:12px}
+.slide.nudge .opts{animation:nudge .5s}
+@keyframes nudge{0%,100%{transform:none}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
+.arr .agrid{display:grid;gap:3px;align-items:center}
+.arr .al{font-family:var(--f-mono);font-size:11px;color:var(--soft);padding-right:8px;line-height:1.25}
+.arr .ai{font-family:var(--f-mono);font-size:9.5px;color:var(--faint);text-align:center;transition:color .25s}
+.arr .ai.pick{color:var(--acc);font-weight:700}
+.arr .ac{font-family:var(--f-mono);font-size:12px;text-align:center;padding:7px 0;background:var(--panel);border:1px solid var(--hair);color:var(--ink);opacity:0;transform:translateY(-10px);transition:opacity .35s,transform .35s,background .25s,border-color .25s,color .25s}
+.arr .ac.in{opacity:1;transform:none}
+.arr .ac.seen{background:var(--upbg);border-color:var(--up)}
+.arr .ac.hit{background:var(--dnbg);border-color:var(--dn);color:var(--dn);font-weight:600}
+.arr .ac.pick{background:var(--acc-soft);border-color:var(--acc);color:var(--acc);font-weight:700;animation:land .6s}
+.arr .ac.ptr{outline:2px solid var(--acc);outline-offset:1px}
+.ameter{display:flex;gap:12px;margin-top:14px;flex-wrap:wrap}
+.am{border:1px solid var(--hair);background:var(--panel);padding:8px 14px;min-width:170px}
+.am b{display:block;font-family:var(--f-serif);font-size:28px;line-height:1.1;color:var(--ink);font-variant-numeric:tabular-nums}
+@media (prefers-reduced-motion:reduce){.arr .ac,.opt{transition:none;animation:none}}
+/* ---- extension: code layout ---- */
+.codegrid{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);grid-template-rows:minmax(0,1fr);gap:12px;flex:1;min-height:0}
+.codegrid.solo{grid-template-columns:minmax(0,1fr)}
+.codeside{display:flex;flex-direction:column;gap:12px;min-height:0;min-width:0;overflow:hidden}
+.codeside>.card{flex:none}
+.codecard{display:flex;flex-direction:column;min-height:0;height:100%;padding:0;overflow:hidden}
+.codecard .k{padding:10px 14px 6px;margin:0;border-bottom:1px solid var(--hair)}
+.codep{flex:1;min-height:0;overflow:auto;margin:0;padding:8px 0;font-family:var(--f-mono);font-size:12.5px;line-height:1.5;background:var(--code)}
+.codep .ln{display:grid;grid-template-columns:44px 1fr;white-space:pre;color:var(--ink);padding-right:14px}
+.codep .ln i{font-style:normal;color:var(--faint);text-align:right;padding-right:12px;user-select:none}
+.codep .ln.fresh{background:var(--acc-soft);box-shadow:inset 3px 0 0 var(--acc)}
+.codep .ln.fresh[data-st]:not(.lit){opacity:0;filter:none}
+.codep .gap{color:var(--faint);padding:2px 0 2px 56px;font-style:italic;font-size:11.5px}
+.askq.compact .qtext{font-size:19px}
+.askq.compact .opts{grid-template-columns:1fr}
+</style>
+</head>
+<body>
+<div id="stage">
+ <header class="mast">
+  <span class="eyebrow" id="deckEyebrow"></span>
+  <nav class="tabs" id="tabs"></nav>
+  <button class="tt" id="tt" type="button">Dark</button>
+ </header>
+ <main class="deck" id="deck"></main>
+ <div class="narr"><div class="prog" id="nprog"></div>
+  <div><div class="who">Narration · <span id="ncount"></span></div><div class="txt" id="ntxt"></div><div class="dots" id="ndots"></div></div>
+  <div class="ctl"><button id="bprev" type="button" title="Back (left arrow)">◀</button><button id="bplay" type="button" title="Auto-play (A)">▶ auto</button><button id="bnext" type="button" title="Next (right arrow or space)">▶</button><button id="bvoice" type="button" aria-pressed="false" title="Turn the voice-over on or off (V)">Voice off</button></div>
+ </div>
+</div>
+<noscript><p style="position:fixed;top:0;left:0;padding:20px;background:#fff">This deck needs JavaScript.</p></noscript>
+
+<script>
+/* #####################################################################################
+   ###                                                                               ###
+   ###   DECK CONTENT — EDIT ONLY THIS BLOCK.                                        ###
+   ###   Everything you see and hear comes from the DECK object below.               ###
+   ###   See HOW-TO.md for every field. The engine further down never needs editing. ###
+   ###                                                                               ###
+   #####################################################################################
+
+   QUICK RULES
+   - Each slide has a "narration" list. One line = one build step (one click).
+   - Anything with  step: N  appears on step N (the first step is 0).
+   - Rich-text fields (heading, stand, text, html, label…) accept small inline codes:
+       [[src:KEY]]            ↗ link to DECK.sources[KEY]
+       [[unv:KEY|reason]]     ↗ link + an "unverified" tag (hover shows the reason)
+       [[tag:ok|text]]        small tag; kinds: ok | new | unv
+       [[count:98||%]]        number that counts up: [[count:NUMBER|before|after|decimals]]
+       \\[[ ... ]]             (two backslashes inside a JS string) shows the code literally, e.g. in a how-to
+   - Diagram box kinds: "main" (in use), "change" (in use, changing), "new", "ext" (outside), "hub".
+*/
+const DECK = {
+ "title": "Making Repeats Harmless",
+ "eyebrow": "Streaming · Ch 5 · Part 2",
+ "theme": "light",
+ "voice": {
+  "preferred": "Google UK English Male",
+  "fallbackLangs": [
+   "en-GB",
+   "en"
+  ],
+  "rate": {
+   "google": 0.98,
+   "microsoft": 1,
+   "other": 0.95
+  },
+  "pitch": 1,
+  "sentencePauseMs": 320,
+  "questionPauseMs": 420,
+  "sayAs": {
+   "e.g.": "for example",
+   "&": "and",
+   "→": " to ",
+   "·": ", ",
+   "×": " times ",
+   "≈": "about ",
+   "OLTP": "O L T P",
+   "OLAP": "oh-lap",
+   "SQL": "sequel",
+   "LIMIT": "limit",
+   "SUM": "sum",
+   "ORC": "O R C",
+   "RLE": "run-length encoding",
+   "ID": "I D",
+   "CPU": "C P U"
+  }
+ },
+ "auto": {
+  "afterSpeechMs": 700,
+  "minStepMs": 5200,
+  "msPerChar": 62,
+  "firstStepDelayMs": 1200
+ },
+ "legend": {
+  "main": "in use",
+  "change": "the stage being costed",
+  "new": "added by this design",
+  "ext": "outside this chapter"
+ },
+ "sources": {
+  "ch": [
+   "https://github.com/vinayakuber/streaming-systems-study-guide/blob/main/docs/ch05-exactly-once-and-side-effects.md",
+   "Chapter 5 on GitHub"
+  ],
+  "sec": [
+   "https://github.com/vinayakuber/streaming-systems-study-guide/blob/main/docs/ch05-exactly-once-and-side-effects.md#idempotency-and-deduplication",
+   "Chapter 5 · idempotency and deduplication"
+  ],
+  "why": [
+   "https://github.com/vinayakuber/streaming-systems-study-guide/blob/main/docs/ch05-exactly-once-and-side-effects.md#why-a-replayable-source-has-no-substitute-and-the-other-two-are-redundant",
+   "Chapter 5 · why the source has no substitute"
+  ],
+  "when": [
+   "https://github.com/vinayakuber/streaming-systems-study-guide/blob/main/docs/ch05-exactly-once-and-side-effects.md#when-to-use-which-guard-and-where-the-redundancy-disappears",
+   "Chapter 5 · when to use which guard"
+  ],
+  "walk": [
+   "https://github.com/vinayakuber/streaming-systems-study-guide/blob/main/docs/ch05-exactly-once-and-side-effects.md#visual-walkthrough--set-vs-add-the-seen-set-and-all-8-combinations",
+   "Chapter 5 · set versus add, and 8 combinations"
+  ],
+  "prog": [
+   "https://github.com/vinayakuber/streaming-systems-study-guide/blob/main/docs/ch05-exactly-once-and-side-effects.md#three-guards-eight-combinations--stack-and-heap-at-every-step",
+   "Chapter 5 · three guards, traced"
+  ],
+  "meaning": [
+   "https://github.com/vinayakuber/streaming-systems-study-guide/blob/main/docs/ch05-exactly-once-and-side-effects.md#why-exactly-once-is-two-guarantees-and-which-half-is-hard",
+   "Chapter 5 · two guarantees"
+  ],
+  "quiz": [
+   "https://github.com/vinayakuber/streaming-systems-study-guide/blob/main/docs/ch05-exactly-once-and-side-effects.md#quiz",
+   "Chapter 5 · quiz"
+  ]
+ },
+ "slides": [
+  {
+   "title": "Story",
+   "layout": "title",
+   "eyebrow": "01 · Chapter 5 · Part 2",
+   "heading": "A crash, four events sent twice, and how to make that harmless",
+   "hero": {
+    "step": 0,
+    "text": "Two users, <code>a<\/code> and <code>b<\/code>, do things on a website. Each thing is an <b>event<\/b> carrying a <b>value<\/b>, a number to add up. A <b>pipeline<\/b> — programs on several machines — keeps the totals. When a machine <b>crashes<\/b> (stops suddenly), work it cannot prove was done is sent again: a <b>retry<\/b>.[[src:meaning]]"
+   },
+   "tiles": [
+    {
+     "step": 1,
+     "value": 9,
+     "label": "events, worth 45 in total[[src:why]]"
+    },
+    {
+     "step": 1,
+     "value": 4,
+     "label": "events sent twice after a crash[[src:why]]"
+    },
+    {
+     "step": 2,
+     "value": 8,
+     "label": "ways to combine three safeguards[[src:why]]"
+    },
+    {
+     "step": 2,
+     "value": 3,
+     "label": "different totals they produce[[src:why]]"
+    }
+   ],
+   "cardsLabel": "What this part answers",
+   "cards": [
+    {
+     "step": 3,
+     "n": 1,
+     "title": "How can a repeat change nothing?",
+     "text": "By writing a result, not adding to one."
+    },
+    {
+     "step": 3,
+     "n": 2,
+     "title": "How can a repeat be spotted?",
+     "text": "By remembering what has already arrived."
+    },
+    {
+     "step": 4,
+     "n": 3,
+     "title": "Which safeguard cannot be replaced?",
+     "text": "The one that can bring a lost event back."
+    }
+   ],
+   "note": {
+    "step": 4,
+    "text": "You will be asked to answer before each explanation. Every ↗ opens the chapter on GitHub.[[src:ch]]"
+   },
+   "narration": [
+    "Two users, a and b, do things on a website. Each thing is an event with a value, a number to add up. A pipeline of programs keeps the totals. When a machine crashes, work it cannot prove was done is sent again: a retry.",
+    "Our 9 events are worth 45 in total. After one crash, 4 of them, events 5 to 8, are sent a second time. Counted twice, they would make the total 67.",
+    "This part looks at three safeguards against that. They can be combined in 8 ways, and the 8 ways produce only 3 different totals.",
+    "Two questions first. How can a repeat be made to change nothing? And how can a repeat be spotted and dropped?",
+    "And then the surprising one: which of the three safeguards can nothing else replace? You will answer first, each time."
+   ]
+  },
+  {
+   "title": "Data",
+   "layout": "table",
+   "eyebrow": "02 · The nine events, and their two clocks",
+   "heading": "When it happened, when it was seen, and which window it counts in",
+   "stand": "Some of the nine events, in the order the pipeline saw them.",
+   "table": {
+    "columns": [
+     "Event",
+     "Who",
+     "Happened at",
+     "Seen at",
+     "Value",
+     "Window"
+    ],
+    "rows": [
+     {
+      "step": 0,
+      "cells": [
+       "event 0",
+       "user a",
+       "12:00:01",
+       "12:00:02",
+       "5",
+       "12:00–12:02"
+      ]
+     },
+     {
+      "step": 0,
+      "cells": [
+       "event 1",
+       "user a",
+       "12:00:03",
+       "12:00:04",
+       "3",
+       "12:00–12:02"
+      ]
+     },
+     {
+      "step": 0,
+      "cells": [
+       "event 2",
+       "user b",
+       "12:01:30",
+       "12:01:33",
+       "7",
+       "12:00–12:02"
+      ]
+     },
+     {
+      "step": 1,
+      "cells": [
+       "event 3",
+       "user a",
+       "12:02:10",
+       "12:02:12",
+       "2",
+       "12:02–12:04"
+      ]
+     },
+     {
+      "step": 1,
+      "cells": [
+       "event 4",
+       "user a",
+       "12:04:05",
+       "12:04:06",
+       "6",
+       "12:04–12:06"
+      ]
+     },
+     {
+      "step": 1,
+      "cells": [
+       "…",
+       "…",
+       "…",
+       "…",
+       "…",
+       "…"
+      ]
+     },
+     {
+      "step": 2,
+      "cells": [
+       "event 7",
+       "user b",
+       "12:00:50",
+       "12:04:40",
+       "4",
+       "12:00–12:02"
+      ]
+     },
+     {
+      "step": 2,
+      "cells": [
+       "<b>event 8<\/b>",
+       "user a",
+       "12:09:00",
+       "12:09:02",
+       "<b>8<\/b>",
+       "<b>12:08–12:10<\/b>"
+      ]
+     }
+    ]
+   },
+   "side": {
+    "step": 3,
+    "title": "Three words, used from now on",
+    "html": "<ul class=\"l\"><li><b>Event time<\/b> — when it really happened.<\/li><li><b>Processing time<\/b> — when the pipeline saw it.<\/li><li><b>Window<\/b> — a two-minute stretch of event time with its own total. 12:08–12:10 holds only event 8: total <b>8<\/b>.[[src:why]]<\/li><\/ul>"
+   },
+   "narration": [
+    "Here are the events, in the order the pipeline saw them. Each has two clocks: when it happened, and when the pipeline saw it. Event 0 happened at 12:00:01 and was seen a second later.",
+    "Event 3 is worth 2 and event 4 is worth 6. The time something really happened is called its event time. The time the pipeline saw it is called its processing time.",
+    "Event 7 happened at 12:00:50 but was seen at 12:04:40. The pipeline keeps a total per two minutes of event time, called a window, so event 7 still counts in the 12:00 window.",
+    "One window matters in this part: 12:08 to 12:10. It holds only event 8, so its total is 8. Watch what a retry of event 8 does to it."
+   ]
+  },
+  {
+   "title": "Q1",
+   "layout": "ask",
+   "eyebrow": "03 · Your turn",
+   "heading": "Two ways to tell a window about event 8",
+   "stand": "The message about event 8 arrives at the window 12:08–12:10, and is then retried, so it arrives a second time.",
+   "question": {
+    "step": 0,
+    "prompt": "Which message leaves the window’s total right after arriving twice?",
+    "options": [
+     {
+      "text": "“Set this window’s total to 8.”",
+      "correct": true,
+      "why": "It names the result. However many times it arrives, the total ends at 8."
+     },
+     {
+      "text": "“Add 8 to this window’s total.”",
+      "correct": false,
+      "why": "It names a change. Arriving twice adds 8 twice: 16."
+     },
+     {
+      "text": "Neither: a repeated message is always wrong.",
+      "correct": false,
+      "why": "A message that states the final value can be applied twice with no harm. That is the whole trick."
+     }
+    ]
+   },
+   "columns": 2,
+   "cards": [
+    {
+     "step": 1,
+     "title": "Idempotent",
+     "html": "<p>An action is <b>idempotent<\/b> when doing it twice is the same as doing it once. “Set to 8” is; “add 8” is not.[[src:sec]]<\/p>"
+    },
+    {
+     "step": 2,
+     "title": "The test",
+     "html": "<p>Does the message name a <b>result<\/b> or a <b>change<\/b>? A result is safe to repeat; a change is not.[[src:why]]<\/p>"
+    }
+   ],
+   "narration": [
+    "First question. The message about event 8 arrives at its window, and is retried, so it arrives twice. Which message leaves the total right? Choose an answer.",
+    "Set the total to 8. An action is called idempotent when doing it twice is the same as doing it once. Setting to 8 is idempotent; adding 8 is not.",
+    "The test is simple: does the message name a result, or a change? A result can be repeated safely. A change cannot."
+   ]
+  },
+  {
+   "title": "Set",
+   "layout": "array",
+   "eyebrow": "04 · Watch the two messages arrive twice",
+   "heading": "Add drifts. Set stays put.",
+   "stand": "The window 12:08–12:10, before any message, after the first delivery, and after the retry.",
+   "array": {
+    "labelWidth": 200,
+    "slotLabel": "moment",
+    "rows": [
+     {
+      "label": "delivery",
+      "values": [
+       "before",
+       "event 8",
+       "event 8 again"
+      ]
+     },
+     {
+      "label": "total with “add 8”",
+      "values": [
+       0,
+       8,
+       16
+      ]
+     },
+     {
+      "label": "total with “set 8”",
+      "values": [
+       0,
+       8,
+       8
+      ]
+     }
+    ],
+    "actions": [
+     {
+      "step": 0,
+      "do": "show",
+      "rows": [
+       0
+      ]
+     },
+     {
+      "step": 1,
+      "do": "show",
+      "rows": [
+       1
+      ]
+     },
+     {
+      "step": 2,
+      "do": "show",
+      "rows": [
+       2
+      ]
+     },
+     {
+      "step": 2,
+      "do": "pick",
+      "slots": [
+       2
+      ]
+     }
+    ]
+   },
+   "columns": 2,
+   "cards": [
+    {
+     "step": 1,
+     "title": "Add: 16",
+     "html": "<p>The second “add 8” is applied on top of the first. The window reads <b>16<\/b>, double its real total.[[src:walk]]<\/p>"
+    },
+    {
+     "step": 2,
+     "title": "Set: 8",
+     "html": "<p>The second “set 8” writes 8 over 8. Nothing changes. The output that does this is an idempotent writer.[[src:walk]]<\/p>"
+    },
+    {
+     "step": 3,
+     "title": "Whether this is possible at all",
+     "html": "<p>Only if each message carries the window’s <b>whole total<\/b>. A pipeline that sends only the change can never write “set”.[[src:why]]<\/p>"
+    }
+   ],
+   "narration": [
+    "Here is the window at three moments: before any message, after event 8’s first delivery, and after its retry.",
+    "With add 8, the first delivery makes 8, and the retry makes 16: double the real total.",
+    "With set 8, the first delivery makes 8, and the retry writes 8 over 8. Nothing changes. The repeat is harmless.",
+    "But set is only possible if each message carries the window’s whole total. A pipeline that sends only the change, plus 8, can never write set, so this choice is made early."
+   ]
+  },
+  {
+   "title": "Q2",
+   "layout": "ask",
+   "eyebrow": "05 · Your turn",
+   "heading": "When the messages can only add",
+   "stand": "Sometimes the receiving machine can only add. Every event carries its own number, 0 to 8.",
+   "question": {
+    "step": 0,
+    "prompt": "How can the receiving machine stop a retried event from being added twice?",
+    "options": [
+     {
+      "text": "Drop any event whose value equals the previous one.",
+      "correct": false,
+      "why": "Values say nothing about identity. Two different events can share a value; a repeat need not follow its original."
+     },
+     {
+      "text": "Add everything, then halve the total at the end.",
+      "correct": false,
+      "why": "Only four of the nine events were repeated, so halving the total punishes the five that arrived once."
+     },
+     {
+      "text": "Keep the numbers of events it has accepted, and drop any it has seen.",
+      "correct": true,
+      "why": "Event 5 arriving a second time is found in that list and dropped before it is added."
+     }
+    ]
+   },
+   "columns": 3,
+   "cards": [
+    {
+     "step": 1,
+     "title": "Record id",
+     "html": "<p>Each event’s own number, which travels with it, is its <b>record id<\/b>. Event 5 is id 5 on its first trip and on its retry.[[src:sec]]<\/p>"
+    },
+    {
+     "step": 2,
+     "title": "Shuffle",
+     "html": "<p>The hop where one machine hands events to the next is called the <b>shuffle<\/b>. The receiving side is where repeats arrive.[[src:sec]]<\/p>"
+    },
+    {
+     "step": 2,
+     "title": "Deduplicate",
+     "html": "<p>To <b>deduplicate<\/b> is to drop the copies, keeping one of each. At the shuffle, that is one look-up per arriving event.[[src:why]]<\/p>"
+    }
+   ],
+   "narration": [
+    "Second question. Sometimes the receiver can only add. Every event carries its own number. How can the receiver stop a retried event from being added twice? Choose an answer.",
+    "Keep the numbers it has accepted, and drop any it has seen. Each event’s own number, which travels with it, is called its record id. Event 5 is id 5 on every trip.",
+    "The hop where one machine hands events to the next is called the shuffle, and that is where repeats arrive. Dropping the copies is called deduplicating. Watch it happen."
+   ]
+  },
+  {
+   "title": "Seen",
+   "layout": "array",
+   "eyebrow": "06 · Watch the receiver check each arrival",
+   "heading": "Thirteen arrivals, four dropped, total 45",
+   "stand": "The thirteen deliveries after the crash. Before adding, the receiver asks: have I accepted this id already?",
+   "array": {
+    "labelWidth": 150,
+    "slotLabel": "arrival",
+    "rows": [
+     {
+      "label": "record id",
+      "values": [
+       0,
+       1,
+       2,
+       3,
+       4,
+       5,
+       6,
+       7,
+       8,
+       5,
+       6,
+       7,
+       8
+      ]
+     },
+     {
+      "label": "seen before?",
+      "values": [
+       "no",
+       "no",
+       "no",
+       "no",
+       "no",
+       "no",
+       "no",
+       "no",
+       "no",
+       "yes",
+       "yes",
+       "yes",
+       "yes"
+      ]
+     },
+     {
+      "label": "value added",
+      "values": [
+       5,
+       3,
+       7,
+       2,
+       6,
+       1,
+       9,
+       4,
+       8,
+       "",
+       "",
+       "",
+       ""
+      ]
+     }
+    ],
+    "meters": [
+     "arrivals checked",
+     "repeats dropped"
+    ],
+    "actions": [
+     {
+      "step": 0,
+      "do": "show",
+      "rows": [
+       0
+      ]
+     },
+     {
+      "step": 1,
+      "do": "show",
+      "rows": [
+       1
+      ]
+     },
+     {
+      "step": 1,
+      "do": "sweep",
+      "row": 1,
+      "mode": "match",
+      "match": "yes",
+      "readMeter": 0,
+      "resultMeter": 1,
+      "speed": 240
+     },
+     {
+      "step": 2,
+      "do": "show",
+      "rows": [
+       2
+      ]
+     },
+     {
+      "step": 2,
+      "do": "pick",
+      "slots": [
+       9,
+       10,
+       11,
+       12
+      ]
+     }
+    ]
+   },
+   "columns": 2,
+   "cards": [
+    {
+     "step": 1,
+     "title": "The seen-set",
+     "html": "<p>The list of ids already accepted is the <b>seen-set<\/b>. Ids 5, 6, 7 and 8 are in it when their retries arrive, so all 4 are dropped.[[src:why]]<\/p>"
+    },
+    {
+     "step": 2,
+     "title": "Right, with a receiver that only adds",
+     "html": "<p>The values that get through add up to <b>45<\/b>. The check stands in front of the adding, so the adding never sees a repeat.[[src:prog]]<\/p>"
+    }
+   ],
+   "narration": [
+    "Here are the thirteen deliveries after the crash: ids 0 to 8, then 5, 6, 7 and 8 again.",
+    "Before adding, the receiver checks each id against the list of ids it has already accepted, called the seen-set. Watch: thirteen checked, and the four retries are found and dropped.",
+    "Only the first copy of each event is added. The values that get through add up to 45, the right total, even though the receiver itself can only add."
+   ]
+  },
+  {
+   "title": "Q3",
+   "layout": "ask",
+   "eyebrow": "07 · Your turn",
+   "heading": "Deduplication is not free",
+   "stand": "Suppose the sender gives each send a fresh number, made up at the moment of sending, instead of the event’s own id.",
+   "question": {
+    "step": 0,
+    "prompt": "Event 5 is retried. What does the seen-set do with it?",
+    "options": [
+     {
+      "text": "Drops it: the receiver recognises event 5 anyway.",
+      "correct": false,
+      "why": "The receiver only compares numbers. With a fresh number per send, two trips of one event look like two events."
+     },
+     {
+      "text": "Stops the pipeline with an error.",
+      "correct": false,
+      "why": "Nothing looks wrong to the receiver. That is what makes this failure silent."
+     },
+     {
+      "text": "Lets it through: the new number has never been seen.",
+      "correct": true,
+      "why": "The retry carries a different number from the first trip, so the check finds nothing and event 5 is added twice."
+     }
+    ]
+   },
+   "columns": 2,
+   "cards": [
+    {
+     "step": 1,
+     "title": "Ids must be stable",
+     "html": "<p>An id is <b>stable<\/b> when every retry of an event carries the same one. A number made up at send time defeats the seen-set entirely.[[src:why]]<\/p>"
+    },
+    {
+     "step": 2,
+     "title": "The set has a horizon",
+     "html": "<p>The seen-set grows with every event, forever. It must be trimmed, and how far back it remembers is its <b>horizon<\/b>. A repeat older than that gets through.[[src:why]]<\/p>"
+    }
+   ],
+   "narration": [
+    "Third question. Suppose the sender gives each send a fresh number made up at the moment of sending. Event 5 is retried. What does the seen-set do? Choose an answer.",
+    "It lets the retry through. An id is called stable when every retry of an event carries the same one. A number made up at send time defeats the seen-set completely.",
+    "And the seen-set grows with every event, forever, so it must be trimmed. How far back it remembers is its horizon. A repeat older than the horizon gets through."
+   ]
+  },
+  {
+   "title": "Q4",
+   "layout": "ask",
+   "eyebrow": "08 · Your turn",
+   "heading": "What if events 5 to 8 never come back?",
+   "stand": "The events are read from a source that keeps a saved position. The crash may have lost events 5 to 8 before they were counted, and the pipeline cannot tell.",
+   "question": {
+    "step": 0,
+    "prompt": "If the source cannot read events 5 to 8 again, can “set” or the seen-set rescue the total?",
+    "options": [
+     {
+      "text": "Yes: the seen-set knows which ids are missing.",
+      "correct": false,
+      "why": "It knows which ids it has accepted, not which ones exist. It cannot fetch an event it never received."
+     },
+     {
+      "text": "No: both only stop extra copies. Neither can bring an event back.",
+      "correct": true,
+      "why": "Both safeguards remove repeats. If an event never arrives again, there is nothing for them to work on: the total stays 23."
+     },
+     {
+      "text": "Yes: “set” writes the correct total anyway.",
+      "correct": false,
+      "why": "“Set” writes whatever total it was given. Without events 5 to 8, that total is 23."
+     }
+    ]
+   },
+   "columns": 2,
+   "cards": [
+    {
+     "step": 1,
+     "title": "A replayable source",
+     "html": "<p>The <b>source<\/b> is where events are read from. Its saved position is an <b>offset<\/b>. A <b>replayable<\/b> source can read again from any saved offset, so lost events come back.[[src:sec]]<\/p>"
+    },
+    {
+     "step": 2,
+     "title": "Guards only subtract",
+     "html": "<p>Each of the three safeguards is a <b>guard<\/b>. “Set” and the seen-set stop a contribution counting twice, and can do nothing else. Only replay can make the total complete.[[src:why]]<\/p>"
+    }
+   ],
+   "narration": [
+    "Fourth question. Events are read from a source with a saved position. If the crash lost events 5 to 8 and the source cannot read them again, can set or the seen-set rescue the total? Choose an answer.",
+    "No. The place events are read from is the source, and its saved position is an offset. A source that can read again from a saved offset is called replayable. Without that, the total stays 23.",
+    "Call each of the three safeguards a guard. Set and the seen-set only stop a repeat counting twice. Neither can add back an event that never returned. Only the replayable source can."
+   ]
+  },
+  {
+   "title": "Eight",
+   "layout": "table",
+   "eyebrow": "09 · Every combination of the three guards",
+   "heading": "Eight combinations, three totals",
+   "stand": "The same crash in each row, at its worst: unsent events stay lost, landed ones count twice. Each guard is there or not. The last stage, which writes totals out, is the sink: it writes “set” or “add”.",
+   "table": {
+    "columns": [
+     "Replayable source?",
+     "Seen-set at the shuffle?",
+     "Sink writes “set”?",
+     "Total"
+    ],
+    "rows": [
+     {
+      "step": 0,
+      "cells": [
+       "yes",
+       "yes",
+       "yes",
+       "<b>45<\/b> · right"
+      ]
+     },
+     {
+      "step": 0,
+      "cells": [
+       "yes",
+       "yes",
+       "no",
+       "<b>45<\/b> · right"
+      ]
+     },
+     {
+      "step": 0,
+      "cells": [
+       "yes",
+       "no",
+       "yes",
+       "<b>45<\/b> · right"
+      ]
+     },
+     {
+      "step": 1,
+      "cells": [
+       "yes",
+       "no",
+       "no",
+       "67 · counted twice"
+      ]
+     },
+     {
+      "step": 2,
+      "cells": [
+       "no",
+       "yes",
+       "yes",
+       "23 · events lost"
+      ]
+     },
+     {
+      "step": 2,
+      "cells": [
+       "no",
+       "yes",
+       "no",
+       "23 · events lost"
+      ]
+     },
+     {
+      "step": 2,
+      "cells": [
+       "no",
+       "no",
+       "yes",
+       "23 · events lost"
+      ]
+     },
+     {
+      "step": 2,
+      "cells": [
+       "no",
+       "no",
+       "no",
+       "23 · events lost"
+      ]
+     }
+    ]
+   },
+   "side": {
+    "step": 3,
+    "title": "Read the right column",
+    "html": "<ul class=\"l\"><li>Without replay: <b>23<\/b> in all four rows, whatever else is there.<\/li><li>With replay and no guard: <b>67<\/b>.<\/li><li>With replay and <b>either<\/b> guard: <b>45<\/b>. 3 of the 8 rows.[[src:walk]]<\/li><\/ul>"
+   },
+   "narration": [
+    "Here is the same crash, in all 8 combinations of the three guards, each row at its worst. The last stage, which writes the totals out, is called the sink. In the first three rows, the source replays and another guard is there: 45 each time.",
+    "The fourth row replays but has no guard at all. If the first sends had landed, the retried events count twice, and the total is 67.",
+    "The bottom four rows cannot replay. If the first sends were lost, nothing brings them back: whatever else is there, the total is 23 in every one of them.",
+    "So three totals from eight rows. Replay is needed every time. After that, the seen-set or a sink that writes set: either one alone is enough."
+   ]
+  },
+  {
+   "title": "Q5",
+   "layout": "ask",
+   "eyebrow": "10 · Your turn",
+   "heading": "Do you really need all three?",
+   "stand": "A common rule says: exactly-once needs a replayable source, a deduplicating shuffle and an idempotent sink — drop any one and it breaks.",
+   "question": {
+    "step": 0,
+    "prompt": "For a pipeline that keeps totals, what does the table say about that rule?",
+    "options": [
+     {
+      "text": "Exactly right: every row missing a guard is wrong.",
+      "correct": false,
+      "why": "Two rows each miss a guard and still reach 45. Only the row missing both, or missing replay, goes wrong."
+     },
+     {
+      "text": "Too strict: replay is required, then either guard is enough.",
+      "correct": true,
+      "why": "Rows with replay and only the seen-set, or only “set”, both reach 45. The two guards cover for each other."
+     },
+     {
+      "text": "Too strict the other way: no guard is needed.",
+      "correct": false,
+      "why": "The row with replay and no guard gives 67. At least one guard is needed."
+     }
+    ]
+   },
+   "columns": 2,
+   "cards": [
+    {
+     "step": 1,
+     "title": "Exactly-once, for totals",
+     "html": "<p>Each event counting once, <b>exactly-once<\/b>, needs a replayable source plus at least one guard: the seen-set <b>or<\/b> a “set” sink.[[src:sec]]<\/p>"
+    },
+    {
+     "step": 2,
+     "title": "Why replay is different",
+     "html": "<p>Completeness has one mechanism; accuracy has two. That asymmetry is why one guard has no substitute and the other two can stand in for each other.[[src:why]]<\/p>"
+    }
+   ],
+   "narration": [
+    "Fifth question. A common rule says exactly-once needs all three guards, and dropping any one breaks it. For a pipeline that keeps totals, what does the table say? Choose an answer.",
+    "Too strict. Exactly-once means each event counts once, and for totals it needs a replayable source plus at least one guard: the seen-set, or a sink that writes set.",
+    "The reason is an asymmetry. Making the total complete has one mechanism, replay. Making it accurate has two, and they can stand in for each other."
+   ]
+  },
+  {
+   "title": "When",
+   "layout": "cards",
+   "eyebrow": "11 · When to use which guard",
+   "heading": "Start with the source, then pick the cheaper guard",
+   "stand": "The table says what works. These cards say what each choice costs.",
+   "columns": 2,
+   "cards": [
+    {
+     "step": 0,
+     "title": "1 · Always start with the source",
+     "html": "<p>If it cannot replay from a saved offset, nothing downstream gets past 23. Check this before designing anything else.[[src:when]]<\/p>"
+    },
+    {
+     "step": 1,
+     "title": "2 · Prefer a sink that writes “set”",
+     "html": "<p>It needs no extra memory, no stable ids and no horizon. The seen-set needs all three.[[src:when]]<\/p>"
+    },
+    {
+     "step": 2,
+     "title": "3 · Use the seen-set when “set” is impossible",
+     "html": "<p>When the sink only accepts changes, or only appends rows. Then budget for its memory and choose its horizon deliberately.[[src:when]]<\/p>"
+    },
+    {
+     "step": 3,
+     "title": "4 · The redundancy is not universal",
+     "html": "<p>It holds because a window total can be recomputed. Once the sink touches the outside world, the two guards stop being interchangeable: part 3.[[src:when]]<\/p>"
+    }
+   ],
+   "narration": [
+    "So, when to use which guard. Always start with the source. If it cannot replay from a saved offset, nothing downstream gets past 23.",
+    "Then prefer a sink that writes set. It needs no extra memory, no stable ids and no horizon, all of which the seen-set needs.",
+    "Use the seen-set when set is impossible: when the sink only accepts changes, or only appends rows. Then budget for its memory and choose its horizon on purpose.",
+    "One warning. The two guards are interchangeable only because a window total can be recomputed. Once the sink changes the outside world, that stops being true. That is part 3."
+   ]
+  },
+  {
+   "title": "Check",
+   "layout": "ask",
+   "eyebrow": "12 · Your turn · check yourself",
+   "heading": "Which of these is safe to repeat?",
+   "stand": "The chapter’s own quiz question, in plain words.",
+   "question": {
+    "step": 0,
+    "prompt": "Which operation is idempotent?",
+    "options": [
+     {
+      "text": "Add 8 to the 12:08 window.",
+      "correct": false,
+      "why": "Twice gives 16. It names a change."
+     },
+     {
+      "text": "Increase a counter by one.",
+      "correct": false,
+      "why": "Every run moves the counter again."
+     },
+     {
+      "text": "Set the 12:08 window to 8.",
+      "correct": true,
+      "why": "It replaces the value, so running it twice has the same effect as once."
+     },
+     {
+      "text": "Append a row to a list.",
+      "correct": false,
+      "why": "Every run adds another row."
+     }
+    ]
+   },
+   "narration": [
+    "One check, the chapter’s own quiz question. Which of these operations is idempotent? Choose an answer.",
+    "Set the 12:08 window to 8. It replaces the value, so running it twice has the same effect as running it once. Adding, increasing and appending all move something again on every run."
+   ]
+  },
+  {
+   "title": "Chk2",
+   "layout": "ask",
+   "eyebrow": "13 · Your turn · check yourself",
+   "heading": "The three parts, and which one is required",
+   "stand": "Another of the chapter’s quiz questions.",
+   "question": {
+    "step": 0,
+    "prompt": "What are the three parts of exactly-once from start to finish?",
+    "options": [
+     {
+      "text": "A source, a cache in memory, and a queue between machines.",
+      "correct": false,
+      "why": "None of those, on its own, stops a repeat or brings back a loss."
+     },
+     {
+      "text": "A replayable source, a deduplicating shuffle, an idempotent sink.",
+      "correct": true,
+      "why": "And the source is required; for totals, either of the other two is enough on its own."
+     },
+     {
+      "text": "A sending machine, a relay machine, and a receiving machine.",
+      "correct": false,
+      "why": "Those are just the roles in any message system. None of them is a safeguard."
+     },
+     {
+      "text": "A clock, a two-minute window, and a timer for each window.",
+      "correct": false,
+      "why": "Those decide where and when totals are reported, not how often an event counts."
+     }
+    ]
+   },
+   "narration": [
+    "And one more from the chapter’s quiz. What are the three parts of exactly-once from start to finish? Choose an answer.",
+    "A replayable source, a deduplicating shuffle and an idempotent sink. The source is required. For totals, either of the other two is enough on its own."
+   ]
+  },
+  {
+   "title": "Recap",
+   "layout": "table",
+   "eyebrow": "14 · What you now know",
+   "heading": "One guard brings events back; two stop them counting twice",
+   "stand": "Everything in this part, in a sentence each.",
+   "table": {
+    "columns": [
+     "Word",
+     "What it means"
+    ],
+    "rows": [
+     {
+      "step": 0,
+      "cells": [
+       "<b>Idempotent<\/b>",
+       "Twice is the same as once. “Set the window to 8” is; “add 8” is not.[[src:sec]]"
+      ]
+     },
+     {
+      "step": 0,
+      "cells": [
+       "<b>Seen-set<\/b> · <b>deduplicate<\/b>",
+       "Ids already accepted; a repeat is dropped: 13 arrivals, 4 dropped, 45. Needs stable ids and a horizon.[[src:why]]"
+      ]
+     },
+     {
+      "step": 1,
+      "cells": [
+       "<b>Replayable source<\/b>",
+       "Reads again from a saved offset. The only guard that can make a total complete.[[src:why]]"
+      ]
+     },
+     {
+      "step": 2,
+      "cells": [
+       "<b>The eight rows<\/b>",
+       "23 without replay, 67 with replay alone, 45 with replay and either other guard.[[src:walk]]"
+      ]
+     }
+    ]
+   },
+   "side": {
+    "step": 3,
+    "title": "Next · part 3",
+    "html": "<p>What if the sink charges a card instead of writing a total? Then the two guards are no longer interchangeable, and only one of them reaches every way a crash can strike.<\/p>"
+   },
+   "narration": [
+    "To recap. Idempotent means twice is the same as once: setting the window to 8 is, adding 8 is not. The seen-set drops repeats by id, and needs stable ids and a horizon.",
+    "The replayable source reads again from a saved offset. It is the only guard that can make the total complete again.",
+    "Across the eight combinations: 23 without replay, 67 with replay and nothing else, and 45 with replay plus either of the other guards.",
+    "Next, part 3: what if the sink charges a card instead of writing a total? Then the two guards stop being interchangeable."
+   ]
+  }
+ ]
+};
+/* ##################################  END OF DECK CONTENT  ################################## */
+</script>
+
+<script>
+/* =====================================================================================
+   ENGINE — you should not need to edit below this line.
+   ===================================================================================== */
+(function(){
+'use strict';
+const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelectorAll(s)];
+const NS='http://www.w3.org/2000/svg';
+const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const st=k=>k==null?'':' data-st="'+k+'"';
+const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const KIND_VAR={main:'--g-main',change:'--g-change',new:'--g-new',ext:'--g-ext',hub:'--acc'};
+
+/* ---------------- sources + inline codes ---------------- */
+function srcInfo(v){if(!v)return null;const key=Array.isArray(v)?v[0]:v,unv=Array.isArray(v)?(v[1]||'Not checked yet'):'';
+ const s=(DECK.sources||{})[key];if(!s){console.warn('[deck] unknown source key: '+key);return null}return{url:s[0],label:s[1]||s[0],unv}}
+function linkHTML(v){const s=srcInfo(v);if(!s)return'';
+ return '<a class="sl" href="'+esc(s.url)+'" target="_blank" rel="noopener" title="Source: '+esc(s.label)+(s.unv?' · UNVERIFIED: '+esc(s.unv):'')+'">↗</a>'+
+  (s.unv?'<span class="tag unv" title="'+esc(s.unv)+'">unverified</span>':'')}
+function countHTML(n,pre,suf,dec){return '<span data-count="'+(+n)+'" data-pre="'+esc(pre||'')+'" data-suf="'+esc(suf||'')+'" data-dec="'+(+dec||0)+'">'+esc(pre||'')+'0'+esc(suf||'')+'</span>'}
+function rich(t){if(t==null)return'';return String(t).replace(/\\\[\[/g,'\u0000')   // \[[ = show [[ literally
+ .replace(/\[\[src:([\w-]+)\]\]/g,(_,k)=>linkHTML(k))
+ .replace(/\[\[unv:([\w-]+)\|([^\]]*)\]\]/g,(_,k,r)=>linkHTML([k,r]))
+ .replace(/\[\[tag:(\w+)\|([^\]]*)\]\]/g,(_,k,x)=>'<span class="tag '+k+'">'+x+'</span>')
+ .replace(/\[\[count:([\d.]+)\|([^|\]]*)\|([^|\]]*)(?:\|(\d+))?\]\]/g,(_,n,p,s,d)=>countHTML(n,p,s,d)).replace(/\u0000/g,'[[')}
+function fmt(v,d,p,s){return p+v.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d})+s}
+
+/* ---------------- slide renderers (one per layout) ---------------- */
+function head(s){return '<div class="hd"><p class="eyebrow">'+rich(s.eyebrow)+'</p><h1>'+rich(s.heading)+'</h1>'+(s.stand?'<p class="stand">'+rich(s.stand)+'</p>':'<span></span>')+'</div>'}
+function notesRow(notes){return notes&&notes.length?'<div class="row2">'+notes.map(n=>'<div'+st(n.step)+'>'+rich(n.html)+'</div>').join('')+'</div>':''}
+/* extension helpers: a card row under an ask/array slide, and plain text for the voice */
+function extCards(s){return s.cards&&s.cards.length?'<div class="grid" style="grid-template-columns:repeat('+(s.columns||Math.min(3,s.cards.length))+',1fr)">'+
+ s.cards.map(c=>'<div class="card"'+st(c.step)+'><h3>'+rich(c.title)+'</h3>'+rich(c.html)+'</div>').join('')+'</div>':''}
+function plain(t){return String(t==null?'':t).replace(/\\\[\[/g,'[[').replace(/\[\[[^\]]*\]\]/g,'').replace(/<[^>]*>/g,'').replace(/\s+/g,' ').trim()}
+const RENDER={
+ /* extension: code layout */
+ code(s){const c=s.code,L=c.lines,shown=new Set(),fresh=new Set();
+  (c.shown||[]).forEach(([a,b])=>{for(let i=a;i<=b;i++)shown.add(i)});(c.fresh||[]).forEach(([a,b])=>{for(let i=a;i<=b;i++)fresh.add(i)});
+  if(c.full)L.forEach((_,i)=>shown.add(i));
+  let h='',prev=-1;L.forEach((t,i)=>{if(!shown.has(i)&&!fresh.has(i))return;
+   if(prev>=0&&i>prev+1)h+='<div class="gap">⋯ '+(i-prev-1)+' line'+(i-prev-1===1?'':'s')+' not written yet</div>';
+   h+='<div class="ln'+(fresh.has(i)?' fresh':'')+'" data-n="'+i+'"'+(fresh.has(i)?st(c.step):'')+'><i>'+(i+1)+'</i><span>'+esc(t)+'</span></div>';prev=i});
+  if(c.full)h=h.split('not written yet').join('');
+  const panel='<div class="card codecard"><p class="k">'+rich(c.label||'the program so far')+'</p><div class="codep">'+h+'</div></div>';
+  let side='';
+  if(s.question){const q=s.question;side+='<div class="card askq compact"'+st(q.step)+'><p class="k">'+rich(q.label||'Your turn · pick an answer')+'</p><p class="qtext">'+rich(q.prompt)+'</p><div class="opts">'+
+   q.options.map((o,j)=>'<button type="button" class="opt" data-j="'+j+'"><i>'+String.fromCharCode(65+j)+'</i><span>'+rich(o.text)+'</span></button>').join('')+'</div><div class="fb" aria-live="polite"></div></div>'}
+  if(s.cards&&s.cards.length)side+=s.cards.map(x=>'<div class="card"'+st(x.step)+'><h3>'+rich(x.title)+'</h3>'+rich(x.html)+'</div>').join('');
+  return head(s)+'<div class="codegrid'+(side?'':' solo')+'">'+(side?'<div class="codeside">'+side+'</div>':'')+panel+'</div>'},
+ /* extension: ask + array layouts */
+ ask(s){const q=s.question;
+  let h='<div class="card askq"'+st(q.step)+'><p class="k">'+rich(q.label||'Your turn · pick an answer')+'</p><p class="qtext">'+rich(q.prompt)+'</p><div class="opts">'+
+   q.options.map((o,j)=>'<button type="button" class="opt" data-j="'+j+'"><i>'+String.fromCharCode(65+j)+'</i><span>'+rich(o.text)+'</span></button>').join('')+
+   '</div><div class="fb" aria-live="polite"></div></div>';
+  return head(s)+'<div class="askwrap">'+h+extCards(s)+'</div>'},
+ array(s){const a=s.array,n=a.rows[0].values.length;
+  let h='<div class="card arr"><div class="agrid" style="grid-template-columns:'+(a.labelWidth||130)+'px repeat('+n+',minmax(0,1fr))">';
+  if(a.slots!==false)h+='<span class="al k">'+rich(a.slotLabel||'slot')+'</span>'+Array.from({length:n},(_,j)=>'<span class="ai" data-c="'+j+'">'+j+'</span>').join('');
+  a.rows.forEach((r,ri)=>{h+='<span class="al">'+rich(r.label)+'</span>'+r.values.map((v,j)=>'<span class="ac" data-r="'+ri+'" data-c="'+j+'">'+esc(v)+'</span>').join('')});
+  h+='</div>'+((a.meters||[]).length?'<div class="ameter">'+a.meters.map((m,j)=>'<div class="am" data-m="'+j+'"><span class="k">'+rich(m)+'</span><b>0</b></div>').join('')+'</div>':'')+'</div>';
+  return head(s)+'<div class="arrwrap">'+h+extCards(s)+'</div>'},
+
+ title(s){let l='<p class="eyebrow">'+rich(s.eyebrow)+'</p><h1>'+rich(s.heading)+'</h1>';
+  if(s.hero)l+='<div class="card hero"'+st(s.hero.step)+'><p>'+rich(s.hero.text)+'</p></div>';
+  if(s.tiles)l+='<div class="tiles">'+s.tiles.map(t=>'<div'+st(t.step)+'><div class="v">'+countHTML(t.value,t.prefix,t.suffix,t.decimals)+'</div><div class="d">'+rich(t.label)+'</div></div>').join('')+'</div>';
+  if(s.note)l+='<p class="note"'+st(s.note.step)+'>'+rich(s.note.text)+'</p>';
+  let r=(s.cardsLabel?'<p class="k">'+rich(s.cardsLabel)+'</p>':'')+'<div class="steps">'+(s.cards||[]).map(c=>'<div class="card"'+st(c.step)+'><span class="n">'+esc(c.n)+'</span><div><b>'+rich(c.title)+'</b><span class="x">'+rich(c.text)+'</span></div></div>').join('')+'</div>';
+  return '<div class="tl"><div class="l">'+l+'</div><div class="r">'+r+'</div></div>'},
+ graph(s){const g=s.graph,L=DECK.legend||{};
+  const leg=g.legend?'<div class="glegend">'+['main','change','new','ext'].filter(k=>L[k]).map(k=>'<span><i class="'+k+'"></i>'+esc(L[k])+'</span>').join('')+'</div>':'';
+  return head(s)+'<div class="card gwrap">'+leg+'<svg class="g" viewBox="'+esc(g.viewBox||'0 0 1520 460')+'" preserveAspectRatio="xMidYMid meet"></svg>'+notesRow(s.notes)+'</div>'},
+ sequence(s){return head(s)+'<div class="card gwrap"><svg class="seq" preserveAspectRatio="xMidYMid meet"></svg>'+notesRow(s.notes)+'</div>'},
+ table(s){const t=s.table;
+  let h='<div class="card"><table class="t"><tr>'+t.columns.map(c=>'<th>'+rich(c)+'</th>').join('')+'</tr>'+
+   t.rows.map(r=>'<tr'+st(r.step)+'>'+r.cells.map(c=>'<td>'+rich(c)+'</td>').join('')+'</tr>').join('')+'</table></div>';
+  if(s.side)h+='<div class="card"'+st(s.side.step)+'><p class="k">'+rich(s.side.title)+'</p>'+rich(s.side.html)+'</div>';
+  return head(s)+'<div class="cols" style="grid-template-columns:'+(s.side?'1.6fr 1fr':'1fr')+'">'+h+'</div>'},
+ timeline(s){const T=s.timeline||[],n=T.length;
+  let h='<div class="card"><div class="tline"><div class="track"></div><div class="fillbar"></div>'+
+   T.map((m,j)=>'<div class="ms" style="left:'+tlPos(j,n)+'%"><div class="t">'+esc(m.time||'')+'</div><div class="dot"></div><b>'+rich(m.title)+'</b><span>'+rich(m.text)+'</span><span class="chip state">next</span></div>').join('')+'</div></div>';
+  if(s.strip)h+='<div class="card"><p class="k">'+rich(s.strip.label)+'</p><div class="strip">'+s.strip.items.map(i=>'<div class="tkt '+esc(i.tone||'')+'"><b>'+esc(i.n)+'</b>'+rich(i.text)+'</div>').join('')+'</div></div>';
+  return head(s)+h+notesRow(s.notes)},
+ cards(s){let h='';
+  if(s.tokens||s.bars){h+='<div class="cols" style="flex:none;grid-template-columns:'+(s.tokens&&s.bars?'1fr 1fr':'1fr')+'">';
+   if(s.tokens)h+='<div class="card"><p class="k">'+rich(s.tokens.label)+'</p><div class="tokens">'+s.tokens.items.map(x=>'<span class="tk">'+esc(x)+'</span>').join('')+'</div></div>';
+   if(s.bars){const mx=Math.max(...s.bars.items.map(b=>b.value))||1;
+    h+='<div class="card"><p class="k">'+rich(s.bars.label)+'</p><div class="bars">'+s.bars.items.map(b=>'<div class="row"><span>'+rich(b.label)+'</span><span class="track"><span class="fill" data-w="'+(b.value/mx*100)+'"'+(b.color?' style="background:'+esc(b.color)+'"':'')+'></span></span><span class="num">'+esc(b.value)+'</span></div>').join('')+'</div></div>'}
+   h+='</div>'}
+  h+='<div class="grid" style="grid-template-columns:repeat('+(s.columns||3)+',1fr)">'+(s.cards||[]).map(c=>'<div class="card"'+st(c.step)+'><h3>'+rich(c.title)+'</h3>'+rich(c.html)+'</div>').join('')+'</div>';
+  return head(s)+h+notesRow(s.notes)}
+};
+function tlPos(j,n){return n<2?50:8+j*(84/(n-1))}
+
+/* ---------------- graph engine ----------------
+   node: {id,x,y,w,h,title,sub,kind,step,src,values}   (coordinates are in viewBox units)
+   edge: {from,to,kind,step,label,bend,labelAt,dx,dy,labelAnchor,loop,src}
+   Arrows dash-draw in on their step; "new" arrows march; dots run along the current step's arrows. */
+function rectHit(n,qx,qy){/* point where the line from the box centre towards (qx,qy) leaves the box */
+ const cx=n.x+n.w/2,cy=n.y+n.h/2,dx=qx-cx,dy=qy-cy;if(!dx&&!dy)return[cx,cy];
+ const sx=dx?(n.w/2+3)/Math.abs(dx):1e9,sy=dy?(n.h/2+3)/Math.abs(dy):1e9,s=Math.min(sx,sy);return[cx+dx*s,cy+dy*s]}
+function buildGraph(svg,cfg){const vb=svg.viewBox.baseVal,N={};let h='';const f=v=>v.toFixed(1);
+ (cfg.lanes||[]).forEach(l=>h+='<rect class="glane" x="0" y="'+l.y+'" width="'+vb.width+'" height="'+l.h+'"/><text class="gcol" x="16" y="'+(l.y+l.h/2+4)+'">'+esc(l.label)+'</text>');
+ (cfg.cols||[]).forEach(c=>h+='<text class="gcol" x="'+c.x+'" y="'+c.y+'">'+esc(c.text)+'</text>');
+ cfg.nodes.forEach(n=>{N[n.id]={kind:'main',step:0,...n}});
+ const E=cfg.edges.map(e=>{const A=N[e.from],B=N[e.to];if(!A||!B){console.warn('[deck] edge with unknown box',e);return null}
+  let d;const ac=[A.x+A.w/2,A.y+A.h/2],bc=[B.x+B.w/2,B.y+B.h/2];
+  if(e.loop){const x=A.x+A.w*0.5,y=A.y;d='M'+(x-30)+','+(y-2)+' C'+(x-44)+','+(y-62)+' '+(x+44)+','+(y-62)+' '+(x+30)+','+(y-4)}
+  else{const mx=(ac[0]+bc[0])/2,my=(ac[1]+bc[1])/2,L=Math.hypot(bc[0]-ac[0],bc[1]-ac[1])||1,b=e.bend||0;
+   const cx=mx-(bc[1]-ac[1])/L*b,cy=my+(bc[0]-ac[0])/L*b;
+   const p=rectHit(A,b?cx:bc[0],b?cy:bc[1]),q=rectHit(B,b?cx:ac[0],b?cy:ac[1]);
+   d=b?'M'+f(p[0])+','+f(p[1])+' Q'+f(cx)+','+f(cy)+' '+f(q[0])+','+f(q[1]):'M'+f(p[0])+','+f(p[1])+' L'+f(q[0])+','+f(q[1])}
+  return{kind:'main',step:0,...e,d}}).filter(Boolean).map((e,i)=>({...e,i}));
+ E.forEach(e=>h+='<path class="gedge k-'+e.kind+'" data-i="'+e.i+'" d="'+e.d+'"/>');
+ Object.values(N).forEach(n=>{const cx=n.x+n.w/2,subs=n.sub?(Array.isArray(n.sub)?n.sub:[n.sub]):[],hasVal=!!n.values;
+  h+='<g class="gnode k-'+n.kind+'" data-id="'+esc(n.id)+'">';
+  if(n.kind==='hub')h+='<rect class="hubring" x="'+n.x+'" y="'+n.y+'" width="'+n.w+'" height="'+n.h+'" rx="6" style="transform-origin:'+cx+'px '+(n.y+n.h/2)+'px"/>';
+  h+='<rect x="'+n.x+'" y="'+n.y+'" width="'+n.w+'" height="'+n.h+'" rx="4"/>';
+  const ty=hasVal?n.y+24:(subs.length?n.y+n.h/2-(n.kind==='hub'?4:3)-(subs.length-1)*6:n.y+n.h/2+5);
+  h+='<text x="'+cx+'" y="'+ty+'" text-anchor="middle">'+esc(n.title)+'</text>';
+  subs.forEach((s,j)=>h+='<text class="s" x="'+cx+'" y="'+(ty+(n.kind==='hub'?20:15)+j*13)+'" text-anchor="middle">'+esc(s)+'</text>');
+  if(hasVal)h+='<text class="val" x="'+cx+'" y="'+(n.y+n.h-14)+'" text-anchor="middle" data-val="'+esc(n.id)+'"></text>';
+  h+='</g>'});
+ h+='<g class="ahs"></g><g class="lbls"></g><g class="pkts"></g>';
+ svg.innerHTML=h;
+ let ah='',lb='';
+ $$('.gedge',svg).forEach(p=>{const e=E[+p.dataset.i];const L=p.getTotalLength();p.style.setProperty('--len',Math.ceil(L)+4);e.len=L;e.el=p;
+  const P1=p.getPointAtLength(L),P0=p.getPointAtLength(Math.max(0,L-1));let ux=P1.x-P0.x,uy=P1.y-P0.y;const n=Math.hypot(ux,uy)||1;ux/=n;uy/=n;
+  const bx=P1.x-ux*11,by=P1.y-uy*11;
+  ah+='<path class="gah k-'+e.kind+'" data-i="'+e.i+'" d="M'+f(P1.x)+','+f(P1.y)+'L'+f(bx-uy*5.5)+','+f(by+ux*5.5)+'L'+f(bx+uy*5.5)+','+f(by-ux*5.5)+'z"/>';
+  if(e.label){const M=p.getPointAtLength(L*(e.labelAt==null?.5:e.labelAt));
+   String(e.label).split('|').forEach((s,j)=>lb+='<text class="glbl" data-i="'+e.i+'" x="'+f(M.x+(e.dx||0))+'" y="'+f(M.y+(e.dy==null?-6:e.dy)+j*15)+'" text-anchor="'+(e.labelAnchor||'middle')+'">'+esc(s)+'</text>')}});
+ $('.ahs',svg).innerHTML=ah;$('.lbls',svg).innerHTML=lb;
+ /* source links on boxes and arrow labels */
+ $$('.gnode',svg).forEach(el=>{const n=N[el.dataset.id];if(!n.src)return;const unv=Array.isArray(n.src);
+  svgText(el,n.x+n.w-6,n.y+11,unv?'unvt':'lnk',unv?'UNVERIFIED ↗':'↗');svgLink(el,n.src)});
+ E.forEach(e=>{if(e.src&&e.label)$$('.glbl[data-i="'+e.i+'"]',svg).forEach(x=>svgLink(x,e.src))});
+ return{svg,N,E,gen:0,timer:null}}
+function graphStage(g,k){const svg=g.svg;
+ $$('.gnode',svg).forEach(el=>{const n=g.N[el.dataset.id];el.classList.toggle('lit',n.step<=k);el.classList.toggle('pulse',n.step===k)});
+ $$('.hubring',svg).forEach(r=>r.classList.toggle('go',k>=0));
+ g.E.forEach(e=>{const on=e.step<=k,hot=e.step===k;e.el.classList.toggle('lit',on);e.el.classList.toggle('hot',hot);
+  $$('[data-i="'+e.i+'"]:not(.gedge)',svg).forEach(x=>{x.classList.toggle('lit',on);if(x.classList.contains('glbl'))x.classList.toggle('hot',hot)})});
+ Object.values(g.N).forEach(n=>{if(!n.values)return;const t=$('[data-val="'+CSS.escape(n.id)+'"]',svg);let s='';
+  for(let j=0;j<=k&&j<n.values.length;j++)if(n.values[j]!=null)s=n.values[j];t.textContent=k<0?'':s});
+ packets(g,k)}
+function packets(g,k){g.gen++;clearTimeout(g.timer);const gen=g.gen;$('.pkts',g.svg).innerHTML='';if(k<0)return;
+ const hot=g.E.filter(e=>e.step===k);if(!hot.length)return;
+ const fire=()=>{if(gen!==g.gen)return;hot.forEach((e,j)=>setTimeout(()=>runPacket(g,e,gen),j*260));g.timer=setTimeout(fire,2900)};
+ g.timer=setTimeout(fire,900)}
+function runPacket(g,e,gen){if(gen!==g.gen)return;const c=document.createElementNS(NS,'circle');c.setAttribute('r',5.5);c.setAttribute('class','pkt');
+ c.setAttribute('fill',css(KIND_VAR[e.kind]||'--acc'));$('.pkts',g.svg).appendChild(c);
+ const D=Math.max(900,e.len*3.2),t0=performance.now();
+ (function f(n){if(gen!==g.gen){c.remove();return}const q=Math.min(1,(n-t0)/D),ez=q<.5?2*q*q:1-Math.pow(-2*q+2,2)/2;
+  const P=e.el.getPointAtLength(e.len*ez);c.setAttribute('cx',P.x);c.setAttribute('cy',P.y);c.setAttribute('opacity',q>.92?(1-q)*12:1);
+  if(q<1)requestAnimationFrame(f);else c.remove()})(t0)}
+function svgLink(el,v){const s=srcInfo(v);if(!s||el.closest('a'))return null;
+ const a=document.createElementNS(NS,'a');a.setAttribute('href',s.url);a.setAttribute('target','_blank');a.setAttribute('rel','noopener');
+ const ti=document.createElementNS(NS,'title');ti.textContent='Source: '+s.label+(s.unv?' · UNVERIFIED: '+s.unv:'');a.appendChild(ti);
+ el.parentNode.insertBefore(a,el);a.appendChild(el);return a}
+function svgText(parent,x,y,cls,txt,anc){const t=document.createElementNS(NS,'text');t.setAttribute('class',cls);t.setAttribute('x',x);t.setAttribute('y',y);t.setAttribute('text-anchor',anc||'end');t.textContent=txt;parent.appendChild(t);return t}
+
+/* ---------------- sequence engine ---------------- */
+function buildSeq(svg,cfg){const A=cfg.actors,M=cfg.messages,W=1500,sp=W/A.length,bw=Math.min(170,sp-16),rh=cfg.rowHeight||38,H=92+M.length*rh+10;
+ svg.setAttribute('viewBox','0 0 '+W+' '+H);const X=i=>sp*(i+.5),idx={};A.forEach((a,i)=>idx[a.name]=i);let h='';
+ A.forEach((a,i)=>{h+='<g class="actor'+(a.highlight?' new':'')+'"><rect x="'+(X(i)-bw/2)+'" y="8" width="'+bw+'" height="48" rx="3"/><text x="'+X(i)+'" y="29" text-anchor="middle" font-weight="600">'+esc(a.name)+'</text><text class="lbl" x="'+X(i)+'" y="46" text-anchor="middle">'+esc(a.sub||'')+'</text></g><line class="life" x1="'+X(i)+'" x2="'+X(i)+'" y1="56" y2="'+(H-6)+'"/>'});
+ M.forEach((m,i)=>{const a=idx[m.from],b=idx[m.to];if(a==null||b==null||a===b){console.warn('[deck] bad sequence message',m);return}
+  const y=92+i*rh,x1=X(a),x2=X(b),k=m.step||0;
+  h+='<path class="msg" data-k="'+k+'" data-m="'+i+'" d="M'+x1+','+y+' L'+(x2+(x2>x1?-6:6))+','+y+'"/><text class="mt lbl" data-k="'+k+'" data-m="'+i+'" x="'+((x1+x2)/2)+'" y="'+(y-8)+'" text-anchor="middle">'+(i+1)+'. '+esc(m.label)+'</text>'});
+ svg.innerHTML=h+'<g class="ahs"></g>';
+ let ah='';const f=v=>v.toFixed(2);
+ $$('.msg',svg).forEach(p=>{const L=p.getTotalLength();p.style.setProperty('--len',Math.ceil(L)+4);
+  const E=p.getPointAtLength(L),P=p.getPointAtLength(Math.max(0,L-1));let ux=E.x-P.x,uy=E.y-P.y;const n=Math.hypot(ux,uy)||1;ux/=n;uy/=n;
+  const tx=E.x+ux*1.3,ty=E.y+uy*1.3,bx=tx-ux*12.6,by=ty-uy*12.6;
+  ah+='<path class="ah" data-k="'+p.dataset.k+'" d="M'+f(tx)+','+f(ty)+'L'+f(bx-uy*6.3)+','+f(by+ux*6.3)+'L'+f(bx+uy*6.3)+','+f(by-ux*6.3)+'z"/>'});
+ $('.ahs',svg).innerHTML=ah;
+ $$('.actor',svg).forEach((g,i)=>{const v=A[i].src;if(!v)return;const r=g.querySelector('rect');
+  svgText(g,+r.getAttribute('x')+(+r.getAttribute('width'))-5,+r.getAttribute('y')+11,Array.isArray(v)?'unvt':'lnk',Array.isArray(v)?'UNVERIFIED ↗':'↗');svgLink(g,v)});
+ $$('.mt',svg).forEach(t=>{const v=M[+t.dataset.m].src;if(v)svgLink(t,v)})}
+
+/* ---------------- counters ---------------- */
+function count(el){const t=+el.dataset.count,d=+el.dataset.dec||0,p=el.dataset.pre||'',s=el.dataset.suf||'';
+ const t0=performance.now(),D=+el.dataset.ms||1900;const host=el.closest('.v')||el;host.classList.add('ticking');host.classList.remove('landed');
+ (function f(n){if(!el._run)return;const q=Math.min(1,(n-t0)/D),e=1-Math.pow(1-q,4);el.textContent=fmt(t*e,d,p,s);
+  if(q<1)requestAnimationFrame(f);else{el.textContent=fmt(t,d,p,s);host.classList.remove('ticking');host.classList.add('landed')}})(t0)}
+function counters(slide,k){$$('[data-count]',slide).forEach(c=>{const host=c.closest('[data-st]');const on=host?+host.dataset.st<=k:k>=0;
+ if(on&&!c._run){c._run=1;count(c)}else if(!on&&c._run){c._run=0;c.textContent=fmt(0,+c.dataset.dec||0,c.dataset.pre||'',c.dataset.suf||'')}})}
+
+/* ---------------- build the deck from DECK ---------------- */
+document.title=DECK.title||document.title;$('#deckEyebrow').innerHTML=rich(DECK.eyebrow||'');
+const deckEl=$('#deck');
+DECK.slides.forEach((s,i)=>{const sec=document.createElement('section');sec.className='slide';sec.dataset.title=s.title||('Slide '+(i+1));
+ const r=RENDER[s.layout];if(!r){console.warn('[deck] unknown layout "'+s.layout+'" on slide '+(i+1));sec.innerHTML=head(s)}else sec.innerHTML=r(s);deckEl.appendChild(sec)});
+const S=$$('.slide',deckEl);
+const NARR=DECK.slides.map(s=>(s.narration&&s.narration.length?s.narration:['']).map(String));
+const SPEECH=DECK.slides.map(s=>s.speech||[]);   // optional per-line spoken text, if it should differ from the bar
+/* per-slide hooks for diagrams that need JS: stage(k) shows step k, reset() clears */
+DECK.slides.forEach((s,i)=>{const sec=S[i];sec._hooks=[];
+ if(s.layout==='graph'){const g=buildGraph($('svg.g',sec),s.graph);sec._hooks.push({stage:k=>graphStage(g,k),reset:()=>{g.gen++;clearTimeout(g.timer);graphStage(g,-1)}})}
+ if(s.layout==='sequence'){const svg=$('svg.seq',sec);buildSeq(svg,s.sequence);
+  const lit=k=>$$('.msg,.mt,.ah',svg).forEach(e=>e.classList.toggle('lit',+e.dataset.k<=k));sec._hooks.push({stage:lit,reset:()=>lit(-1)})}
+ if(s.layout==='timeline'){const ms=$$('.ms',sec),T=s.timeline||[],fill=$('.fillbar',sec),tk=$$('.tkt',sec),sp=s.strip;
+  sec._hooks.push({stage:k=>{let c=-1;T.forEach((m,j)=>{if((m.step||0)<=k)c=j});
+    ms.forEach((m,j)=>{const state=j<c?'done':j===c?'now':'next';m.classList.remove('done','now','next');m.classList.add(state);const ch=$('.state',m);ch.textContent=state;ch.className='chip state'+(state==='done'?' u':state==='now'?' a':'')});
+    fill.style.width=c<0?'0':(tlPos(c,T.length)-8)+'%';
+    if(sp){if(k>=sp.step&&!sec._dropped){sec._dropped=1;tk.forEach((t,j)=>{clearTimeout(t._t);t._t=setTimeout(()=>t.classList.add('in'),300+j*520)})}
+     else if(k<sp.step){sec._dropped=0;tk.forEach(t=>{clearTimeout(t._t);t.classList.remove('in')})}}},
+   reset:()=>{sec._dropped=0;tk.forEach(t=>{clearTimeout(t._t);t.classList.remove('in')});fill.style.width='0';ms.forEach(m=>m.classList.remove('done','now'))}})}
+ if(s.layout==='cards'&&(s.tokens||s.bars)){const tks=$$('.tk',sec),fills=$$('.bars .fill',sec);
+  sec._hooks.push({stage:k=>{if(s.tokens){if(k>=s.tokens.step&&!sec._tok){sec._tok=1;tks.forEach((t,j)=>{clearTimeout(t._t);t._t=setTimeout(()=>t.classList.add('in'),j*90)})}
+     else if(k<s.tokens.step){sec._tok=0;tks.forEach(t=>{clearTimeout(t._t);t.classList.remove('in')})}
+     tks.forEach(t=>t.classList.toggle('fade',s.tokens.fadeStep!=null&&k>=s.tokens.fadeStep))}
+    if(s.bars)fills.forEach(f=>f.style.width=(k>=s.bars.step?f.dataset.w:0)+'%')},
+   reset:()=>{sec._tok=0;tks.forEach(t=>{clearTimeout(t._t);t.classList.remove('in','fade')});fills.forEach(f=>f.style.width='0')}})}
+ /* extension: ask — answering is the only way past the question step */
+ if(s.question){const q=s.question,fb=$('.fb',sec),bs=$$('.opt',sec),L=j=>String.fromCharCode(65+j);
+  const reset=()=>{sec._answered=false;bs.forEach(b=>{b.className='opt';b.disabled=false});fb.innerHTML=''};
+  bs.forEach(b=>b.onclick=e=>{e.stopPropagation();if(sec._answered)return;const j=+b.dataset.j,o=q.options[j],ok=!!o.correct,ci=q.options.findIndex(x=>x.correct),c=q.options[ci];
+   sec._answered=true;bs.forEach((x,m)=>{x.disabled=true;x.classList.add(q.options[m].correct?'right':m===j?'wrong':'dim')});
+   fb.innerHTML='<p class="verdict '+(ok?'ok':'no')+'">'+(ok?'Right':'Not quite')+'</p><p>'+rich(o.why)+'</p>'+(ok?'':'<p><b>The answer is '+L(ci)+'.</b> '+rich(c.why)+'</p>');
+   if(voice&&HAS_TTS)speakLine((ok?'Right. ':'Not quite. ')+plain(o.why)+(ok?'':' The answer is '+plain(c.text)+'. '+plain(c.why)));
+   else if(playing){clearTimeout(timer);timer=setTimeout(next,Math.max(4000,plain(fb.textContent).length*55))}});
+  sec._hooks.push({stage:()=>{},reset})}
+ /* extension: code — keep the newest lines in view as they appear */
+ if(s.layout==='code'){const pane=$('.codep',sec),fr=$$('.ln.fresh',sec);
+  sec._hooks.push({stage:k=>{const first=fr.find(e=>e.classList.contains('lit')||!e.hasAttribute('data-st'));
+    if(first&&pane)pane.scrollTop=Math.max(0,first.offsetTop-pane.offsetTop-pane.clientHeight*0.25)},
+   reset:()=>{if(pane)pane.scrollTop=0}})}
+ /* extension: array — show, pick and sweep, each tied to a narration step */
+ if(s.layout==='array'){const a=s.array,A=a.actions||[],cell=(r,c)=>$('.ac[data-r="'+r+'"][data-c="'+c+'"]',sec),M=$$('.am b',sec);
+  let gen=0;const fmt0=v=>Number(v).toLocaleString('en-US'),setM=(i,v)=>{if(i!=null&&M[i])M[i].textContent=fmt0(v)};
+  const rowsOf=x=>x.rows!=null?x.rows:x.row!=null?[x.row]:a.rows.map((_,r)=>r);
+  const clear=()=>{gen++;$$('.ac',sec).forEach(e=>e.classList.remove('in','seen','hit','pick','ptr'));$$('.ai',sec).forEach(e=>e.classList.remove('pick'));M.forEach(m=>m.textContent='0')};
+  const sweepTo=(x,upto)=>{const r=x.row,vals=a.rows[r].values;let read=0,acc=0,hits=0;
+   for(let c=0;c<=upto;c++){const el=cell(r,c),v=Number(vals[c]);read++;el.classList.add('seen');
+    if(x.mode==='sum')acc+=v;else if(x.mode==='match'&&String(vals[c])===String(x.match)){hits++;el.classList.add('hit')}}
+   setM(x.readMeter,read);if(x.mode==='sum')setM(x.resultMeter,acc);if(x.mode==='match')setM(x.resultMeter,hits)};
+  const stageA=k=>{clear();const g=gen;
+   A.filter(x=>x.step<=k).forEach(x=>{const live=x.step===k;
+    if(x.do==='show')rowsOf(x).forEach(r=>a.rows[r].values.forEach((_,c)=>{const el=cell(r,c);if(live){el._t=setTimeout(()=>{if(g===gen)el.classList.add('in')},c*45+r*120)}else el.classList.add('in')}));
+    if(x.do==='pick')(x.slots||[]).forEach(c=>{rowsOf(x).forEach(r=>cell(r,c).classList.add('pick'));const i=$('.ai[data-c="'+c+'"]',sec);if(i)i.classList.add('pick')});
+    if(x.do==='sweep'){const n=a.rows[x.row].values.length;
+     if(!live)sweepTo(x,n-1);else{let c=0;(function tick(){if(g!==gen)return;$$('.ac.ptr',sec).forEach(e=>e.classList.remove('ptr'));
+      if(c>=n)return;sweepTo(x,c);cell(x.row,c).classList.add('ptr');c++;setTimeout(tick,x.speed||140)})()}}})};
+  sec._hooks.push({stage:stageA,reset:clear})}
+});
+/* authoring check: warns (console only) when a step number has no narration line */
+DECK.slides.forEach((s,i)=>{let mx=-1;JSON.stringify(s,(k,v)=>{if((k==='step'||k==='fadeStep')&&typeof v==='number')mx=Math.max(mx,v);return v});
+ if(mx>=NARR[i].length)console.warn('[deck] slide '+(i+1)+' uses step '+mx+' but has only '+NARR[i].length+' narration lines')});
+
+/* ---------------- scaling, theme, tabs ---------------- */
+function fit(){document.documentElement.style.setProperty('--s',Math.min(innerWidth/1600,innerHeight/900))}
+fit();addEventListener('resize',fit);
+const tt=$('#tt');function setTheme(m){document.documentElement.dataset.theme=m;tt.textContent=m==='dark'?'Light':'Dark'}
+setTheme(DECK.theme==='dark'?'dark':'light');tt.onclick=()=>setTheme(document.documentElement.dataset.theme==='dark'?'light':'dark');
+const tabs=$('#tabs');S.forEach((s,i)=>{const b=document.createElement('button');b.type='button';b.innerHTML='<i>'+String(i+1).padStart(2,'0')+'</i>'+esc(s.dataset.title);b.onclick=()=>go(i);tabs.appendChild(b)});
+
+/* ---------------- voice-over ----------------
+   Fixed voice by name (any word order), silent fallback through DECK.voice.fallbackLangs, then the
+   browser default. Voices load asynchronously in Chrome, so the choice is redone on "voiceschanged".
+   Each sentence is spoken as its own utterance (avoids Chrome cutting long utterances off). */
+const V=DECK.voice||{},AUTO=DECK.auto||{},HAS_TTS='speechSynthesis' in window&&typeof SpeechSynthesisUtterance!=='undefined';
+let VOICE=null;
+const WANT=String(V.preferred||'').toLowerCase().split(/\s+/).filter(Boolean);
+const isPreferred=v=>{const n=(v.name||'').toLowerCase();return WANT.length>0&&WANT.every(w=>new RegExp('\\b'+w.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\b').test(n))};
+const normLang=l=>String(l||'').toLowerCase().replace('_','-');
+function chooseVoice(list){const p=list.find(isPreferred);if(p)return p;
+ for(const lang of (V.fallbackLangs||[])){const L=normLang(lang),m=list.find(v=>normLang(v.lang)===L||normLang(v.lang).startsWith(L+'-')||normLang(v.lang).startsWith(L));if(m)return m}
+ return null}   // null = let the browser use its default voice
+function loadVoices(){if(!HAS_TTS)return;VOICE=chooseVoice(speechSynthesis.getVoices()||[])}
+if(HAS_TTS){loadVoices();if(speechSynthesis.addEventListener)speechSynthesis.addEventListener('voiceschanged',loadVoices);else speechSynthesis.onvoiceschanged=loadVoices}
+function speakable(s){let t=String(s);Object.entries(V.sayAs||{}).forEach(([a,b])=>{t=t.split(a).join(b)});
+ return t.replace(/(\d),(\d{3})/g,'$1$2').replace(/(\d+(?:\.\d+)?)%/g,'$1 percent')}
+function rateFor(v){const R=V.rate||{};if(v&&/^google/i.test(v.name))return R.google||1;if(v&&/^microsoft/i.test(v.name))return R.microsoft||1;return R.other||1}
+let speechGen=0,pauseT=null;
+function stopSpeech(){speechGen++;clearTimeout(pauseT);if(HAS_TTS)speechSynthesis.cancel()}
+function speakLine(text){stopSpeech();const gen=speechGen;if(!VOICE)loadVoices();const v=VOICE;
+ const parts=speakable(text).match(/[^.!?]+[.!?]+["')]*|[^.!?]+$/g)||[text];let i=0;
+ (function nextSentence(){if(gen!==speechGen)return;
+  if(i>=parts.length){if(playing)timer=setTimeout(next,AUTO.afterSpeechMs==null?700:AUTO.afterSpeechMs);return}
+  const u=new SpeechSynthesisUtterance(parts[i++].trim());if(v){u.voice=v;u.lang=v.lang}u.rate=rateFor(v);u.pitch=V.pitch||1;u.volume=1;
+  const pause=/[?!]["')]*$/.test(u.text)?(V.questionPauseMs||420):(V.sentencePauseMs||320);
+  let done=false;const fin=()=>{if(done)return;done=true;clearTimeout(wd);if(gen!==speechGen)return;pauseT=setTimeout(nextSentence,pause)};
+  const wd=setTimeout(fin,Math.max(8000,u.text.length*200));   // watchdog: some browsers never fire "end"
+  u.onend=fin;u.onerror=fin;speechSynthesis.speak(u)})()}
+
+/* ---------------- stepping, narration bar, auto-play ---------------- */
+let cur=0,line=0,playing=false,timer=null,t0=0,dur=1,voice=false,sayGen=0;
+function stage(i,k){const s=S[i];$$('[data-st]',s).forEach(e=>e.classList.toggle('lit',+e.dataset.st<=k));counters(s,k);s._hooks.forEach(h=>h.stage(k))}
+function dots(){$('#ndots').innerHTML=NARR[cur].map((_,j)=>'<i class="'+(j<=line?'on':'')+'"></i>').join('')}
+function go(i,startLine){if(i<0||i>=S.length)return;stopSpeech();clearTimeout(timer);
+ S.forEach((s,j)=>{s.classList.toggle('on',j===i);s.classList.toggle('prev',j<i);s._hooks.forEach(h=>h.reset())});
+ $$('#tabs button').forEach((b,j)=>b.classList.toggle('on',j===i));
+ $$('[data-st]',S[i]).forEach(e=>e.classList.remove('lit'));counters(S[i],-1);
+ cur=i;line=Math.max(0,Math.min(startLine||0,NARR[i].length-1));history.replaceState(null,'','#'+(i+1));
+ const g=++sayGen;setTimeout(()=>{if(g===sayGen)say()},350)}
+function say(){clearTimeout(timer);const g=++sayGen,L=NARR[cur],tx=$('#ntxt');tx.style.opacity=0;
+ setTimeout(()=>{if(g!==sayGen)return;tx.textContent=L[line];tx.style.opacity=1;
+  $('#ncount').textContent='slide '+(cur+1)+'/'+S.length+' · step '+(line+1)+'/'+L.length;dots();stage(cur,line);
+  dur=Math.max(AUTO.minStepMs||5200,L[line].length*(AUTO.msPerChar||62));t0=performance.now();
+  if(voice&&HAS_TTS)speakLine(SPEECH[cur][line]||L[line]);else if(playing)timer=setTimeout(next,dur)},250)}
+/* extension: an unanswered question holds the deck on its question step */
+function blocked(){const s=DECK.slides[cur];return !!s.question&&line===s.question.step&&!S[cur]._answered}
+function nudge(){const s=S[cur];s.classList.remove('nudge');void s.offsetWidth;s.classList.add('nudge');
+ const fb=$('.fb',s);if(fb&&!fb.textContent.trim())fb.innerHTML='<p class="hint">Choose an answer to carry on.</p>'}
+function next(){if(blocked()){nudge();return}stopSpeech();if(line<NARR[cur].length-1){line++;say()}else if(cur<S.length-1)go(cur+1);else{playing=false;upd()}}
+function prev(){stopSpeech();if(line>0){line--;say()}else if(cur>0)go(cur-1,NARR[cur-1].length-1)}
+(function prog(){const p=playing?Math.min(1,(performance.now()-t0)/dur):0;$('#nprog').style.width=(p*100)+'%';requestAnimationFrame(prog)})();
+function upd(){$('#bplay').textContent=playing?'❚❚ auto':'▶ auto';$('#bplay').classList.toggle('on',playing)}
+function toggleAuto(){playing=!playing;upd();clearTimeout(timer);if(playing){if(voice&&HAS_TTS)say();else timer=setTimeout(next,AUTO.firstStepDelayMs||1200)}}
+function toggleVoice(){voice=!voice;const b=$('#bvoice');b.textContent=voice?'Voice on':'Voice off';b.setAttribute('aria-pressed',String(voice));b.classList.toggle('on',voice);
+ if(!voice){stopSpeech();if(playing){clearTimeout(timer);timer=setTimeout(next,dur)}}else say()}
+$('#bplay').onclick=toggleAuto;$('#bnext').onclick=next;$('#bprev').onclick=prev;$('#bvoice').onclick=toggleVoice;
+
+/* keyboard: → / space next · ← back · PageDown/PageUp slide · Home/End · 1–9, 0 = slide 10 · A auto · V voice */
+addEventListener('keydown',e=>{if(e.target.closest&&e.target.closest('input,textarea,select,[contenteditable]'))return;if(e.ctrlKey||e.metaKey||e.altKey)return;
+ const k=e.key;
+ if(k==='ArrowRight'||k===' '){e.preventDefault();next()}else if(k==='ArrowLeft'){e.preventDefault();prev()}
+ else if(k==='PageDown')go(cur+1);else if(k==='PageUp')go(cur-1);else if(k==='Home')go(0);else if(k==='End')go(S.length-1);
+ else if(/^[1-9]$/.test(k))go(+k-1);else if(k==='0')go(9);else if(k==='a'||k==='A')toggleAuto();else if(k==='v'||k==='V')toggleVoice()});
+/* click anywhere on the slide to advance — but not on links, buttons or while selecting text */
+let clickLock=0;
+deckEl.addEventListener('click',e=>{if(e.button!==0||e.target.closest('button,a,input,select,textarea,label,.ctl,.tabs'))return;
+ const sel=window.getSelection&&String(window.getSelection());if(sel&&sel.trim())return;const now=performance.now();if(now-clickLock<450)return;clickLock=now;next()});
+/* links (HTML or SVG) never advance the slide: stop the event in the capture phase; the link still opens */
+['click','pointerdown','mousedown','pointerup','mouseup'].forEach(ev=>document.addEventListener(ev,e=>{if(e.target.closest&&e.target.closest('a[href]'))e.stopPropagation()},true));
+
+/* small read-only hook for automated checks */
+window.__deck={go,next,prev,toggleAuto,toggleVoice,slides:S.length,narrLen:i=>NARR[i].length,
+ state:()=>({cur,line,playing,voice,voiceName:VOICE?VOICE.name:null,text:$('#ntxt').textContent})};
+
+const h0=parseInt((location.hash||'').slice(1),10);go(h0>=1&&h0<=S.length?h0-1:0);
+})();
+</script>
+</body>
+</html>

@@ -6,14 +6,14 @@
 
 Worth noticing early: **one click matches 2 impressions**, so a windowed join is not one-to-one and its output can exceed either input. That is a capacity surprise people usually meet after shipping.
 
-**The temporal (stream-table) join** enriches each row with the version of a table that was current *at that row's event time*. Here each click probes the impression side as of its own `et`: click 3 → 11, click 4 → 20, and 2 clicks get NULL because no impression existed yet at that time.
+**The temporal (stream-table) join** enriches each row with the version of a table that was current *at that row's event time*. Here the impression side is read as a table whose state at time t is the **impression total** — the sum of each impression's value `v` (the seed's per-event number) over every impression with `et` ≤ t — and each click probes that total as of its own `et`: click 3 → 11, click 4 → 20, and 2 clicks get NULL because no impression existed yet at that time.
 
 No window, no buffer, no wait on the other side's watermark — each of the 5 rows is looked up as it arrives. The price is that it needs a **versioned** table that is **complete** for that time: "as of 12:02:10" is not the same question as "now", and a table holding only current values cannot answer it. These impressions are not complete in time: looked up on arrival, click 3 reads 7 instead of 11 and click 4 reads 7 instead of 20, because impressions 6 and 7 arrive after the clicks they precede.
 
 **So the two are bounded by entirely different things:**
 
 - what bounds it — windowed: the 60s window · temporal: the table, finite per key
-- what it buffers — windowed: up to 5 rows · temporal: nothing
+- what it buffers — windowed: up to 5 rows, both sides together · temporal: nothing
 - when it emits — windowed: when both watermarks pass · temporal: on arrival, trusting the table to be settled
 - what it needs — windowed: watermarks on both sides · temporal: a versioned table
 
@@ -52,7 +52,7 @@ The join predicate is one subtraction, and it produces 5 matches from 20 candida
 
 <img src="../diagrams/anim/ch09-kinds/frames/step-02.svg" alt="Step 2: the temporal join: look up the table AS OF the row&#39;s time" width="1040">
 
-A temporal join is a lookup, and it behaves completely differently: no buffer, and no wait on a second watermark. The price is in the note — it needs the table's **history**, because "as of 12:02:10" is not the same question as "now", and it needs that history to be **complete**. The values above are the as-of answers; looked up the moment each click arrives, click 3 reads 7 instead of 11 and click 4 reads 7 instead of 20, because impressions 6 and 7 have not arrived yet.
+A temporal join is a lookup, and it behaves completely differently: no buffer, and no wait on a second watermark. The price is in the note — it needs the table's **history**, because "as of 12:02:10" is not the same question as "now", and it needs that history to be **complete**. The values above are the as-of impression totals (sums of v); looked up the moment each click arrives, click 3 reads 7 instead of 11 and click 4 reads 7 instead of 20, because impressions 6 and 7 have not arrived yet.
 
 </details>
 <details>

@@ -23,8 +23,11 @@ const dupDamage = EVENTS.map(e => {
   return { e, w, base, after: base + e.v, pct: Math.round(100 * e.v / base) };
 }).sort((a, b) => b.pct - a.pct);
 const WORST_DUP = dupDamage[0];
-// the crash-and-replay scenario: the pipeline checkpoints its STATE after event
-// CHK but the source offset is not committed, so CHK+1 .. end are re-read
+// the crash-and-replay scenario: the checkpoint covers events 0 .. CHK; events
+// CHK+1 .. end were sent once, past the committed offset, and the crash leaves one
+// unknown -- whether those first sends landed.  A replayable source re-reads them;
+// each row of the table reports its WORST case over that unknown: lost if they did
+// not land and nothing re-reads them, doubled if they did and the replay is unguarded
 const CHK = WATERMARKS.findIndex(w => w >= WIN_STARTS[0] + WIN);     // a real pipeline moment
 const REPLAYED = EVENTS.slice(CHK + 1);
 const REPLAY_V = REPLAYED.reduce((s, e) => s + e.v, 0);
@@ -176,7 +179,7 @@ const C2 = [
     cap: `Dedup at the shuffle is a seen-set and one membership test, and it works — ${TOTAL}, correct. The two things that make it not free are in the note: the ids must be stable across the retry (a freshly generated id defeats it entirely), and the set itself is unbounded state that needs a horizon, so dedup has a memory beyond which it stops working.` },
   { t: 'the 8 combinations, and what each one actually produces', draw: (c) => {
       let s = c.panel('REPLAYABLE SOURCE x DEDUP SHUFFLE x IDEMPOTENT SINK', 'a');
-      s += c.line(c.P.main.x + 24, c.P.main.y + 46, `after a crash at event ${CHK}, with the state committed and the offset not`, { size: 11, weight: 700, fill: c.C.line });
+      s += c.line(c.P.main.x + 24, c.P.main.y + 46, `crash after event ${CHK}: did the first sends of ${REPLAYED[0].id}–${REPLAYED[REPLAYED.length - 1].id} land? each row shows its worst case`, { size: 11, weight: 700, fill: c.C.line });
       TABLE.forEach((r, i) => {
         const y = c.P.main.y + 64 + i * 30;
         const col = r.label === 'CORRECT' ? c.C.good : c.C.hot, fil = r.label === 'CORRECT' ? c.C.goodFill : c.C.hotFill;
@@ -340,7 +343,7 @@ const DIAGRAMS = [
       `**Idempotent means twice is the same as once**, and the test is what the operation *names*. \`SET window [${mm(WORST_DUP.w)}, ${mm(WORST_DUP.w + WIN)}) = ${WORST_DUP.base}\` names a result: apply it any number of times and the value is ${WORST_DUP.base}. \`ADD ${WORST_DUP.e.v}\` names a change: twice gives ${WORST_DUP.after}.`, '',
       `This connects straight back to ch02. An **accumulating** pane carries the window's whole total, so it is a SET and is safe to re-deliver. A **discarding** pane carries only the delta, so it is an ADD and is not. **The accumulation mode decides whether an idempotent sink is possible at all.**`, '',
       `**Dedup at the shuffle** is a set of ids already accepted plus one membership test. Replay ids ${REPLAYED.map(e => e.id).join(', ')} into it and all ${REPLAYED.length} are recognised and dropped: total ${TOTAL}, correct. Two things make it non-free — the ids must be **stable** across the retry (an id generated at send time gets a new value and defeats it), and the seen-set is unbounded state that needs a horizon, so dedup has a memory beyond which it stops working.`, '',
-      `**Now put all three guards in a table.** After a crash at event ${CHK} with the state committed and the offset not, the ${TABLE.length} combinations of (replayable source × deduplicating shuffle × idempotent sink) produce exactly **three** totals: ${TOTAL - REPLAY_V}, ${TOTAL} and ${TOTAL + REPLAY_V}.`, '',
+      `**Now put all three guards in a table.** The pipeline crashes after event ${CHK}. The checkpoint covers events 0–${CHK}; events ${REPLAYED[0].id}–${REPLAYED[REPLAYED.length - 1].id} were sent once, past the committed offset, and the pipeline cannot know whether those first sends landed. Each row reports its **worst case** over that unknown: a source that cannot replay loses them if they did not land, and an unguarded replay counts them twice if they did. The ${TABLE.length} combinations of (replayable source × deduplicating shuffle × idempotent sink) produce exactly **three** totals: ${TOTAL - REPLAY_V}, ${TOTAL} and ${TOTAL + REPLAY_V}.`, '',
       `${CORRECT_ROWS.length} of the ${TABLE.length} rows reach ${TOTAL}, and reading them refines the usual claim. "End-to-end exactly-once = source + shuffle + sink, drop any one and it breaks" is **not quite right for an aggregation**: the replayable source is load-bearing, and then dedup **or** an idempotent sink is enough. The two accuracy guards are redundant.`, '',
       `**The source is different because the mechanisms are asymmetric.** Dedup and idempotency are *subtractive* — they stop a contribution counting twice, and can do nothing else. Neither can add back a record that was never re-read. So completeness has exactly one mechanism and accuracy has two.`],
     whenHeading: 'When to use which guard, and where the redundancy disappears',
@@ -454,7 +457,7 @@ PROGRAMS.push({
     '',
     '// function: deliver(mode) — the list of record ids a stage actually receives.',
     `//   deliver("exactly-once") = [${EVENTS.map(e => e.id).join(', ')}]`,
-    `//   deliver("at-most-once") = [${EVENTS.slice(0, CHK + 1).map(e => e.id).join(', ')}]   (the replay never happens)`,
+    `//   deliver("at-most-once") = [${EVENTS.slice(0, CHK + 1).map(e => e.id).join(', ')}]   (${REPLAYED[0].id}–${REPLAYED[REPLAYED.length - 1].id} lost, never re-sent)`,
     `//   deliver("at-least-once") = [${EVENTS.map(e => e.id).join(', ')}, ${REPLAYED.map(e => e.id).join(', ')}]   (the replay is not deduplicated)`,
     'fun deliver(mode) {',
     '    var out = []',
@@ -510,7 +513,7 @@ PROGRAMS.push({
       { t: 'at-most-once DROPS everything after the checkpoint', line: at('fun deliver(mode)', 'if (mode == "at-most-once" && indexOf(e) > CHK) { continue }'),
         stack: [MAIN(), { name: 'deliver', locals: ['mode = "at-most-once"', 'out = @0x200', `e = EVENTS[${REPLAYED[0].id}]`] }],
         heap: [{ key: 'atMost', hot: true }],
-        cap: `\`indexOf(EVENTS[${REPLAYED[0].id}])\` is ${CHK + 1}, which is > CHK = ${CHK}, so the record is skipped. All ${REPLAYED.length} records after the checkpoint are dropped and the list holds ${CHK + 1} ids. That is a COMPLETENESS failure: the sum will be ${TOTAL - REPLAY_V}, and nothing downstream can recover it.` },
+        cap: `\`indexOf(EVENTS[${REPLAYED[0].id}])\` is ${CHK + 1}, which is > CHK = ${CHK}, so the record is skipped. Their first sends were lost in the crash and at-most-once never re-sends, so all ${REPLAYED.length} records after the checkpoint are missing and the list holds ${CHK + 1} ids. That is a COMPLETENESS failure: the sum will be ${TOTAL - REPLAY_V}, and nothing downstream can recover it.` },
       { t: 'at-least-once APPENDS them a second time', line: at('for (e in REPLAYED) { out = append(out, e.id) }'),
         stack: [MAIN({ once: TOTAL, atMost: TOTAL - REPLAY_V }), { name: 'deliver', locals: ['mode = "at-least-once"', 'out = @0x300', `e = EVENTS[${REPLAYED[REPLAYED.length - 1].id}]`] }],
         heap: [{ key: 'atMost' }, { key: 'atLeast', hot: true }],
@@ -528,7 +531,7 @@ PROGRAMS.push({
   },
   intro: [
     `**What is being answered.** Why exactly-once is two guarantees — as three delivery lists built by one function and summed by another.`, '',
-    `\`deliver(mode)\` produces the list of record ids a stage actually receives: ${EVENTS.length} ids for exactly-once, ${CHK + 1} for at-most-once (the replay never happens), and ${EVENTS.length + REPLAYED.length} for at-least-once (the replay is not deduplicated).`, '',
+    `\`deliver(mode)\` produces the list of record ids a stage actually receives: ${EVENTS.length} ids for exactly-once, ${CHK + 1} for at-most-once (the first sends of ids ${REPLAYED[0].id}–${REPLAYED[REPLAYED.length - 1].id} were lost in the crash and are never re-sent), and ${EVENTS.length + REPLAYED.length} for at-least-once (those first sends landed, and the replay is not deduplicated).`, '',
     `\`aggregate(ids)\` then sums them, and step 3 is the point: it is **identical and correct** for all three lists and produces ${TOTAL - REPLAY_V}, ${TOTAL} and ${TOTAL + REPLAY_V}. The duplicates are visible in the list and invisible in the number.`],
   sub: `All three totals and every per-window duplicate cost are computed from the seed and asserted.` });
 

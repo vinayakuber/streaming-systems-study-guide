@@ -94,7 +94,10 @@ This is **the file that is half uploaded** solved on its own: a complete file, e
                                              so a backup exists that nothing knows about
     a ZERO-chunk backup, rename -> an EMPTY file   zero bytes, and it EXISTS: the rename
                                              still runs, so a restore finds a real file
-    a ZERO-chunk backup, direct -> ABSENT    nothing was ever written, so there is no file
+    a ZERO-chunk backup, direct -> ABSENT, record SET   nothing was ever written, so there
+                                             is no file -- yet the record says the backup
+                                             succeeded.  The direct ordering breaks the
+                                             statement's second rule here, with no crash
   And on a generated 5,000-chunk file:
     rename, no crash          -> COMPLETE    19,995 bytes
     rename, crash at 2500     -> ABSENT      half the file staged, and a restore sees none
@@ -117,8 +120,7 @@ commit boundary for the rename (killed before the last chunk, killed with every 
 but the rename not yet run, and not killed at all) and the matching crash rows for direct and
 record_first, a crash point past the end of the
 stream that never fires, a zero-chunk backup, a one-chunk backup, and a 5,000-chunk file at
-scale; each row prints what a restart costs with and without resuming the staging file.  Every
-row is ASSERTED, so the table cannot drift from the code.
+scale; each row prints what a restart costs with and without resuming the staging file.
 
 Run it:  python3 programs/ch05_v2.py
 """
@@ -442,10 +444,16 @@ def main():
     one_store, one_rec = {}, {"ok": False}
     attempt(["z"], "rename", 0, one_store, one_rec)
     assert visible(one_store) is None and one_store.get(TEMP) == "", one_store
+    direct_store, direct_rec = {}, {"ok": False}
+    attempt([], "direct", None, direct_store, direct_rec)
+    assert visible(direct_store) is None and direct_rec["ok"] is True, (direct_store, direct_rec)
     print(f"\n  boundaries: an empty backup commits as a zero-byte file -- {visible(empty_store)!r} is not")
     print(f"  None, which is what lets 'the file exists' be the position.  A single-chunk upload")
     print(f"  killed before its only chunk leaves an empty STAGING file and nothing under the")
-    print(f"  real name, which is the state a restore must read as 'no backup'.")
+    print(f"  real name, which is the state a restore must read as 'no backup'.  And the")
+    print(f"  direct write of an empty backup sets the record with no file under the real")
+    print(f"  name: rec={direct_rec['ok']}, visible={visible(direct_store)} -- a record claiming a")
+    print(f"  backup that is not there, with no crash at all.")
 
     # ---- many files, every crash point
     rng = random.Random(20260303)
@@ -552,7 +560,10 @@ the finished file is 45 bytes: 'aaaaabbbcccccccddeeeeeefggggggggghhhhiiiiiiii'
   boundaries: an empty backup commits as a zero-byte file -- '' is not
   None, which is what lets 'the file exists' be the position.  A single-chunk upload
   killed before its only chunk leaves an empty STAGING file and nothing under the
-  real name, which is the state a restore must read as 'no backup'.
+  real name, which is the state a restore must read as 'no backup'.  And the
+  direct write of an empty backup sets the record with no file under the real
+  name: rec=True, visible=None -- a record claiming a
+  backup that is not there, with no crash at all.
 
   300 random files x every crash point: the rename leaves the real name absent or
   complete, and complete exactly when the job was not killed.  record_first always
@@ -654,7 +665,6 @@ never fires, the rebuild interval on both sides of the staleness bound (every ev
 and an interval longer than the whole stream), the zero-valued event that makes the two stores
 AGREE while still being split, a one-event stream, an empty stream that has nothing to split,
 and a 3,000-event stream at scale; each row prints what both designs cost for that same input.
-Every row is ASSERTED, so the table cannot drift from the code.
 
 Run it:  python3 programs/ch05_v3.py
 """
@@ -1170,8 +1180,7 @@ fires, both sides of the dedupe boundary (remember-then-send against send-then-r
 sides of the far-end idempotency key including the case where the key does NOT rescue the
 design, an empty queue and a one-item queue, a run crashed at every item at once, and a
 20,000-item queue at scale; each row prices its own outcome for both messages, so the row
-shows which message it is acceptable for.  Every row is ASSERTED, so the table cannot drift
-from the code.
+shows which message it is acceptable for.
 
 Run it:  python3 programs/ch05_v4.py
 """

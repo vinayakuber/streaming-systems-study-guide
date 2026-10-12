@@ -8,6 +8,8 @@
 
 Two of those six stages exist **only** because a session's bounds can change after the fact: the merger and the retraction emitter. So "we'll use session windows" is not a configuration change — it adds two components and places a hard requirement on the store.
 
+**Two examples, kept apart.** The component bullets above drop the keys, treat all 9 events as one user's, and use the interview section's G = 47s: there id 7 **bridges** two sessions, so panes 8 and 9 are retracted and 21 is emitted. Everything from here on uses the **keyed** stream (keys a and b) at the book's gap of 120s and at 40s, where id 7 only ever meets key "b"'s sessions and **extends** one instead of bridging two. Every figure below belongs to the keyed stream.
+
 **The requirement, stated precisely.** At gap 40s this stream produces: session [12:01:30, 12:01:30] ids 2 sum 7 emitted at event 4, so the store holds 7. Then id 7 arrives at event 7 and the session becomes [12:00:50, 12:01:30] ids 7,2 sum 11. The emitter must retract 7 **for the old bounds** and emit 11 for the new ones. A store that ignores the retraction reads 18 for a session worth 11.
 
 Note what makes this harder than a fixed window's correction: the retraction names the **old bounds**. A fixed window's correction updates a row; a session's correction **deletes one row and inserts another**, because the bounds are the key.
@@ -20,11 +22,11 @@ Note what makes this harder than a fixed window's correction: the retraction nam
 
 **Choose the gap as a product definition, then accept its consequences.** It decides how many sessions exist AND whether retractions are required. Those are not independent knobs, and the second one reaches into the storage contract.
 
-**Set allowed lateness against the memory, not against the skew.** It is how long a collected session can still be revived, so it is the price of being able to correct — paid in bytes per open (key, session) pair.
+**Set allowed lateness against the memory, not against the skew.** It is how long past end + gap a session's state is kept so a late event can still revive it (this chapter sets none, so every figure above uses end + gap), so it is the price of being able to correct — paid in bytes per open (key, session) pair.
 
 **What this design does NOT settle — four gaps:**
 
-1. **Session state is data-dependent.** 5 entries for 9 events here, and nothing bounds it for a burstier stream or a larger key space. Fixed windows can be sized in advance; this cannot.
+1. **Session state is data-dependent.** 5 entries for 9 events in the keyed stream at gap 120s (the one-user example at G = 47s ends with 3), and nothing bounds it for a burstier stream or a larger key space. Fixed windows can be sized in advance; this cannot.
 2. **One session is never collected**, because the watermark never reaches 12:11:00. Its state is held for the life of the job regardless of allowed lateness — a low-traffic key is a permanent allocation.
 3. **The bridge case is not demonstrated in this keyed stream.** This stream's late event extends a session; one that merged two already-published sessions would retract two panes and emit one. Same mechanism, twice the bookkeeping, and no event in this keyed stream does it at gap 120s or 40s. The Google Interview Question section shows it on the same event times with the keys dropped and G = 47s: arrival 50 withdraws 1..3 and 90..130 and replaces them with 1..130.
 4. **The gap is unverifiable.** Every session count stated for the book's gap is correct for 120s and for no other definition — the same stream gives 4, 3, 2, 1 sessions for key a at 40s, 120s, 130s, 300s — and nothing in the data can tell you whether 120s is the right definition of a visit.

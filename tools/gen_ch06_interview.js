@@ -102,8 +102,8 @@ const SRC = [
   '    return emit(last)',
   '}',
   '',
-  '// function: valueAfter(log, k, n) — what key k was after its n-th change. Answerable',
-  '//   from the full log and from nothing else.',
+  '// function: valueAfter(log, k, n) — what key k was after its n-th change. It counts',
+  '//   entries, so only the full log can be asked: compacted, entry n is not change n.',
   `//   valueAfter(CHANGELOG, "${ASKED}", ${MID}) = ${HIST[MID - 1]}`,
   `//   valueAfter(compacted, "${ASKED}", ${MID}) = UNANSWERABLE`,
   'fun valueAfter(log, k, n) {',
@@ -238,7 +238,7 @@ const r = buildInterviewSection({
       maps: `\`fold\` over the compacted log, then continuing over live entries — with the handover point being the version the fold reached.` },
 
     { name: 'the audit log that was compacted', surface: 'compliance',
-      statement: [`A regulator asks what a record held on a date two years ago. **The log was compacted last year.**`],
+      statement: [`A regulator asks what a record held on a date two years ago. **The log was compacted last year:** every entry older than that day was cut to the last one per record, so the entries since then survive and the history before it is gone.`],
       whyHard: `The answer is that the question cannot be answered, and the valuable part is that this was decided a year ago by someone optimising disk. The useful framing separates two logs that were conflated: a **state** log, which may be compacted freely, and an **audit** log, which may not — and they have different retention, different access patterns and often different storage. Arriving at "these were never the same log and treating them as one was the mistake" is better than any recovery scheme, because there is no recovery scheme.`,
       maps: `\`valueAfter\` returning UNANSWERABLE, which is the traced frame — here with a person on the other end of it.` },
 

@@ -116,9 +116,10 @@ def the_double_booked_room(bookings):
             best, at = live, t
     return best, at, pairs
 
-def the_attributed_click(impressions, clicks, w, wait_for_late):
+def the_attributed_click(impressions, clicks, w, wait):
     """Variation 3, surface: advertising.  Match each click to the NEAREST impression
-    that preceded it by at most w, one-to-one.
+    shown at most w before it, one-to-one.  The same function, encoding and data as
+    programs/ch09_v3.py's attribute(), so the two give the same answers.
 
     Non-obvious point: the match is asymmetric and one-to-one, so an impression already
     matched must not match again -- and "nearest" means a click cannot be answered until
@@ -127,21 +128,17 @@ def the_attributed_click(impressions, clicks, w, wait_for_late):
     stops being an optimisation and becomes a correctness requirement.  w and the
     lateness bound are different numbers and are easy to conflate.
 
-    `impressions` is [(arrival_order_index, t), ...] -- its t values may arrive late.
-    `wait_for_late` false answers each click immediately; true waits for every
-    impression first.  Returns [(click_t, impression_t or None), ...].
+    `impressions` is [(shown_at, arrived_at), ...]: the second it was shown and the
+    second the matcher received it.  A click at t is answered at t + wait, so it may only
+    consider impressions that had ARRIVED by then.  Returns [(click_t, shown_at or None), ...].
     """
     out, used = [], set()
-    for ci, ct in enumerate(clicks):
-        if wait_for_late:
-            pool = [t for _, t in impressions]
-        else:                            # only what had arrived by this click's position
-            pool = [t for order, t in impressions if order <= ci]
+    for ct in clicks:
         best = None
-        for t in pool:
-            if ct - w <= t <= ct and t not in used:
-                if best is None or t > best:
-                    best = t
+        for shown, arrived in impressions:
+            if arrived <= ct + wait and ct - w <= shown <= ct and shown not in used:
+                if best is None or shown > best:
+                    best = shown
         if best is not None:
             used.add(best)
         out.append((ct, best))
@@ -210,25 +207,23 @@ def main():
     assert (best, at, pairs) == (2, 5, 2), (best, at, pairs)
     assert the_double_booked_room([(0, 1), (2, 3)]) == (1, 0, 0), "no overlap, no clash"
 
-    late = [(0, 100), (1, 180), (2, 150)]          # the 150 impression arrives LAST
-    now = the_attributed_click(late, [200], w=60, wait_for_late=False)
-    later = the_attributed_click(late, [200], w=60, wait_for_late=True)
-    print(f"  attributed click: answering at once gives {now} (lost), waiting gives {later}")
-    # MEASURED, and sharper than first expected: answering the click at once does not
-    # merely pick a worse impression, it finds NONE at all -- the only impression that
-    # had arrived (100) is already outside the w = 60 window, so the attribution is
-    # lost rather than approximated.  Waiting for the late arrivals recovers 180.
-    assert now == [(200, None)] and later == [(200, 180)], (now, later)
-    assert now != later, "the wait must change the answer"
-    # a click at 160 answered immediately picks 100; waiting finds the nearer 150
-    now2 = the_attributed_click(late, [160], w=60, wait_for_late=False)
-    later2 = the_attributed_click(late, [160], w=60, wait_for_late=True)
-    assert now2 == [(160, 100)] and later2 == [(160, 150)], (now2, later2)
-    assert now2 != later2, "the wait must change the answer, or it is not needed"
-    print(f"                    a click at 160: at once {now2[0][1]}, waiting {later2[0][1]}")
+    # the streams of programs/ch09_v3.py: the impression shown at 245 arrives at 330
+    imps = [(1, 1), (3, 3), (130, 130), (245, 330), (540, 540)]
+    clicks = [50, 90, 220, 260, 265]
+    credited = lambda res: sum(1 for _, i in res if i is not None)
+    at_once = the_attributed_click(imps, clicks, w=60, wait=0)
+    wait_w = the_attributed_click(imps, clicks, w=60, wait=60)
+    wait_late = the_attributed_click(imps, clicks, w=60, wait=85)
+    print(f"  attributed click: wait 0 -> {credited(at_once)}, wait 60 -> {credited(wait_w)}, "
+          f"wait 85 -> {credited(wait_late)} attributed")
+    # MEASURED, as in ch09_v3.py: waiting W = 60 is not enough, because the impression
+    # shown at 245 is 85 late; waiting the measured lateness recovers the click at 260.
+    assert (credited(at_once), credited(wait_w), credited(wait_late)) == (1, 1, 2)
+    assert at_once[3] == (260, None) and wait_late[3] == (260, 245), (at_once, wait_late)
+    assert wait_late[4] == (265, None), "one-to-one: the click at 265 may not take 245 again"
     # one-to-one: two clicks may not take the same impression
-    two = the_attributed_click([(0, 100)], [120, 130], w=60, wait_for_late=True)
-    assert two == [(120, 100), (130, None)], two
+    two = the_attributed_click([(100, 100)], [120, 120], w=60, wait=0)
+    assert two == [(120, 100), (120, None)], two
 
     free = the_unavailable_hours([(130, 245), (540, 540)], 0, 600)
     print(f"  unavailable hours: free {free}")

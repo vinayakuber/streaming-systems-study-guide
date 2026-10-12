@@ -70,7 +70,10 @@ the finished file is 45 bytes: 'aaaaabbbcccccccddeeeeeefggggggggghhhhiiiiiiii'
   boundaries: an empty backup commits as a zero-byte file -- '' is not
   None, which is what lets 'the file exists' be the position.  A single-chunk upload
   killed before its only chunk leaves an empty STAGING file and nothing under the
-  real name, which is the state a restore must read as 'no backup'.
+  real name, which is the state a restore must read as 'no backup'.  And the
+  direct write of an empty backup sets the record with no file under the real
+  name: rec=True, visible=None -- a record claiming a
+  backup that is not there, with no crash at all.
 
   300 random files x every crash point: the rename leaves the real name absent or
   complete, and complete exactly when the job was not killed.  record_first always
